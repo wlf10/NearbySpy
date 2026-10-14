@@ -1,41 +1,42 @@
 --[[
     NearbySpy 1.0.0
-    Записывает игроков рядом с тобой в SavedVariables (NearbySpy.lua).
+    Records players near you into SavedVariables (NearbySpy.lua).
 
-    Источники данных — пассивные, основной режим (пользователю ничего делать не надо):
-      - таргет, фокус, наведение мыши (UPDATE_MOUSEOVER_UNIT);
-      - nameplate1..nameplate40 (NAME_PLATE_UNIT_ADDED + тик раз в 2 сек) — в бете
-        nameplate'ы молчат (lastPlates=0), оставлено на случай включения;
-      - группа/рейд (GROUP_ROSTER_UPDATE);
-      - ростер гильдии (GUILD_ROSTER_UPDATE) — уровень/класс/зона всех согильдийцев;
-      - комбат-лог (COMBAT_LOG_EVENT_UNFILTERED) — имя+класс+раса по GUID, дедуп 2 мин;
-      - чат (CHAT_MSG_SAY/YELL/CHANNEL) — только имя говорящего (класс/уровень
-        неизвестны → пустые поля не передаются), source='chat': городские каналы
-        показывают тех, до кого nameplate-скан и ростеры не доходят;
-      - /who — РАСШИРЕННЫЙ ручной режим /nspy suggest: с билда 1.60.1.70291 сервер
-        отвечает только на аппаратный клик (hardware-гейт в C++, программный who мёртв),
-        поэтому аддон вписывает запрос в поле, а пользователь жмёт лупу.
-    Команды: /nearbyspy (или /nspy) — окно со списком,
-             /nspy suggest | count | who | announce | debug | reset
+    Data sources — passive, main mode (no user action required):
+      - target, focus, mouseover (UPDATE_MOUSEOVER_UNIT);
+      - nameplate1..nameplate40 (NAME_PLATE_UNIT_ADDED + 2 sec tick) — in the
+        beta nameplates are silent (lastPlates=0), kept in case they get enabled;
+      - party/raid (GROUP_ROSTER_UPDATE);
+      - guild roster (GUILD_ROSTER_UPDATE) — level/class/zone of all guildmates;
+      - combat log (COMBAT_LOG_EVENT_UNFILTERED) — name+class+race by GUID, 2 min dedup;
+      - chat (CHAT_MSG_SAY/YELL/CHANNEL) — only the speaker's name (class/level
+        unknown → empty fields are not passed), source='chat': city channels
+        show players that nameplate scans and rosters never reach;
+      - /who — ASSISTED manual mode /nspy suggest: since build 1.60.1.70291 the
+        server answers only a hardware click (hardware gate in C++, programmatic
+        who is dead), so the addon types the query into the box and the user
+        clicks the search button.
+    Commands: /nearbyspy (or /nspy) — window with the list,
+              /nspy suggest | count | who | announce | debug | reset
 
 ]]
 
 local ADDON_NAME = ...
 
 local PREFIX = "|cff33ff99NearbySpy|r: "
-local REAP_SECONDS = 600      -- встреча после паузы дольше = новый "заход" в счётчик
+local REAP_SECONDS = 600      -- an encounter after a longer pause = a new "visit" in the counter
 local TICK_SECONDS = 2
-local WHO_GAP = 45            -- базовая пауза между запросами скана, сек (+ случайные 0-30 — не метроном)
-local WHO_CAP = 50            -- серверный лимит строк в ответе /who
-local MAX_ROWS = 500          -- сколько строк рисуем в списке (защита от гигантских баз)
-local GROUP_TROTTLE = 10      -- GROUP_ROSTER_UPDATE спамится — проход не чаще, сек
-local GUILD_REFRESH = 600     -- дозапрос ростера гильдии раз в 10 мин
-local LEVEL_CHART_H = 56      -- графики окна: высота столбика уровней, px
-local CLASS_BARS = 3          -- сколько баров топ-классов рисуем
+local WHO_GAP = 45            -- base pause between scan queries, sec (+ random 0-30 — not a metronome)
+local WHO_CAP = 50            -- server limit of rows in a /who reply
+local MAX_ROWS = 500          -- how many rows we draw in the list (guard against giant databases)
+local GROUP_TROTTLE = 10      -- GROUP_ROSTER_UPDATE is spammy — pass no more often than this, sec
+local GUILD_REFRESH = 600     -- re-request the guild roster every 10 min
+local LEVEL_CHART_H = 56      -- window charts: level bar height, px
+local CLASS_BARS = 3          -- how many top-class bars we draw
 
--- ============ локализация UI (enUS fallback, ruRU, zhCN) ============
--- Только пользовательские строки (P/окна). Отладочные D()-сообщения и
--- причины FinishZoneScan — технические, держим на английском вне таблицы.
+-- ============ UI localization (enUS fallback, ruRU, zhCN) ============
+-- Only user-facing strings (P/windows). Debug D() messages and
+-- FinishZoneScan reasons are technical — kept in English outside the table.
 local LOCALE = {
     enUS = {
         ON = "on", OFF = "off",
@@ -166,6 +167,135 @@ local LOCALE = {
         QUERIES_FMT = "%d 个查询",
         STARTUP = "已启动，数据库中有%d名玩家。命令: /nspy（suggest —— 辅助 /who）",
     },
+    deDE = {
+        ON = "an", OFF = "aus",
+        LVL_PREFIX = "Stufe ",
+        ALLIANCE = "Allianz", HORDE = "Horde",
+        FIRST_SEEN = "zum ersten Mal in der Nähe: %s (%s%s) - %s",
+        WHO_THROTTLED = "Der Server drosselt /who — 5 Minuten Pause",
+        SUGGEST_INSCRIBED = "suggest: \"%s\" eingetragen — KLICKE die Lupe (noch %d in der Warteschlange)",
+        SUGGEST_WAITING = "suggest: warte weiter auf deinen Klick auf die Lupe (\"%s\")",
+        ERR_SCAN_RUNNING = "Scan läuft bereits (%s)",
+        ERR_THROTTLE_PAUSE = "Drossel-Pause: %ds — der Server hat sich kürzlich beschwert",
+        ERR_QUEUE_EMPTY = "Warteschlange ist leer (keine Namen zum Filtern)",
+        WHO_FACTION_COVER = "/who sieht nur die Fraktion %s — volle Abdeckung: Scan mit einem Charakter jeder Fraktion",
+        CVAR_FIX = "%s=1 aktiviert",
+        EXPORT_TITLE = "NearbySpy - Export (Rohdaten)",
+        EXPORT_HINT = "Text anklicken -> Strg+A, Strg+C; Esc oder × zum Schließen",
+        ERR_EXPORT = "Exportfenster-FEHLER: ",
+        ERR_LIST = "Listen-FEHLER: ",
+        ERR_WINDOW = "Fenster-FEHLER: ",
+        TIME_NOW = "gerade eben", TIME_MIN = "vor %d Min", TIME_HOUR = "vor %d Std",
+        SRC_LINE = "Quellen: ",
+        WIN_TOTAL = "Gesamt: %d Spieler · neu diese Sitzung: %d",
+        WIN_FRESH = "Frisch: 5m=%d · 15m=%d · 1h=%d",
+        WIN_DEMO = "Stufe %d–%d (Ø %d)",
+        CHART_LABEL = "Stufen 1–60: %d mit Stufe · max %d Spieler auf Stufe %d · Ø %.1f",
+        CHART_EMPTY = "Stufen 1–60: keine Daten",
+        BTN_COPY = "Kopieren",
+        WIN_HINT = "Esc - schließen · /nspy count - Statistik · /nspy who - Zonenscan",
+        MODE_LEVEL = "breit + Klassen", MODE_CLASS = "nach Klassen", MODE_RACE = "nach Völkern",
+        SCAN_STARTED = "%s-Scan gestartet (%s), 45-75 Sek Pause zwischen Anfragen",
+        SCAN_FAILED = "Scan nicht gestartet: ",
+        SCAN_NOT_RUNNING = "kein Scan aktiv",
+        SUGGEST_PROG_BLOCK = "programmgesteuerter Scan läuft — zuerst /nspy whostop",
+        SUGGEST_STARTED = "suggest: trage Anfragen ins Who-Feld ein — du klickst nur die Lupe. Stopp: /nspy suggest",
+        SUGGEST_FAILED = "suggest nicht gestartet: ",
+        COUNT = "Spieler gesamt: %d, neu diese Sitzung: %d, Ansagen: %s",
+        ANNOUNCE_TOGGLE = "Ansagen neuer Spieler: ",
+        DEBUG_ON = "Debug-Modus: an — Logs im Chat (Digests, Scan, Who, Gate-Blockierungen)",
+        DEBUG_OFF = "Debug-Modus: aus — versteckt, Logs nur im SV-Ring",
+        DB_CLEARED = "Begegnungs-Datenbank geleert",
+        CMDS = "Befehle: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
+        QUERIES_FMT = "%d Anfragen",
+        STARTUP = "gestartet, %d Spieler in der DB. Befehle: /nspy (suggest — assistiertes /who)",
+    },
+    frFR = {
+        ON = "activé", OFF = "désactivé",
+        LVL_PREFIX = "niv. ",
+        ALLIANCE = "Alliance", HORDE = "Horde",
+        FIRST_SEEN = "vu pour la première fois : %s (%s%s) - %s",
+        WHO_THROTTLED = "le serveur limite /who — pause de 5 min",
+        SUGGEST_INSCRIBED = "suggest : « %s » saisi — CLIQUE sur la loupe (encore %d en file)",
+        SUGGEST_WAITING = "suggest : j'attends toujours ton clic sur la loupe (« %s »)",
+        ERR_SCAN_RUNNING = "scan déjà en cours (%s)",
+        ERR_THROTTLE_PAUSE = "pause de limitation : %ds — le serveur a râlé récemment",
+        ERR_QUEUE_EMPTY = "file vide (aucun nom à filtrer)",
+        WHO_FACTION_COVER = "/who ne voit que la faction %s — couverture complète : scan avec un personnage de chaque faction",
+        CVAR_FIX = "%s=1 activé",
+        EXPORT_TITLE = "NearbySpy - export (données brutes)",
+        EXPORT_HINT = "Clique sur le texte -> Ctrl+A, Ctrl+C ; Échap ou × pour fermer",
+        ERR_EXPORT = "ERREUR fenêtre d'export : ",
+        ERR_LIST = "ERREUR liste : ",
+        ERR_WINDOW = "ERREUR fenêtre : ",
+        TIME_NOW = "à l'instant", TIME_MIN = "il y a %d min", TIME_HOUR = "il y a %d h",
+        SRC_LINE = "Sources : ",
+        WIN_TOTAL = "Total : %d joueurs · nouveaux cette session : %d",
+        WIN_FRESH = "Frais : 5m=%d · 15m=%d · 1h=%d",
+        WIN_DEMO = "Niv. %d–%d (moy. %d)",
+        CHART_LABEL = "Niveaux 1–60 : %d avec niveau · max %d joueurs niv. %d · moy. %.1f",
+        CHART_EMPTY = "Niveaux 1–60 : aucune donnée",
+        BTN_COPY = "Copier",
+        WIN_HINT = "Échap - fermer · /nspy count - stats · /nspy who - scan de zone",
+        MODE_LEVEL = "large + classes", MODE_CLASS = "par classes", MODE_RACE = "par races",
+        SCAN_STARTED = "scan %s lancé (%s), pause de 45-75 s entre les requêtes",
+        SCAN_FAILED = "scan non lancé : ",
+        SCAN_NOT_RUNNING = "aucun scan en cours",
+        SUGGEST_PROG_BLOCK = "scan programmatique en cours — /nspy whostop d'abord",
+        SUGGEST_STARTED = "suggest : je saisis les requêtes dans le champ who — tu n'as qu'à cliquer la loupe. Stop : /nspy suggest",
+        SUGGEST_FAILED = "suggest non lancé : ",
+        COUNT = "joueurs au total : %d, nouveaux cette session : %d, annonces : %s",
+        ANNOUNCE_TOGGLE = "annonces des nouveaux joueurs : ",
+        DEBUG_ON = "mode debug : activé — logs dans le chat (digests, scan, who, blocages du gate)",
+        DEBUG_OFF = "mode debug : désactivé — furtif, logs uniquement dans le ring SV",
+        DB_CLEARED = "base des rencontres vidée",
+        CMDS = "commandes : /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
+        QUERIES_FMT = "%d requêtes",
+        STARTUP = "démarré, %d joueurs en base. Commandes : /nspy (suggest — /who assisté)",
+    },
+    koKR = {
+        ON = "켜짐", OFF = "꺼짐",
+        LVL_PREFIX = "레벨 ",
+        ALLIANCE = "얼라이언스", HORDE = "호드",
+        FIRST_SEEN = "처음 근처에서 발견: %s (%s%s) - %s",
+        WHO_THROTTLED = "서버가 /who 를 제한 중 — 5분 일시 중지",
+        SUGGEST_INSCRIBED = "suggest: 「%s」 입력됨 — 돋보기 버튼을 클릭하세요 (대기열 %d개 남음)",
+        SUGGEST_WAITING = "suggest: 돋보기 클릭을 기다리는 중 (「%s」)",
+        ERR_SCAN_RUNNING = "스캔이 이미 진행 중 (%s)",
+        ERR_THROTTLE_PAUSE = "제한 일시 중지: %d초 — 서버가 최근에 경고함",
+        ERR_QUEUE_EMPTY = "대기열이 비어 있음 (필터링할 이름 없음)",
+        WHO_FACTION_COVER = "/who 는 %s 진영만 볼 수 있음 — 전체 커버리지: 각 진영 캐릭터로 스캔",
+        CVAR_FIX = "%s=1 활성화됨",
+        EXPORT_TITLE = "NearbySpy -보내기 (원시 데이터)",
+        EXPORT_HINT = "텍스트 클릭 -> Ctrl+A, Ctrl+C; Esc 또는 × 닫기",
+        ERR_EXPORT = "보내기 창 오류: ",
+        ERR_LIST = "목록 오류: ",
+        ERR_WINDOW = "창 오류: ",
+        TIME_NOW = "방금", TIME_MIN = "%d분 전", TIME_HOUR = "%d시간 전",
+        SRC_LINE = "데이터 출처: ",
+        WIN_TOTAL = "전체: 플레이어 %d명 · 이번 세션 신규: %d",
+        WIN_FRESH = "최근 활동: 5분=%d · 15분=%d · 1시간=%d",
+        WIN_DEMO = "레벨 %d–%d (평균 %d)",
+        CHART_LABEL = "레벨 1–60: 레벨 있는 %d명 · 최다 %d명 %d레벨 · 평균 %.1f",
+        CHART_EMPTY = "레벨 1–60: 데이터 없음",
+        BTN_COPY = "복사",
+        WIN_HINT = "Esc - 닫기 · /nspy count - 통계 · /nspy who - 지역 스캔",
+        MODE_LEVEL = "광역+직업", MODE_CLASS = "직업별", MODE_RACE = "종족별",
+        SCAN_STARTED = "%s 스캔 시작 (%s), 요청 간 45-75초 간격",
+        SCAN_FAILED = "스캔 시작 실패: ",
+        SCAN_NOT_RUNNING = "진행 중인 스캔 없음",
+        SUGGEST_PROG_BLOCK = "프로그램 스캔 진행 중 — 먼저 /nspy whostop",
+        SUGGEST_STARTED = "suggest: 검색창에 쿼리를 입력합니다 — 돋보기 버튼만 클릭하세요. 중지: /nspy suggest",
+        SUGGEST_FAILED = "suggest 시작 실패: ",
+        COUNT = "전체 플레이어: %d, 이번 세션 신규: %d, 알림: %s",
+        ANNOUNCE_TOGGLE = "신규 플레이어 알림: ",
+        DEBUG_ON = "디버그 모드: 켜짐 — 채팅에 로그 출력 (다이제스트, 스캔, who, 게이트 차단)",
+        DEBUG_OFF = "디버그 모드: 꺼짐 — 스텔스 모드, 로그는 SV 링에만 기록",
+        DB_CLEARED = "조우 데이터베이스 삭제됨",
+        CMDS = "명령어: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
+        QUERIES_FMT = "%d개 쿼리",
+        STARTUP = "시작됨, DB에 플레이어 %d명. 명령어: /nspy (suggest — 보조 /who)",
+    },
 }
 local function L(key)
     local t = LOCALE[GetLocale()] or LOCALE.enUS
@@ -174,18 +304,18 @@ end
 
 local newThisSession = 0
 local lastWhoSent = 0
-local whoScan = nil           -- активный послойный скан {zone, sent, results, added, current, suggest}
-local whoQueue = {}           -- очередь диапазонов {lo, hi}
+local whoScan = nil           -- active layered scan {zone, sent, results, added, current, suggest}
+local whoQueue = {}           -- queue of ranges {lo, hi}
 
-local GetDB   -- forward: тело P пишет кольцо в db через эту ссылку
+local GetDB   -- forward: P's body writes the ring into db through this reference
 
 local function P(msg)
-    -- таймстамп в каждую строку (08.10): без времени в кольце невозможно
-    -- отличить мгновенный ответ от кулдауна сервера
+    -- timestamp on every line (08.10): without time in the ring you can't
+    -- tell an instant reply from a server cooldown
     local stamped = ("[%s] %s"):format(date("%H:%M:%S"), tostring(msg))
     print(PREFIX .. stamped)
-    -- дубль печати в SavedVariables-кольцо (последние 200 строк): чат-кэш
-    -- пуст, вывод команд читается после логаута прямо из SV
+    -- duplicate prints into a SavedVariables ring (last 200 lines): the chat
+    -- cache is empty, command output is read after logout straight from SV
     local ok, db2 = pcall(GetDB)
     if ok and type(db2) == "table" and type(db2.debug) == "table" then
         local ring = db2.debug.printRing
@@ -206,10 +336,10 @@ GetDB = function()
         NearbySpy.debug = {}
     end
     local db = NearbySpy
-    -- метка игры для сайта (14.10.2026): retail / classic_era / forever.
-    -- GetBuildInfo: 1.60.x — Forever-бета; прочий 1.x — classic-лайн;
-    -- >=11 — retail. Пишется один раз; API нет → не пишем (сайт сам
-    -- подставит дефолт forever).
+    -- game tag for the site (14.10.2026): retail / classic_era / forever.
+    -- GetBuildInfo: 1.60.x — Forever beta; other 1.x — classic live;
+    -- >=11 — retail. Written once; no API → skip (the site fills in
+    -- the default forever itself).
     if not db.game then
         local v = GetBuildInfo and GetBuildInfo() or ""
         local major = tonumber(tostring(v):match("^(%d+)")) or 0
@@ -222,8 +352,8 @@ GetDB = function()
             db.game = "classic_era"
         end
     end
-    -- разовая миграция: склейка двусловных имён Camelot, разорванных старым
-    -- парсингом (фамилия попадала в realm), + замена realm на настоящий
+    -- one-time migration: merge two-word Camelot names split by the old
+    -- parsing (the surname landed in realm), + replace realm with the real one
     if not db.migratedNames then
         local realRealm = GetRealmName()
         if realRealm and realRealm ~= "" then
@@ -232,7 +362,7 @@ GetDB = function()
             for _, p in pairs(db.players) do
                 if p.name and p.realm and p.realm ~= ""
                     and p.realm ~= realRealm and not p.name:find(" ") then
-                    -- фамилия застряла в realm — возвращаем в имя
+                    -- surname got stuck in realm — move it back into the name
                     p.name = p.name .. " " .. p.realm
                 end
                 p.realm = realRealm
@@ -260,7 +390,7 @@ GetDB = function()
     return db
 end
 
--- кольцо без чата (дайджесты каждые 5 мин — не спамим игроку)
+-- ring without chat (digests every 5 min — don't spam the player)
 local function R(msg)
     local ok, db2 = pcall(GetDB)
     if ok and type(db2) == "table" and type(db2.debug) == "table" then
@@ -271,20 +401,20 @@ local function R(msg)
     end
 end
 
--- ЛОГ (режим дебага): всегда в SV-кольцо, а в чат — ТОЛЬКО при
--- db.debugMode (/nspy debug). С выключенным debug модуль «скрытный»: в чате
--- только ответы на команды, анонсы и ошибки; технические строки (прогресс
--- скана, дайджесты, блокировки гейта) читаются из кольца после логаута.
+-- LOG (debug mode): always to the SV ring, to chat ONLY when
+-- db.debugMode is on (/nspy debug). With debug off the addon is "stealthy":
+-- chat shows only command replies, announcements and errors; technical lines
+-- (scan progress, digests, gate blocks) are read from the ring after logout.
 local function D(msg)
     local ok, db2 = pcall(GetDB)
     if ok and type(db2) == "table" and db2.debugMode then
-        P(msg)   -- P печатает в чат и дублирует в кольцо
+        P(msg)   -- P prints to chat and duplicates into the ring
     else
-        R(msg)   -- тихо: только кольцо
+        R(msg)   -- quiet: ring only
     end
 end
 
--- первая ошибка по источнику — в debug (раньше pcall глотал молча, 1.5.1)
+-- first error per source goes to debug (pcall used to swallow it silently, 1.5.1)
 local function DbgErr(src, err)
     local ok, db = pcall(GetDB)
     if not ok then return end
@@ -296,12 +426,12 @@ local function DbgErr(src, err)
 end
 
 local function PlayerRealm()
-    -- Camelot: двусловные имена — UnitName отдаёт ФАМИЛИЮ как «realm»,
-    -- поэтому настоящий реалм берём только из GetRealmName().
+    -- Camelot: two-word names — UnitName returns the SURNAME as the
+    -- "realm", so the real realm is taken only from GetRealmName().
     return GetRealmName() or "?"
 end
 
--- зона по имени игрока (чужой юнит в бете отдаёт mapID=0, имя зоны не вытащить)
+-- zone by player name (another unit in the beta returns mapID=0, zone name unavailable)
 local function PlayerZone()
     local zone = GetZoneText()
     if not zone or zone == "" then
@@ -310,7 +440,7 @@ local function PlayerZone()
     return zone
 end
 
--- приближённые координаты: позиция игрока (кто рядом — в той же зоне)
+-- approximate coordinates: player position (whoever is nearby is in the same zone)
 local function PlayerXY()
     local ok, mapID = pcall(C_Map.GetBestMapForUnit, "player")
     if not ok or not mapID then return nil, nil end
@@ -320,7 +450,7 @@ local function PlayerXY()
     return x, y
 end
 
--- uiMapID текущей зоны — число, одинаковое на любом языке клиента
+-- uiMapID of the current zone — a number, identical in any client language
 local function PlayerZoneId()
     local ok, mapID = pcall(C_Map.GetBestMapForUnit, "player")
     if ok and mapID and mapID > 0 then return mapID end
@@ -332,7 +462,7 @@ local function Round4(v)
     return math.floor(v * 10000 + 0.5) / 10000
 end
 
--- локализованное имя класса -> файл-ключ (для цвета в UI)
+-- localized class name -> file key (for UI color)
 local function ClassFileFromLocalized(classStr)
     if not classStr or classStr == "" then return nil end
     for _, tbl in ipairs({ LOCALIZED_CLASS_NAMES_MALE, LOCALIZED_CLASS_NAMES_FEMALE }) do
@@ -345,7 +475,7 @@ local function ClassFileFromLocalized(classStr)
     return nil
 end
 
--- общая запись/обновление
+-- shared record/upsert
 local function UpsertPlayer(db, data)
     local key = data.key
     if not key then return false end
@@ -371,7 +501,7 @@ local function UpsertPlayer(db, data)
             source = data.source,
         }
         newThisSession = newThisSession + 1
-        -- счётчик по источникам (1.5.1, полный дебаг): кто реально кормит базу
+        -- per-source counter (1.5.1, full debug): who actually feeds the database
         local src = data.source or "?"
         db.debug.src = db.debug.src or {}
         db.debug.src[src] = (db.debug.src[src] or 0) + 1
@@ -407,13 +537,13 @@ local function UpsertPlayer(db, data)
     return false
 end
 
--- Расы -> фракция (файл-ключи из UnitRace: Human, Orc, ...)
+-- Race -> faction (file keys from UnitRace: Human, Orc, ...)
 local RACE_FACTION = {
     Human = "Alliance", Dwarf = "Alliance", NightElf = "Alliance", Gnome = "Alliance",
     Orc = "Horde", Scourge = "Horde", Tauren = "Horde", Troll = "Horde",
 }
 
--- локализованное имя расы (из /who) -> файл-ключ: ruRU + enUS
+-- localized race name (from /who) -> file key: ruRU + enUS
 local RACE_LOCALE = {
     ["Человек"] = "Human", ["Human"] = "Human",
     ["Дворф"] = "Dwarf", ["Dwarf"] = "Dwarf",
@@ -425,9 +555,9 @@ local RACE_LOCALE = {
     ["Тролль"] = "Troll", ["Troll"] = "Troll",
 }
 
--- Самообучение рас/фракций (кастомные расы сервера):
--- из юнит-детектов учим "локализованная раса → файл-ключ" и "раса → фракция",
--- затем применяем к /who-записям. Хранится в SavedVariables (db.learn).
+-- Self-learning of races/factions (server custom races):
+-- from unit detections we learn "localized race → file key" and "race → faction",
+-- then apply them to /who entries. Stored in SavedVariables (db.learn).
 local function LearnRace(db, raceLoc, raceFile, faction)
     db.learn = db.learn or {}
     if raceLoc and raceLoc ~= "" and raceFile and raceFile ~= "" then
@@ -440,8 +570,8 @@ local function LearnRace(db, raceLoc, raceFile, faction)
     end
 end
 
--- Фракция: у вражеских игроков UnitFactionGroup может быть пустым,
--- тогда выводим "противоположную своему" через UnitCanAttack.
+-- Faction: for enemy players UnitFactionGroup may be empty,
+-- then infer "opposite of ours" via UnitCanAttack.
 local function GetFaction(unit)
     local ok, fg = pcall(UnitFactionGroup, unit)
     if ok and fg and fg ~= "Neutral" then
@@ -462,7 +592,7 @@ local function Record(unit)
 
     local name, surname = UnitName(unit)
     if not name or name == "" then return end
-    -- Camelot: «realm» из UnitName — это фамилия двусловного имени, склеиваем
+    -- Camelot: the "realm" from UnitName is the surname of a two-word name — join them
     if surname and surname ~= "" then
         name = name .. " " .. surname
     end
@@ -473,7 +603,7 @@ local function Record(unit)
     if not okC then classLoc, classFile = nil, nil end
     local okL, level = pcall(UnitLevel, unit)
     if okL and level and level < 0 then level = nil elseif not okL then level = nil end
-    -- раса: UnitRace возвращает (локализованное имя, файл-ключ)
+    -- race: UnitRace returns (localized name, file key)
     local raceFile = nil
     local okR, raceLoc, raceFileRet = pcall(UnitRace, unit)
     if okR then raceFile = raceFileRet end
@@ -484,7 +614,7 @@ local function Record(unit)
     end
     LearnRace(db, raceLoc, raceFile, faction)
 
-    -- координаты: сначала реальные юнита, иначе приближение игрока
+    -- coordinates: the unit's real ones first, else the player approximation
     local okP, x, y = pcall(UnitPosition, unit)
     if not okP or not x then
         x, y = PlayerXY()
@@ -508,12 +638,12 @@ local function Record(unit)
     })
 end
 
--- ============ пассивный сбор мира (1.5.0 — основной режим) ============
--- Программный /who мёртв с билда 70291 (hardware-гейт в C++, whoprime 0/17) —
--- базу кормит мир: наведение, группа, гильдия, чат. Всё без действий
--- пользователя. /who остаётся расширенным ручным режимом (/nspy suggest).
+-- ============ passive world collection (1.5.0 — main mode) ============
+-- Programmatic /who is dead since build 70291 (hardware gate in C++, whoprime 0/17) —
+-- the world feeds the database: mouseover, party, guild, chat. All with no
+-- user action. /who remains as the assisted manual mode (/nspy suggest).
 
--- группа/рейд: GROUP_ROSTER_UPDATE спамится при сборе рейда — троттл прохода
+-- party/raid: GROUP_ROSTER_UPDATE is spammy while a raid forms — throttle the pass
 local lastGroupScan = 0
 local function RecordGroup()
     local nowT = time()
@@ -523,7 +653,7 @@ local function RecordGroup()
     for i = 1, 40 do pcall(Record, "raid" .. i) end
 end
 
--- гильдия: ростер отдаёт уровень/класс/зону всех согильдийцев — богатый срез
+-- guild: the roster gives level/class/zone of all guildmates — a rich slice
 local function RecordGuild()
     if not IsInGuild or not IsInGuild() then return end
     if not GetNumGuildMembers or not GetGuildRosterInfo then return end
@@ -531,15 +661,15 @@ local function RecordGuild()
     if n <= 0 then return end
     local db = GetDB()
     local realm = PlayerRealm()
-    local faction = GetFaction("player")  -- своя гильдия = своя фракция
+    local faction = GetFaction("player")  -- own guild = own faction
     local added = 0
     for i = 1, n do
-        -- сигнатура: name, rank, rankIdx, level, classLoc, zone, note, onote,
+        -- signature: name, rank, rankIdx, level, classLoc, zone, note, onote,
         -- online, status, classFile, achPts, achRank, mobile, soR, rep, guid
         local ok, name, _, _, level, classLoc, zone, _, _, _, _, classFile, _, _, _, _, _, guid =
             pcall(GetGuildRosterInfo, i)
         if ok and name and name ~= "" then
-            name = name:match("^([^%-]+)%-") or name  -- стрип «Имя-Реалм»
+            name = name:match("^([^%-]+)%-") or name  -- strip "Name-Realm"
             if UpsertPlayer(db, {
                 key = name .. "-" .. realm,
                 name = name,
@@ -549,9 +679,9 @@ local function RecordGuild()
                 level = level,
                 faction = faction,
                 guid = guid,
-                zone = zone,  -- зона из ростера — где игрок сейчас (может быть чужая)
+                zone = zone,  -- roster zone — where the player is now (may be a different zone)
                 source = "guild",
-                silent = true,  -- ростер сотнями — не спамим чат
+                silent = true,  -- the roster comes in hundreds — don't spam chat
             }) then added = added + 1 end
         end
     end
@@ -569,18 +699,17 @@ local function RequestGuildRoster()
     end)
 end
 
--- ============ /who зоновый скан ============
--- Сервер отдаёт максимум 50 строк на один запрос. Обход (подход CensusPlus):
--- сканируем диапазонами уровней (1-10, 11-20, ...), диапазон с 50 результатами
--- дробим пополам вплоть до одного уровня (1-1, 2-2, ...).
+-- ============ /who zone scan ============
+-- The server returns at most 50 rows per query. Workaround (CensusPlus approach):
+-- scan in level ranges (1-10, 11-20, ...), split any range with 50 results
+-- in half down to a single level (1-1, 2-2, ...).
 
 local function MaxLevel()
-    -- Реальный потолок = макс. уровень, виденный в базе, округлённый вверх до
-    -- границы полосы 10 (решение пользователя 09.10.2026: «используй
-    -- максимальный уровень доступный, сейчас это 30»). GetMaxPlayerLevel
-    -- отдаёт движковый 60 и врёт про серверный кап беты (30), поэтому
-    -- ориентируемся на фактические данные; когда игроки поднимутся выше,
-    -- потолок вырастет сам без правок кода.
+    -- The real ceiling = max level seen in the database, rounded up to a
+    -- multiple of 10 (user decision 09.10.2026: "use the maximum level
+    -- available, right now it's 30"). GetMaxPlayerLevel returns the engine's
+    -- 60 and lies about the beta server cap (30), so we rely on actual data;
+    -- as players level higher, the ceiling grows on its own, no code edits.
     local m = 0
     local d = GetDB()
     if d and d.players then
@@ -599,26 +728,26 @@ local function MaxLevel()
     return 60
 end
 
--- Отправка /who БЕЗ чата (решение пользователя 07.10.2026: «давай без чата»).
--- Наблюдение пользователя 07.10.2026: SetText подставляет текст в поле Who,
--- но поиск НЕ запускается — ручной эталон работает только с ОТКРЫТЫМ окном,
--- а аддон окно лишь прячет и кликает мёртвую кнопку. Поэтому:
---   * перед enter/button-путями показываем окно Who и его родителей;
---   * пути ротируются по числу попытки (PumpWhoQueue крутит q.retries):
---     1. OnEnterPressed поля (эквивалент «ввод + Enter»);
---     2. клик по кнопке (эквивалент ручного клика);
---     3. тихий C_FriendList.SendWho (API, без окна);
---   * если выбранный путь падает синхронно (нет обработчика/кнопки) —
---     в ТОЙ ЖЕ отправке пробуется следующий, скан не умирает;
---   * возврат: true, "<путь>" | false, "<детали провалов>".
+-- Sending /who WITHOUT chat (user decision 07.10.2026: "let's do it without chat").
+-- User observation 07.10.2026: SetText puts text into the Who box,
+-- but the search does NOT start — the manual reference only works with the
+-- window OPEN, while the addon just hides the window and clicks a dead button. So:
+--   * before the enter/button paths, show the Who window and its parents;
+--   * paths rotate by attempt number (PumpWhoQueue bumps q.retries):
+--     1. box OnEnterPressed (equivalent of "type + Enter");
+--     2. button click (equivalent of a manual click);
+--     3. quiet C_FriendList.SendWho (API, no window);
+--   * if the chosen path fails synchronously (no handler/button) —
+--     the SAME send tries the next one, the scan doesn't die;
+--   * returns: true, "<path>" | false, "<failure details>".
 local WHO_PATHS = { "button", "enter", "api" }
-local whoShownByMe = {}    -- фреймы, показанные нами ради отправки /who
-local whoHiddenPanels = {} -- чужие панели LFG, скрытые нами (вернёт HideWhoFrame)
+local whoShownByMe = {}    -- frames we showed to send /who
+local whoHiddenPanels = {} -- foreign LFG panels hidden by us (HideWhoFrame will restore them)
 
 local function EnsureWhoVisible()
-    -- кто открыт — запоминаем, HideWhoFrame уберёт только показанное нами.
-    -- WhoFrame в этом клиенте отсутствует (тест 08.10: дерево пустое) —
-    -- берём реального родителя поля ввода WhoFrameEditBox
+    -- whoever is open — remember; HideWhoFrame removes only what we showed.
+    -- WhoFrame does not exist in this client (08.10 test: empty tree) —
+    -- take the real parent of the WhoFrameEditBox input
     pcall(function()
         local f = WhoFrame or (WhoFrameEditBox and WhoFrameEditBox:GetParent())
         while f and f.Show do
@@ -629,26 +758,26 @@ local function EnsureWhoVisible()
             f = f:GetParent()
         end
     end)
-    -- 08.10: жалоба пользователя — при открытии видно «поиск подземелья», а не
-    -- игроков. Переключаем вкладку: кликаем табы LFGParentFrame, пока именованные
-    -- чужие панели (Listing/Browse) не погаснут — это и есть вкладка who; затем
-    -- глушим остатки и возвращаем who-панель, если таб её убрал.
+    -- 08.10: user complaint — opening shows the "dungeon finder" tab instead of
+    -- players. Switch the tab: click LFGParentFrame tabs until the named foreign
+    -- panels (Listing/Browse) go dark — that's the who tab; then mute leftovers
+    -- and bring the who panel back if the tab removed it.
     pcall(function()
-        -- Переключение на вкладку who — ГЛОБАЛЬНОЙ функцией клиента (08.10, точный
-        -- билд 1.60.1.70205 разобран по исходникам):
-        --   вкладки: 1=Listing, 2=Browse, 3=Who;
-        --   OnShow окна сама ставит прежнюю/первую вкладку (потому и «первая из трёх»);
-        --   клик самих табов падает — миксин Templates.lua зовёт local
-        --   LFGParentFrame_SetActiveTab, недоступный из другого файла → nil;
-        --   LFGParentFrameTab3_OnClick() — официальный путь: SetTab(3) + показ
-        --   LFGWhoListFrame + скрытие Listing/Browse + подсветка вкладки.
+        -- Switching to the who tab via the client's GLOBAL function (08.10, exact
+        -- build 1.60.1.70205 analyzed from sources):
+        --   tabs: 1=Listing, 2=Browse, 3=Who;
+        --   window OnShow itself restores the previous/first tab (hence "first of three");
+        --   clicking the tabs themselves fails — the Templates.lua mixin calls local
+        --   LFGParentFrame_SetActiveTab, unreachable from another file → nil;
+        --   LFGParentFrameTab3_OnClick() — the official path: SetTab(3) + show
+        --   LFGWhoListFrame + hide Listing/Browse + tab highlight.
         if type(LFGParentFrameTab3_OnClick) == "function" then
             LFGParentFrameTab3_OnClick()
         end
     end)
     pcall(function()
-        -- подстраховка на случай, если глобальной функции нет: глушим чужие панели
-        -- и гарантируем показ who-панели
+        -- fallback in case the global function is missing: mute foreign panels
+        -- and guarantee the who panel is shown
         for _, pn in ipairs({ "LFGListingFrame", "LFGBrowseFrame" }) do
             local p = _G[pn]
             if p and p.Hide and p:IsShown() then
@@ -664,16 +793,17 @@ local function EnsureWhoVisible()
     end)
 end
 
-local WhoSearchButton  -- определение ниже; local здесь,
-    -- чтобы WhoSendRaw видел ту же переменную, а не nil-глобал
+local WhoSearchButton  -- definition below; local here
+    -- so WhoSendRaw sees the same variable, not a nil global
 
--- Жмём «лупу» как игрок (08.10): обработчик клиента (WhoSearchMixin:OnClick)
--- читает LFGWhoListFrame.EditBox и шлёт SendWho(text, Social, filters).
--- Берём виджеты НАПРЯМУЮ из parentKey-полей XML (WhoSearch/EditBox), дублируем
--- SetWhoToUi(true) (его ставит OnShow панели — после показа скрытого родителя
--- мог не отработать; если окно спрятут — OnHide вернёт false и ответ уйдёт
--- из UI, баг 06.10) и даём видимую отдачу: программный Click() не анимирует
--- текстуру кнопки — пользователь видит «не нажимается».
+-- Press the "magnifier" like a player (08.10): the client handler
+-- (WhoSearchMixin:OnClick) reads LFGWhoListFrame.EditBox and sends
+-- SendWho(text, Social, filters). We take the widgets DIRECTLY from the XML
+-- parentKey fields (WhoSearch/EditBox), duplicate SetWhoToUi(true) (the
+-- panel's OnShow sets it — after showing a hidden parent it may not have
+-- run; if the window gets hidden, OnHide resets it to false and the reply
+-- leaves the UI, bug 06.10) and give visible feedback: a programmatic Click()
+-- doesn't animate the button texture — the user sees "doesn't press".
 local function WhoPress(query)
     EnsureWhoVisible()
     pcall(function()
@@ -696,10 +826,11 @@ local function WhoPress(query)
 end
 
 local function WhoSendRaw(query, attempt)
-    -- 08.10: кнопка с Click("LeftButton") — единственный подтверждённо живой не-чат
-    -- путь (whotest clickL: 50, уровни 27-30). Ротацию по попыткам убрали: ретраи
-    -- сторожа ВСЕГДА идут кнопкой, enter/api — только синхронный фолбэк, если окно
-    -- или кнопка недоступны. attempt в сигнатуре оставлен (вызовы передают).
+    -- 08.10: the button with Click("LeftButton") is the only confirmed live non-chat
+    -- path (whotest clickL: 50, levels 27-30). Attempt rotation was removed:
+    -- watchdog retries ALWAYS go through the button; enter/api are only a
+    -- synchronous fallback when the window or button is unavailable.
+    -- attempt is kept in the signature (callers pass it).
     local errs = {}
     for i = 1, #WHO_PATHS do
         local path = WHO_PATHS[i]
@@ -750,14 +881,14 @@ local function HideWhoFrame()
     if WhoFrame and WhoFrame:IsShown() then WhoFrame:Hide() end
 end
 
--- Токен зонового фильтра /who зависит от локали клиента:
--- enUS — z-"Zone", ruRU — з-"Зона" (кириллица!). С латинским z на RU-клиенте
--- сервер молча дропает запрос — именно поэтому зоновые сканы не работали.
+-- The /who zone filter token depends on the client locale:
+-- enUS — z-"Zone", ruRU — з-"Зона" (Cyrillic!). With a Latin z on an RU client
+-- the server silently drops the query — that's exactly why zone scans failed.
 local IS_RU = (GetLocale() == "ruRU")
--- Токены фильтров /who ЛОКАЛИЗОВАНЫ В КАЖДОЙ локали: RU — з-/к-/р-,
--- EN — z-/c-/r-, zhCN — свои иероглифы. Клиент хранит их в глобалах
--- WHO_TAG_ZONE / WHO_TAG_CLASS / WHO_TAG_RACE (GlobalStrings) — читаем
--- оттуда, это покрывает любой язык. Фолбэк — таблица по локали.
+-- /who filter tokens are LOCALIZED in every locale: RU — з-/к-/р-,
+-- EN — z-/c-/r-, zhCN — its own characters. The client keeps them in the
+-- WHO_TAG_ZONE / WHO_TAG_CLASS / WHO_TAG_RACE globals (GlobalStrings) — read
+-- from there, covers any language. Fallback — per-locale table.
 local WHO_TOKEN_FALLBACK = {
     ruRU = { zone = "з-", class = "к-", race = "р-" },
     enUS = { zone = "z-", class = "c-", race = "r-" },
@@ -776,7 +907,7 @@ local WHO_TOKEN_ZONE, WHO_TOKEN_SRC = WhoToken("WHO_TAG_ZONE", "zone")
 local WHO_TOKEN_CLASS = WhoToken("WHO_TAG_CLASS", "class")
 local WHO_TOKEN_RACE = WhoToken("WHO_TAG_RACE", "race")
 
--- локализованные имена рас для фильтра р-"раса" (в языке клиента)
+-- localized race names for the r-"race" filter (in the client language)
 local RACE_BY_LOCALE = {
     ruRU = {
         Human = "Человек", Dwarf = "Дворф", NightElf = "Ночной эльф",
@@ -798,10 +929,10 @@ local function PlayerFaction()
     return nil
 end
 
--- Локализованные имена рас для фильтра р-"раса": стандартные + выученные
--- кастомные (Skyborne и пр.) из db.learn
--- faction ~= nil → отсекаем расы чужой фракции: /who на Camelot отдаёт
--- только фракцию запрашивающего персонажа, запросы чужих рас всегда пусты
+-- Localized race names for the r-"race" filter: standard + learned custom
+-- ones (Skyborne etc.) from db.learn
+-- faction ~= nil → cut races of the other faction: /who on Camelot returns
+-- only the querying character's faction, queries for enemy races are always empty
 local function RaceFilterNames(db, faction)
     local names = {}
     local function want(raceFile)
@@ -810,8 +941,8 @@ local function RaceFilterNames(db, faction)
             or RACE_FACTION[raceFile]
         return rf == nil or rf == faction
     end
-    -- таблица есть только для ru/en; на других локалях (zhCN и пр.)
-    -- работают только выученные расы (самообучение из таргетов)
+    -- the table exists only for ru/en; on other locales (zhCN etc.)
+    -- only learned races work (self-learning from targets)
     local locTable = RACE_BY_LOCALE[GetLocale()]
     if locTable then
         for raceFile, locName in pairs(locTable) do
@@ -826,7 +957,7 @@ local function RaceFilterNames(db, faction)
     return names
 end
 
--- Полный послойный скан зоны: очередь диапазонов уровней с паузой WHO_GAP.
+-- Full layered zone scan: a queue of level ranges with a WHO_GAP pause.
 local whoPumpScheduled = false
 
 local function FinishZoneScan(reason)
@@ -834,8 +965,8 @@ local function FinishZoneScan(reason)
     local s = whoScan
     whoScan = nil
     whoQueue = {}
-    -- прибираем за собой: окно Who запоминает последний запрос в поле ввода —
-    -- очищаем, чтобы пользователь не видел «чужие» значения скана
+    -- clean up after ourselves: the Who window remembers the last query in the
+    -- input box — clear it so the user doesn't see the scan's "alien" values
     pcall(function()
         if WhoFrameEditBox then WhoFrameEditBox:SetText("") end
     end)
@@ -844,14 +975,14 @@ local function FinishZoneScan(reason)
         s.zone, reason and (" (" .. reason .. ")") or "", s.sent, s.results, s.added))
 end
 
--- ловим анти-бот сообщение сервера («Интересная операция, связанная с модификацией»):
--- канал прихода непредсказуем — UI_ERROR_MESSAGE или системный чат.
--- Пауза хранится в db (переживает /reload).
+-- catch the server's anti-bot message ("Интересная операция, связанная с модификацией"):
+-- the delivery channel is unpredictable — UI_ERROR_MESSAGE or system chat.
+-- The pause is stored in db (survives /reload).
 local function CheckWhoThrottle(msg)
     if type(msg) ~= "string" then return false end
     local db = GetDB()
     if msg:find("[Пп]ерац") or msg:find("[Мм]одификац") then
-        -- жёсткий антибот («Интересная операция…»): пауза 5 минут, стоп скана
+        -- hard anti-bot ("Интересная операция…"): 5-minute pause, stop the scan
         db.debug.whoThrottled = (db.debug.whoThrottled or 0) + 1
         db.debug.lastErrorMsg = msg:sub(1, 120)
         db.whoPauseUntil = time() + 300
@@ -861,7 +992,7 @@ local function CheckWhoThrottle(msg)
         return true
     end
     if msg:find("[Пп]одожд") then
-        -- мягкий кулдаун команды (пара секунд) — отмечаем, скан не останавливаем
+        -- soft command cooldown (a couple of seconds) — note it, don't stop the scan
         db.debug.whoSoft = (db.debug.whoSoft or 0) + 1
         db.debug.lastErrorMsg = msg:sub(1, 120)
         lastWhoSent = time()
@@ -875,8 +1006,8 @@ local function WhoPauseLeft()
     return left > 0 and left or 0
 end
 
--- диагностика: логируем последние системные сообщения/ошибки в debug,
--- чтобы поймать точный текст и канал серверного антибот-сообщения
+-- diagnostics: log recent system messages/errors into debug
+-- to catch the exact text and channel of the server anti-bot message
 local function LogSysMsg(chan, msg)
     if type(msg) ~= "string" or msg == "" then return end
     local db = GetDB()
@@ -889,8 +1020,8 @@ end
 local function PumpWhoQueue()
     if whoPumpScheduled then return end
     whoPumpScheduled = true
-    -- suggest: следующий запрос сразу после клика пользователя (1.5с),
-    -- программный скан — антитроттл-пауза 45-75с
+    -- suggest: next query right after the user's click (1.5s),
+    -- programmatic scan — anti-throttle pause of 45-75s
     local delay = (whoScan and whoScan.suggest) and 1.5 or (WHO_GAP + math.random(0, 30))
     C_Timer.After(delay, function()
         whoPumpScheduled = false
@@ -901,14 +1032,15 @@ local function PumpWhoQueue()
             return
         end
         whoScan.current = q
-        -- запрос БЕЗ зонового фильтра (сервер дропает z-…), но с опциональным
-        -- фильтром-срезом (к-"класс" / р-"раса") + диапазон уровней
+        -- query WITHOUT the zone filter (the server drops z-…), but with an
+        -- optional slice filter (class/race token, localized) + level range
         local query = q.base and ("%s %d-%d"):format(q.base, q.lo, q.hi)
             or ("%d-%d"):format(q.lo, q.hi)
         if whoScan.suggest then
-            -- расширенный режим (70291: программный who мёртв): аддон вписывает
-            -- запрос в поле, пользователь жмёт лупу — аппаратный клик единственное,
-            -- на что отвечает сервер. Ретраи бессмысленны: ответ придёт от клика.
+            -- assisted mode (70291: programmatic who is dead): the addon types
+            -- the query into the box, the user clicks the magnifier — a hardware
+            -- click is the only thing the server answers. Retries are pointless:
+            -- the reply comes from the click.
             EnsureWhoVisible()
             pcall(function()
                 if C_FriendList and C_FriendList.SetWhoToUi then C_FriendList.SetWhoToUi(true) end
@@ -925,14 +1057,14 @@ local function PumpWhoQueue()
             end)
             return
         end
-        -- попытка 1 = первый путь (enter); ретраи сторожа сдвигают ротацию
+        -- attempt 1 = first path (enter); watchdog retries shift the rotation
         local ok, err = WhoSendRaw(query, (q.retries or 0) + 1)
         if ok then
             whoScan.sent = whoScan.sent + 1
             GetDB().debug.whoSent = (GetDB().debug.whoSent or 0) + 1
             D(("/who %s → waiting for reply… (%s)"):format(query, tostring(err)))
-            -- сторож: ответ не пришёл за 15 сек — сервер дропает часть запросов
-            -- молча (пропускает ~1-2 в минуту). Диапазон не теряем: повтор до 3 раз.
+            -- watchdog: no reply within 15 sec — the server silently drops some
+            -- queries (skips ~1-2 per minute). Don't lose the range: retry up to 3 times.
             C_Timer.After(15, function()
                 if whoScan and whoScan.current == q and not q.answered then
                     q.retries = (q.retries or 0) + 1
@@ -964,18 +1096,18 @@ local function StartZoneScan(zone, manual, mode, suggest)
     whoQueue = {}
     local ml = MaxLevel()
     if mode == "class" then
-        -- срез по классам: к-"маг" 1-80 (при лимите 50 — берём как есть)
+        -- class slice: c-"mage" 1-80 (at the 50 cap — take as is)
         for _, locName in pairs(LOCALIZED_CLASS_NAMES_MALE or {}) do
             table.insert(whoQueue, { base = WHO_TOKEN_CLASS .. "\"" .. locName .. "\"", lo = 1, hi = ml })
         end
     elseif mode == "race" then
-        -- срез по расам: р-"орк" 1-80; кастомные расы — из обученной таблицы
+        -- race slice: r-"orc" 1-80; custom races — from the learned table
         for locName in pairs(RaceFilterNames(db, PlayerFaction())) do
             table.insert(whoQueue, { base = WHO_TOKEN_RACE .. "\"" .. locName .. "\"", lo = 1, hi = ml })
         end
     else
-        -- стартовый широкий запрос от 1 уровня: на Camelot переполнен даже
-        -- 1-1, узкие уровневые сетки от лимита50 всё равно не спасают
+        -- initial wide query from level 1: on Camelot even 1-1 is overfull,
+        -- narrow level grids don't save you from the 50 cap anyway
         table.insert(whoQueue, { lo = 1, hi = ml })
     end
     if #whoQueue == 0 then
@@ -1004,17 +1136,17 @@ local function HandleWhoList()
     for i = 1, num do
         local okI, info = pcall(C_FriendList.GetWhoInfo, i)
         if okI and info and info.fullName then
-            -- разовый дамп сырых полей /who-записи в debug (диагностика полей беты)
+            -- one-time dump of raw /who entry fields into debug (beta field diagnostics)
             if not db.debug.whoSample then
                 local parts = {}
                 for k, v in pairs(info) do parts[#parts + 1] = tostring(k) .. "=" .. tostring(v) end
                 db.debug.whoSample = table.concat(parts, "; ")
             end
             local name = info.fullName:match("^([^%-]+)%-") or info.fullName
-            local realm = PlayerRealm()  -- суффикс после дефиса ненадёжен; реалм = текущий
-            -- класс: в бете есть готовое поле filename (MAGE); fallback — маппинг локали
+            local realm = PlayerRealm()  -- the suffix after the dash is unreliable; realm = current
+            -- class: the beta has a ready filename field (MAGE); fallback — locale mapping
             local classFile = info.filename or ClassFileFromLocalized(info.classStr)
-            -- раса: из обученной таблицы, затем классический маппинг
+            -- race: from the learned table, then the classic mapping
             local raceLoc = info.raceStr
             local raceFile = (db.learn and db.learn.raceLoc2File and db.learn.raceLoc2File[raceLoc or ""])
                 or RACE_LOCALE[raceLoc or ""]
@@ -1023,8 +1155,8 @@ local function HandleWhoList()
                 faction = (db.learn and db.learn.raceFaction and db.learn.raceFaction[raceFile])
                     or RACE_FACTION[raceFile]
             end
-            -- зона игрока — из ответа /who (info.area), не наша текущая!
-            -- zoneId известен только если зона совпала с нашей (id у чужих зон API не даёт)
+            -- player zone — from the /who reply (info.area), not our current one!
+            -- zoneId is known only if the zone matches ours (the API gives no id for foreign zones)
             local zone = info.area or ownZone
             local zoneId = (zone == ownZone) and ownZoneId or nil
             if UpsertPlayer(db, {
@@ -1041,32 +1173,32 @@ local function HandleWhoList()
                 x = x,
                 y = y,
                 source = "who",
-                silent = true,   -- /who зона может дать десятки игроков — не спамим чат
+                silent = true,   -- a /who zone can yield dozens of players — don't spam chat
             }) then
                 added = added + 1
             end
         end
     end
     db.debug.whoAdded = (db.debug.whoAdded or 0) + added
-    -- прячем окно Who только после своего скана, с человеческой задержкой
-    -- (мгновенное скрытие после каждого ответа — паттерн бота для античита);
-    -- в suggest-режиме окно не трогаем — пользователь кликает по нему лупу
+    -- hide the Who window only after our own scan, with a human-like delay
+    -- (instant hiding after every reply is a bot pattern for the anti-cheat);
+    -- in suggest mode we don't touch the window — the user clicks the magnifier on it
     if whoScan and whoScan.suggest then
-        -- окно оставляем открытым
+        -- keep the window open
     elseif whoScan or (time() - (lastWhoSent or 0) < 60) then
         C_Timer.After(1.5 + math.random() * 3, HideWhoFrame)
     end
 
     if whoScan then
-        -- ответ на запрос послойного скана
+        -- reply to the layered scan query
         local q = whoScan.current
         if q then q.answered = true end
         whoScan.results = whoScan.results + num
         whoScan.added = whoScan.added + added
         if num >= WHO_CAP and q then
-            -- лимит 50: широкий ответ режем по КЛАССАМ (по решению
-            -- пользователя: уровневое дробление бесполезно — переполнен
-            -- даже 1-1); классовый срез берём как есть, не дробим
+            -- 50 cap: split a wide reply by CLASS (per the user's decision:
+            -- level splitting is useless — even 1-1 is overfull); a class
+            -- slice is taken as is, not split further
             if not (q.base and q.base:find(WHO_TOKEN_CLASS, 1, true)) then
                 local sub = 0
                 for _, locName in pairs(LOCALIZED_CLASS_NAMES_MALE or {}) do
@@ -1075,29 +1207,30 @@ local function HandleWhoList()
                 end
                 D(("/who: %d (cap) — splitting %d-%d into %d class slices"):format(num, q.lo, q.hi, sub))
             else
-                -- 10.10.2026: сервер ИГНОРИРУЕТ диапазон уровней в /who
-                -- (к-"Друид" 51-60 отдал 50 при капе 30 и нуле игроков >30
-                -- в базе из 8800) — резать по уровням бессмысленно,
-                -- класс — последний рабочий фильтр. Дальше не дробим.
+                -- 10.10.2026: the server IGNORES level ranges in /who
+                -- (c-"Druid" 51-60 returned 50 with cap 30 and zero players >30
+                -- in an 8800-strong database) — level splitting is pointless,
+                -- class is the last working filter. Don't split further.
                 D(("/who: %d (cap) — %s overflowed; server ignores level ranges, taking what we get"):format(num, q.base or "?"))
             end
         end
         PumpWhoQueue()
     else
-        -- ответ на одиночный общий запрос
+        -- reply to a standalone general query
         if added > 0 then
             D(("/who %s: list %d, new %d"):format(db.debug.whoZone or "?", num, added))
         end
-        -- автозапуск программного скана УБРАН (1.5.0): с билда 70291 программный
-        -- /who мёртв (hardware-гейт) — вместо него предлагаем расширенный режим
+        -- auto-start of the programmatic scan was REMOVED (1.5.0): since build
+        -- 70291 programmatic /who is dead (hardware gate) — offer the assisted
+        -- mode instead
         if num >= WHO_CAP then
             D(("/who: full reply (%d) — more data exists. /nspy suggest types queries, you click search"):format(num))
         end
     end
 end
 
--- Плашки: nameplateShowEnemies/ShowAll есть в бете, nameplateShowFriends — нет
--- (GetCVar возвращает nil). Несуществующие CVar'ы не трогаем вообще.
+-- Nameplates: nameplateShowEnemies/ShowAll exist in the beta, nameplateShowFriends
+-- does not (GetCVar returns nil). Non-existent CVars are never touched at all.
 local NAMEPLATE_CVARS = { "nameplateShowFriends", "nameplateShowEnemies", "nameplateShowAll" }
 
 local function EnsureNameplates(db, announceFix)
@@ -1120,7 +1253,7 @@ local function EnsureNameplates(db, announceFix)
             end
         end
     end
-    -- обратная совместимость с debug-полем 1.1/1.2
+    -- backward compatibility with the 1.1/1.2 debug field
     db.debug.nsf = db.debug.cv_nameplateShowFriends
 end
 
@@ -1157,7 +1290,7 @@ local function ScheduleTick()
         if (db.debug.ticks % (GUILD_REFRESH / TICK_SECONDS)) == 0 then
             RequestGuildRoster()
         end
-        -- дайджест в кольцо раз в 5 мин (1.5.1): видно в SV, кто кормит базу
+        -- digest into the ring every 5 min (1.5.1): SV shows who feeds the database
         if (db.debug.ticks % 150) == 0 then
             local n, parts = 0, {}
             for _ in pairs(db.players) do n = n + 1 end
@@ -1234,14 +1367,15 @@ local function BuildExportText()
 end
 
 -- ============ UI ============
--- Без GameFont-объектов: в кастомной бете они могут отсутствовать/быть пустыми
--- (окно рендерится, текст — нет). Шрифт ставим явно по файлу с fallback'ами.
+-- No GameFont objects: in the custom beta they may be missing/empty
+-- (the window renders, the text doesn't). Set the font explicitly by file
+-- with fallbacks.
 
 local FONT_FILES = {
-    -- свой шрифт с полной кириллицей (11.10.2026): клиентские TTF в бете
-    -- запакованы в .slug-ресурсы и кириллицы НЕ содержат (EN-шрифты
-    -- Forever) — весь русский текст окна был «квадратиками». Путь — от папки
-    -- Interface/ (стандарт аддоновых шрифтов). Liberation Sans (OFL).
+    -- bundled font with full Cyrillic (11.10.2026): the beta's client TTFs are
+    -- packed into .slug resources and contain NO Cyrillic (Forever's EN fonts) —
+    -- all Russian window text showed as "boxes". Path is relative to the
+    -- Interface/ folder (the addon-font standard). Liberation Sans (OFL).
     "Interface\\AddOns\\NearbySpy\\NearbySpySans.ttf",
     "Fonts\\FRIZQT__.TTF",
     "Fonts\\ARIALN.TTF",
@@ -1249,11 +1383,13 @@ local FONT_FILES = {
     "Fonts\\SKURRI.TTF",
 }
 
--- zhCN: Liberation Sans без CJK-глифов — на китайском клиенте сначала
--- штатные CJK-шрифты клиента, иначе иероглифы будут «квадратиками».
+-- zhCN/koKR: Liberation Sans has no CJK glyphs — on these clients try the
+-- client's native CJK/Korean fonts first, otherwise text renders as "boxes".
 if GetLocale() == "zhCN" then
     table.insert(FONT_FILES, 1, "Fonts\\ARHei.TTF")
     table.insert(FONT_FILES, 2, "Fonts\\ARKai_T.TTF")
+elseif GetLocale() == "koKR" then
+    table.insert(FONT_FILES, 1, "Fonts\\2002.TTF")
 end
 
 local function ApplyFont(fs, size, flags)
@@ -1281,7 +1417,7 @@ local function ClassColorRGB(classFile)
     return 1, 1, 1
 end
 
--- Окно копирования: отдельное, чтобы красивый список не путался с сырьём
+-- Copy window: separate, so the pretty list doesn't mix with the raw data
 local copyWin, copyEdit
 
 local function HideCopyWindow()
@@ -1336,9 +1472,9 @@ local function BuildCopyWindow()
     sf:SetPoint("TOPLEFT", 12, -44)
     sf:SetPoint("BOTTOMRIGHT", -30, 28)
 
-    -- Без SetFocus()/HighlightText(): автозахват фокуса на Show ронял
-    -- клиент (assert CSimpleEditBox code 11). Фокус ставится только
-    -- по клику пользователя внутри EditBox (EnableMouse=true).
+    -- No SetFocus()/HighlightText(): focus auto-grab on Show crashed the
+    -- client (assert CSimpleEditBox code 11). Focus is set only by the user
+    -- clicking inside the EditBox (EnableMouse=true).
     local eb = CreateFrame("EditBox", nil, sf)
     eb:SetMultiLine(true)
     ApplyFont(eb, 12)
@@ -1368,9 +1504,9 @@ local function ShowCopyWindow()
     end
 end
 
--- Главное окно: красивый список
+-- Main window: the pretty list
 local win, winList, winSummary, winSummary2, winSummary3, winSummary4
-local levelBars, classRows, chartLabel, chartFrame  -- графики окна
+local levelBars, classRows, chartLabel, chartFrame  -- window charts
 local rowPool = {}
 
 local function HideWindow()
@@ -1398,8 +1534,8 @@ local function MakeRow(parent, index)
     return row
 end
 
--- Относительное время для правой колонки: свежесть читается с одного
--- взгляда («3 мин назад»), старое — короткой датой. Lua 5.1: только math.floor.
+-- Relative time for the right column: freshness reads at a glance
+-- ("3 min ago"), old entries get a short date. Lua 5.1: math.floor only.
 local function TimeAgo(ts)
     if not ts or ts == 0 then return "?" end
     local d = time() - ts
@@ -1451,9 +1587,9 @@ local function RefreshRows()
     return n
 end
 
--- Сводка окна: всё считается по db.players за один проход — свежесть
--- (аналог «рядом сейчас» у Spy), срез уровней и топ-классов (как счётчики
--- CensusPlus), источники из debug.src — сразу видно, кто реально кормит базу.
+-- Window summary: everything computed over db.players in one pass — freshness
+-- (Spy's "nearby now" equivalent), level slice and top classes (like CensusPlus
+-- counters), sources from debug.src — instantly shows who really feeds the db.
 local function WinStats()
     local db = GetDB()
     local now = time()
@@ -1482,9 +1618,9 @@ local function WinStats()
              lavg = (ln > 0) and math.floor(lsum / ln) or nil, top = top }
 end
 
--- Строка «кто кормит»: фиксированный порядок важных источников (unit — мир и
--- группа через Record, guild, chat, who), всё прочее с ненулевым счётчиком
--- добавляется скопом — новые источники не потеряются.
+-- "Who feeds" line: fixed order of the important sources (unit — world and
+-- party via Record, guild, chat, who); everything else with a nonzero counter
+-- is appended in bulk — new sources won't be lost.
 local function SrcLine()
     local s = (GetDB().debug and GetDB().debug.src) or {}
     local parts, shown = {}, {}
@@ -1500,10 +1636,10 @@ local function SrcLine()
     return L("SRC_LINE") .. table.concat(parts, " · ")
 end
 
--- Заполнение окна: вынесено из OnShow и вызывается ещё и из
--- ShowWindow. Пустое окно при видимом тайтле (только title рисуется) = OnShow
--- в этой кастомной бете1.60 не стреляет при win:Show() — двойной вызов лечит;
--- дубли безопасен (идемпотентный SetText).
+-- Window population: extracted from OnShow and also called from
+-- ShowWindow. An empty window with a visible title (only the title renders)
+-- = OnShow in this custom beta 1.60 doesn't fire on win:Show() — a double
+-- call fixes it; duplicates are safe (idempotent SetText).
 local function UpdateWindowUI()
     local ok, err = pcall(function()
         winSummary:SetText(L("WIN_TOTAL"):format(
@@ -1511,16 +1647,16 @@ local function UpdateWindowUI()
         local st = WinStats()
         winSummary2:SetText(L("WIN_FRESH"):format(
             st.f5, st.f15, st.f60))
-        -- демо-строка без топа классов: топ теперь графиком-барами ниже
+        -- demo line without the class top: the top is now bar-charted below
         local demo = ""
         if st.lmin then
             demo = L("WIN_DEMO"):format(st.lmin, st.lmax, st.lavg)
         end
         winSummary3:SetText(demo ~= "" and demo or "—")
         winSummary4:SetText(SrcLine())
-        -- гистограмма уровней: столбики 1..60 из db.players. Клиентская
-        -- бета без графического API (нет ни линий, ни шейдеров) — рисуем
-        -- цветными текстурами, как CensusPlus. maxL — ярче остальных.
+        -- level histogram: bars 1..60 from db.players. The client beta has no
+        -- graphics API (no lines, no shaders) — draw with colored textures,
+        -- like CensusPlus. maxL is brighter than the rest.
         local lvlCount, lvlN, lvlSum, maxC, maxL = {}, 0, 0, 0, 0
         for _, p in pairs(db.players) do
             local lv = tonumber(p.level)
@@ -1552,7 +1688,7 @@ local function UpdateWindowUI()
         else
             chartLabel:SetText(L("CHART_EMPTY"))
         end
-        -- топ-3 класса горизонтальными барами (top уже посчитан WinStats)
+        -- top-3 classes as horizontal bars (top already computed by WinStats)
         for i = 1, CLASS_BARS do
             local row = classRows[i]
             local t = st.top[i]
@@ -1592,7 +1728,7 @@ local function BuildWindow()
         end
     end)
 
-    -- ручная рамка: фон, верхний бордер (шаблонов в кастомной бете может не быть)
+    -- manual frame: background, top border (templates may be missing in the custom beta)
     local bg = win:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0.05, 0.05, 0.08, 0.95)
@@ -1620,23 +1756,23 @@ local function BuildWindow()
         xbtn:SetScript("OnClick", HideWindow)
     end
 
-    -- сводка: 4 строки (счётчики, свежесть, демо, источники)
+    -- summary: 4 lines (counters, freshness, demo, sources)
     winSummary = NewText(win, 12, 0.9, 0.9, 0.9)
     winSummary:SetPoint("TOPLEFT", 20, -44)
     winSummary:SetJustifyH("LEFT")
-    winSummary2 = NewText(win, 12, 0.65, 0.95, 0.65)  -- свежесть: живое — зеленоватое
+    winSummary2 = NewText(win, 12, 0.65, 0.95, 0.65)  -- freshness: live entries — greenish
     winSummary2:SetPoint("TOPLEFT", 20, -58)
     winSummary2:SetJustifyH("LEFT")
-    winSummary3 = NewText(win, 12, 0.8, 0.8, 0.8)     -- демо-срез
+    winSummary3 = NewText(win, 12, 0.8, 0.8, 0.8)     -- demo slice
     winSummary3:SetPoint("TOPLEFT", 20, -72)
     winSummary3:SetJustifyH("LEFT")
-    winSummary4 = NewText(win, 12, 0.6, 0.6, 0.65)    -- источники
+    winSummary4 = NewText(win, 12, 0.6, 0.6, 0.65)    -- sources
     winSummary4:SetPoint("TOPLEFT", 20, -86)
     winSummary4:SetJustifyH("LEFT")
 
-    -- графики: пул создаётся один раз, в UpdateWindowUI пересчитываются
-    -- только высоты/цвета/подписи. (1) гистограмма уровней 1–60 — столбики
-    -- снизу вверх от оси; (2) топ-3 класса горизонтальными барами.
+    -- charts: the pool is created once; UpdateWindowUI recomputes only
+    -- heights/colors/labels. (1) level histogram 1–60 — bars grow upward from
+    -- the axis; (2) top-3 classes as horizontal bars.
     chartLabel = NewText(win, 10, 0.55, 0.65, 0.55)
     chartLabel:SetPoint("TOPLEFT", 22, -100)
     chartFrame = CreateFrame("Frame", nil, win)
@@ -1677,7 +1813,7 @@ local function BuildWindow()
         classRows[i] = row
     end
 
-    -- кнопка копирования
+    -- copy button
     local okBtn, copyBtn = pcall(CreateFrame, "Button", nil, win, "UIPanelButtonTemplate")
     if okBtn and copyBtn then
         copyBtn:SetSize(120, 22)
@@ -1698,7 +1834,7 @@ local function BuildWindow()
     hint:SetPoint("BOTTOMLEFT", 14, 12)
     hint:SetText(L("WIN_HINT"))
 
-    -- список
+    -- the list
     local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
     if not okSf or not sf then
         sf = CreateFrame("ScrollFrame", nil, win)
@@ -1719,17 +1855,17 @@ local function ShowWindow()
             BuildWindow()
         end
         win:Show()
-        UpdateWindowUI()  -- OnShow в этой бете не стреляет (см. выше) — дубль
+        UpdateWindowUI()  -- OnShow doesn't fire in this beta (see above) — duplicate call
     end)
     if not ok then
         P(L("ERR_WINDOW") .. tostring(err))
     end
 end
 
--- Настоящая кнопка поиска в окне Who: из дерева 08.10 — анонимная (без имени)
--- прямая дочерняя кнопка LFGWhoListFrame с OnClick и пустым текстом, рядом с
--- полем WhoFrameEditBox (единственная такая; «Фильтр» отсекается по тексту,
--- крестик очистки — ребёнок поля, а не окна).
+-- The real search button in the Who window: from the 08.10 tree — an anonymous
+-- (unnamed) direct child button of LFGWhoListFrame with OnClick and empty text,
+-- next to the WhoFrameEditBox (the only such one; "Filter" is excluded by its
+-- text, the clear-cross is a child of the box, not the window).
 function WhoSearchButton()
     local f = LFGWhoListFrame
     if not f or not f.GetChildren then return nil end
@@ -1773,15 +1909,15 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             P(L("SCAN_NOT_RUNNING"))
         end
     elseif msg == "suggest" then
-        -- расширенный режим (70291): очередь скана вписывается в поле who по
-        -- одному запросу, пользователь жмёт лупу; ответ двигает очередь дальше
+        -- assisted mode (70291): the scan queue is typed into the who box one
+        -- query at a time, the user clicks the magnifier; the reply advances the queue
         if whoScan and whoScan.suggest then
             FinishZoneScan("suggest off")
         elseif whoScan then
             P(L("SUGGEST_PROG_BLOCK"))
         else
-            -- сразу классовые срезы: широкий 1-60 бессмысленен — на этом сервере
-            -- переполнен даже 1-1, первый клик всегда уходит в лимит 50
+            -- straight to class slices: a wide 1-60 is pointless — on this server
+            -- even 1-1 is overfull, the first click always hits the 50 cap
             local okS, infoS = StartZoneScan(PlayerZone() or "?", true, "class", true)
             if okS then
                 P(L("SUGGEST_STARTED"))
@@ -1797,9 +1933,9 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         db.announce = not db.announce
         P(L("ANNOUNCE_TOGGLE") .. (db.announce and L("ON") or L("OFF")))
     elseif msg == "debug" then
-        -- режим дебага: вкл → логи (дайджесты, прогресс скана, блокировки
-        -- гейта) печатаются в чат; выкл → скрытный режим, в чате только ответы
-        -- на команды, анонсы и ошибки. Всё пишется в SV-кольцо в обоих режимах.
+        -- debug mode: on → logs (digests, scan progress, gate blocks) print to
+        -- chat; off → stealth mode, chat shows only command replies,
+        -- announcements and errors. Everything goes to the SV ring in both modes.
         db.debugMode = not db.debugMode
         P(db.debugMode and L("DEBUG_ON") or L("DEBUG_OFF"))
     elseif msg == "reset" then
@@ -1811,18 +1947,19 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     end
 end
 
--- ============ чат как источник имён ============
--- SAY/YELL/CHANNEL отдают имя говорящего без класса/уровня/зоны — пассивный
--- дозаполнитель базы: городские каналы (трейд, локальные) показывают тех, до
--- кого nameplate-скан и ростеры не доходят. Поля класса/уровня/зоны НЕ
--- передаём (nil, не ""): UpsertPlayer затирает только присутствующие ключи,
--- так что данные известных игроков не обнуляются; у новых чат-записей пустые
--- поля и так отфильтрованы на пути (парсер -> "", сайт: class<>'' и level>0).
--- Сигнатура (wowpedia + warcraft.wiki, retail и classic-перезапуск совпадают):
+-- ============ chat as a name source ============
+-- SAY/YELL/CHANNEL give the speaker's name without class/level/zone — a passive
+-- backfill for the database: city channels (trade, local) show players that
+-- nameplate scans and rosters never reach. Class/level/zone fields are NOT
+-- passed (nil, not ""): UpsertPlayer overwrites only present keys, so known
+-- players' data is not zeroed; new chat entries' empty fields are filtered
+-- downstream anyway (parser -> "", site: class<>'' and level>0).
+-- Signature (wowpedia + warcraft.wiki, retail and the classic relaunch match):
 --   text, playerName, languageName, channelName, playerName2, specialFlags, ...
--- то есть спикер — 2-й аргумент события (после имени события). Порядок в
--- бета-клиенте не гарантирован — первые 15 событий пишем целиком в
--- db.debug.chatSample, после первой игры сверяем по dump и правим select().
+-- i.e. the speaker is the event's 2nd argument (after the event name). The
+-- order in the beta client is not guaranteed — write the first 15 events in
+-- full to db.debug.chatSample, verify against the dump after the first session
+-- and adjust select().
 local chatFrame = CreateFrame("Frame")
 local chatSampled = 0
 local CHAT_SAMPLE_MAX = 15
@@ -1830,17 +1967,18 @@ chatFrame:RegisterEvent("CHAT_MSG_SAY")
 chatFrame:RegisterEvent("CHAT_MSG_YELL")
 chatFrame:RegisterEvent("CHAT_MSG_CHANNEL")
 chatFrame:SetScript("OnEvent", function(self, event, ...)
-    -- весь разбор под pcall: если бета отдаёт имя как secret-строку (в комбате
-    -- такие ловили через canaccessvalue), строковые операции уронили бы весь
-    -- обработчик чата — сбор имён защищаем, падения видны через DbgErr.
-    -- varargs передаём в pcall-лямбду ЯВНО (ev, ...): вложенная не-vararg
-    -- функция не видит наружный `...` — Lua 5.1 (клиент) даёт ошибку компиляции
-    -- «cannot use '...' outside a vararg function», luaparser это пропускал.
+    -- all parsing under pcall: if the beta returns the name as a secret string
+    -- (such were caught in combat via canaccessvalue), string operations would
+    -- crash the whole chat handler — protect name collection, failures visible
+    -- via DbgErr.
+    -- pass varargs into the pcall lambda EXPLICITLY (ev, ...): a nested non-vararg
+    -- function can't see the outer `...` — Lua 5.1 (client) raises the compile
+    -- error "cannot use '...' outside a vararg function", luaparser missed that.
     local okP, errP = pcall(function(ev, ...)
         local speaker = select(2, ...)
         if type(speaker) ~= "string" or speaker == "" then return end
         local db = GetDB()
-        -- debug-дамп первых событий: позиция спикера сверяется на живом клиенте
+        -- debug dump of the first events: speaker position verified on the live client
         if chatSampled < CHAT_SAMPLE_MAX then
             chatSampled = chatSampled + 1
             db.debug = db.debug or {}
@@ -1852,8 +1990,8 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
             db.debug.chatSample[#db.debug.chatSample + 1] =
                 ev .. " | " .. table.concat(parts, " | ")
         end
-        -- спикер: "Name" (свой реалм) или "Name-Realm" (кросс). В ванили имя
-        -- игрока дефисов не содержит — первый "-" всегда разделитель реалма
+        -- speaker: "Name" (own realm) or "Name-Realm" (cross). In vanilla a player
+        -- name contains no dashes — the first "-" is always the realm separator
         local name, realm = speaker, nil
         local dash = speaker:find("-", 1, true)
         if dash then
@@ -1863,13 +2001,13 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
         if name == "" then return end
         realm = realm or PlayerRealm()
         UpsertPlayer(db, {
-            key = name .. "-" .. realm, -- тот же формат ключа, что в Record()
+            key = name .. "-" .. realm, -- same key format as in Record()
             name = name,
             realm = realm,
             source = "chat",
-            silent = true, -- не анонсировать чат-имена в чат даже при db.announce
+            silent = true, -- don't announce chat names in chat even with db.announce
         })
-    end, event, ...)  -- varargs наружу: лямбда vararg (см. комментарий выше)
+    end, event, ...)  -- varargs outward: the lambda is vararg (see comment above)
     if not okP then DbgErr("chat", errP) end
 end)
 
@@ -1927,7 +2065,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         local okE, errE = pcall(HandleWhoList)
         if not okE then DbgErr("who", errE) end
     elseif event == "UI_ERROR_MESSAGE" then
-        -- сервер троттлит /who — сигнатура события различается: (msg) или (errorType, msg)
+        -- server throttles /who — the event signature varies: (msg) or (errorType, msg)
         local sm = type(arg2) == "string" and arg2 or arg1
         LogSysMsg("err", sm)
         if not CheckWhoThrottle(arg2) then CheckWhoThrottle(arg1) end
@@ -1937,7 +2075,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         if not CheckWhoThrottle(arg2) then CheckWhoThrottle(arg1) end
     elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN"
         or event == "MACRO_ACTION_BLOCKED" or event == "MACRO_ACTION_FORBIDDEN" then
-        -- защитный гейт клиента (70291+): arg1 = модификация, arg2 = функция
+        -- client guard gate (70291+): arg1 = addon, arg2 = function
         local addon, func = tostring(arg1), tostring(arg2)
         D(("BLOCKED[%s]: %s → %s"):format(event, addon, func))
         local db = GetDB()
@@ -1949,7 +2087,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     elseif event == "LUA_WARNING" then
         D(("LUA_WARNING: %s | %s"):format(tostring(arg1), tostring(arg2)))
     elseif event == "CHAT_MSG_SYSTEM" then
-        -- кастомные серверные сообщения («Интересная операция…») приходят системным чатом
+        -- custom server messages ("Интересная операция…") arrive via system chat
         LogSysMsg("sys", arg1)
         CheckWhoThrottle(arg1)
     end
