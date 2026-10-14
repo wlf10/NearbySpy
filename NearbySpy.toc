@@ -3,6 +3,9 @@
 ## Notes: Passively records encountered players (world, group, guild, chat) + assisted /who mode (/nspy suggest)
 ## Notes-ruRU: Пассивно записывает встреченных игроков (мир, группа, гильдия, чат) + ручной /who-режим (/nspy suggest)
 ## Notes-zhCN: 被动记录遇到的玩家（世界、队伍、公会、聊天）+ 辅助 /who 模式（/nspy suggest）
+## Notes-deDE: Zeichnet Begegnungen mit Spielern passiv auf (Welt, Gruppe, Gilde, Chat) + assistierter /who-Modus (/nspy suggest)
+## Notes-frFR: Enregistre passivement les joueurs rencontrés (monde, groupe, guilde, chat) + mode /who assisté (/nspy suggest)
+## Notes-koKR: 만난 플레이어를 자동으로 기록 (필드, 파티, 길드, 채팅) + 보조 /who 모드 (/nspy suggest)
 ## Author: bitwolff
 ## Version: 1.0.0
 ## SavedVariables: NearbySpy
