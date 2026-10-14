@@ -33,6 +33,145 @@ local GUILD_REFRESH = 600     -- дозапрос ростера гильдии 
 local LEVEL_CHART_H = 56      -- графики окна: высота столбика уровней, px
 local CLASS_BARS = 3          -- сколько баров топ-классов рисуем
 
+-- ============ локализация UI (enUS fallback, ruRU, zhCN) ============
+-- Только пользовательские строки (P/окна). Отладочные D()-сообщения и
+-- причины FinishZoneScan — технические, держим на английском вне таблицы.
+local LOCALE = {
+    enUS = {
+        ON = "on", OFF = "off",
+        LVL_PREFIX = "lvl ",
+        ALLIANCE = "Alliance", HORDE = "Horde",
+        FIRST_SEEN = "first seen nearby: %s (%s%s) - %s",
+        WHO_THROTTLED = "server is throttling /who — pausing for 5 min",
+        SUGGEST_INSCRIBED = "suggest: typed \"%s\" — CLICK the search button (%d more queued)",
+        SUGGEST_WAITING = "suggest: still waiting for your search-button click (\"%s\")",
+        ERR_SCAN_RUNNING = "scan already running (%s)",
+        ERR_THROTTLE_PAUSE = "throttle pause: %ds — the server complained recently",
+        ERR_QUEUE_EMPTY = "queue is empty (no names to filter)",
+        WHO_FACTION_COVER = "/who sees only the %s faction — full coverage needs a scan on a character of each faction",
+        CVAR_FIX = "enabled %s=1",
+        EXPORT_TITLE = "NearbySpy - export (raw data)",
+        EXPORT_HINT = "Click the text -> Ctrl+A, Ctrl+C; Esc or × to close",
+        ERR_EXPORT = "export window ERROR: ",
+        ERR_LIST = "list ERROR: ",
+        ERR_WINDOW = "window ERROR: ",
+        TIME_NOW = "just now", TIME_MIN = "%d min ago", TIME_HOUR = "%d h ago",
+        SRC_LINE = "Sources: ",
+        WIN_TOTAL = "Total: %d players · new this session: %d",
+        WIN_FRESH = "Fresh: 5m=%d · 15m=%d · 1h=%d",
+        WIN_DEMO = "Lvl %d–%d (avg %d)",
+        CHART_LABEL = "Levels 1–60: %d with a level · peak %d players at lvl %d · avg %.1f",
+        CHART_EMPTY = "Levels 1–60: no data",
+        BTN_COPY = "Copy",
+        WIN_HINT = "Esc - close · /nspy count - stats · /nspy who - zone scan",
+        MODE_LEVEL = "wide + classes", MODE_CLASS = "by classes", MODE_RACE = "by races",
+        SCAN_STARTED = "%s scan started (%s), 45-75 sec pause between queries",
+        SCAN_FAILED = "scan did not start: ",
+        SCAN_NOT_RUNNING = "no scan running",
+        SUGGEST_PROG_BLOCK = "programmatic scan running — /nspy whostop first",
+        SUGGEST_STARTED = "suggest: typing queries into the who box — you only click the search button. Stop: /nspy suggest",
+        SUGGEST_FAILED = "suggest did not start: ",
+        COUNT = "total players: %d, new this session: %d, announcements: %s",
+        ANNOUNCE_TOGGLE = "new player announcements: ",
+        DEBUG_ON = "debug mode: on — logs to chat (digests, scan, who, gate blocks)",
+        DEBUG_OFF = "debug mode: off — stealth mode, logs go only to the SV ring",
+        DB_CLEARED = "encounter database cleared",
+        CMDS = "commands: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
+        QUERIES_FMT = "%d queries",
+        STARTUP = "started, %d players in db. Commands: /nspy (suggest — assisted /who)",
+    },
+    ruRU = {
+        ON = "вкл", OFF = "выкл",
+        LVL_PREFIX = "ур. ",
+        ALLIANCE = "Альянс", HORDE = "Орда",
+        FIRST_SEEN = "впервые рядом: %s (%s%s) - %s",
+        WHO_THROTTLED = "сервер троттлит /who — пауза 5 минут",
+        SUGGEST_INSCRIBED = "suggest: вписал «%s» — ЖМИ ЛУПУ (в очереди ещё %d)",
+        SUGGEST_WAITING = "suggest: всё ещё жду твой клик по лупе («%s»)",
+        ERR_SCAN_RUNNING = "скан уже идёт (%s)",
+        ERR_THROTTLE_PAUSE = "пауза троттла: %dс — сервер недавно ругался",
+        ERR_QUEUE_EMPTY = "очередь пуста (нет имён для фильтра)",
+        WHO_FACTION_COVER = "who видит только фракцию %s — полное покрытие: скан под персонажем каждой фракции",
+        CVAR_FIX = "включил %s=1",
+        EXPORT_TITLE = "NearbySpy - экспорт (сырые данные)",
+        EXPORT_HINT = "Клик по тексту -> Ctrl+A, Ctrl+C; Esc или × - закрыть",
+        ERR_EXPORT = "ОШИБКА окна экспорта: ",
+        ERR_LIST = "ОШИБКА списка: ",
+        ERR_WINDOW = "ОШИБКА окна: ",
+        TIME_NOW = "только что", TIME_MIN = "%d мин назад", TIME_HOUR = "%d ч назад",
+        SRC_LINE = "Кто кормит: ",
+        WIN_TOTAL = "Всего: %d игроков · новых за сессию: %d",
+        WIN_FRESH = "Свежие: 5м=%d · 15м=%d · 1ч=%d",
+        WIN_DEMO = "Ур. %d–%d (ср. %d)",
+        CHART_LABEL = "Уровни 1–60: всего с уровнем %d · макс %d игроков ур. %d · ср. %.1f",
+        CHART_EMPTY = "Уровни 1–60: данных нет",
+        BTN_COPY = "Копировать",
+        WIN_HINT = "Esc - закрыть · /nspy count - статистика · /nspy who - скан зоны",
+        MODE_LEVEL = "широкий + классы", MODE_CLASS = "по классам", MODE_RACE = "по расам",
+        SCAN_STARTED = "скан %s запущен (%s), пауза 45-75 сек между запросами",
+        SCAN_FAILED = "скан не ушёл: ",
+        SCAN_NOT_RUNNING = "скан не идёт",
+        SUGGEST_PROG_BLOCK = "идёт программный скан — сначала /nspy whostop",
+        SUGGEST_STARTED = "suggest: вписываю запросы в поле who — твоё дело только жать лупу. Стоп: /nspy suggest",
+        SUGGEST_FAILED = "suggest не стартовал: ",
+        COUNT = "всего игроков: %d, новых за сессию: %d, анонсы: %s",
+        ANNOUNCE_TOGGLE = "анонсы новых игроков: ",
+        DEBUG_ON = "режим дебага: вкл — логи в чат (дайджесты, скан, who, блокировки гейта)",
+        DEBUG_OFF = "режим дебага: выкл — скрытный, логи только в SV-кольцо",
+        DB_CLEARED = "база встреч очищена",
+        CMDS = "команды: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
+        QUERIES_FMT = "%d запросов",
+        STARTUP = "запущен, в базе %d игроков. Команды: /nspy (suggest — расширенный /who)",
+    },
+    zhCN = {
+        ON = "开启", OFF = "关闭",
+        LVL_PREFIX = "等级 ",
+        ALLIANCE = "联盟", HORDE = "部落",
+        FIRST_SEEN = "首次发现附近玩家: %s (%s%s) - %s",
+        WHO_THROTTLED = "服务器正在限制 /who —— 暂停5分钟",
+        SUGGEST_INSCRIBED = "suggest: 已填入「%s」——请点击搜索按钮（队列还有%d个）",
+        SUGGEST_WAITING = "suggest: 仍在等待你点击搜索按钮（「%s」）",
+        ERR_SCAN_RUNNING = "扫描已在进行中（%s）",
+        ERR_THROTTLE_PAUSE = "限流暂停: %d秒 —— 服务器最近发出过限制警告",
+        ERR_QUEUE_EMPTY = "队列为空（没有可过滤的名字）",
+        WHO_FACTION_COVER = "/who 只能看到%s阵营 —— 完整覆盖需要在每个阵营的角色上扫描",
+        CVAR_FIX = "已启用 %s=1",
+        EXPORT_TITLE = "NearbySpy - 导出（原始数据）",
+        EXPORT_HINT = "点击文本 -> Ctrl+A, Ctrl+C；Esc 或 × 关闭",
+        ERR_EXPORT = "导出窗口错误: ",
+        ERR_LIST = "列表错误: ",
+        ERR_WINDOW = "窗口错误: ",
+        TIME_NOW = "刚刚", TIME_MIN = "%d分钟前", TIME_HOUR = "%d小时前",
+        SRC_LINE = "数据来源: ",
+        WIN_TOTAL = "总计: %d名玩家 · 本次会话新增: %d",
+        WIN_FRESH = "最近活跃: 5分钟=%d · 15分钟=%d · 1小时=%d",
+        WIN_DEMO = "等级 %d–%d（平均%d）",
+        CHART_LABEL = "等级 1–60: 有等级的%d名 · %d级最多%d名玩家 · 平均%.1f",
+        CHART_EMPTY = "等级 1–60: 暂无数据",
+        BTN_COPY = "复制",
+        WIN_HINT = "Esc - 关闭 · /nspy count - 统计 · /nspy who - 区域扫描",
+        MODE_LEVEL = "广域+职业", MODE_CLASS = "按职业", MODE_RACE = "按种族",
+        SCAN_STARTED = "%s扫描已启动（%s），查询间隔45-75秒",
+        SCAN_FAILED = "扫描未能启动: ",
+        SCAN_NOT_RUNNING = "没有进行中的扫描",
+        SUGGEST_PROG_BLOCK = "程序扫描正在运行 —— 请先 /nspy whostop",
+        SUGGEST_STARTED = "suggest: 正在将查询填入搜索框 —— 你只需点击搜索按钮。停止: /nspy suggest",
+        SUGGEST_FAILED = "suggest 未能启动: ",
+        COUNT = "玩家总数: %d，本次会话新增: %d，公告: %s",
+        ANNOUNCE_TOGGLE = "新玩家公告: ",
+        DEBUG_ON = "调试模式: 开启 —— 日志输出到聊天（摘要、扫描、who、门禁拦截）",
+        DEBUG_OFF = "调试模式: 关闭 —— 静默模式，日志仅写入SV环形缓冲区",
+        DB_CLEARED = "遭遇数据库已清空",
+        CMDS = "命令: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
+        QUERIES_FMT = "%d 个查询",
+        STARTUP = "已启动，数据库中有%d名玩家。命令: /nspy（suggest —— 辅助 /who）",
+    },
+}
+local function L(key)
+    local t = LOCALE[GetLocale()] or LOCALE.enUS
+    return t[key] or LOCALE.enUS[key] or key
+end
+
 local newThisSession = 0
 local lastWhoSent = 0
 local whoScan = nil           -- активный послойный скан {zone, sent, results, added, current, suggest}
@@ -152,7 +291,7 @@ local function DbgErr(src, err)
     db.debug.err = db.debug.err or {}
     if not db.debug.err[src] then
         db.debug.err[src] = tostring(err):sub(1, 200)
-        D(("DEBUG ошибка [%s]: %s"):format(src, tostring(err):sub(1, 120)))
+        D(("DEBUG error [%s]: %s"):format(src, tostring(err):sub(1, 120)))
     end
 end
 
@@ -237,10 +376,10 @@ local function UpsertPlayer(db, data)
         db.debug.src = db.debug.src or {}
         db.debug.src[src] = (db.debug.src[src] or 0) + 1
         if db.announce and not data.silent then
-            P(("впервые рядом: %s (%s%s) - %s"):format(
+            P(L("FIRST_SEEN"):format(
                 data.name,
                 data.class and (data.class .. ", ") or "",
-                data.level and ("ур. " .. data.level) or "?",
+                data.level and (L("LVL_PREFIX") .. data.level) or "?",
                 data.zone or "?"))
         end
         return true
@@ -543,11 +682,11 @@ local function WhoPress(query)
         end
     end)
     local box = (LFGWhoListFrame and LFGWhoListFrame.EditBox) or WhoFrameEditBox
-    if not box then error("поле Who не найдено") end
+    if not box then error("who edit box not found") end
     box:SetText(query)
     local txtAtClick = (box.GetText and box:GetText()) or "?"
     local btn = (LFGWhoListFrame and LFGWhoListFrame.WhoSearch) or WhoSearchButton()
-    if not btn then error("кнопка WhoSearch не найдена") end
+    if not btn then error("who search button not found") end
     pcall(function() PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end)
     pcall(function() btn:LockHighlight() end)
     C_Timer.After(0.2, function() pcall(function() btn:UnlockHighlight() end) end)
@@ -595,7 +734,7 @@ local function WhoSendRaw(query, attempt)
 end
 
 local function HideWhoFrame()
-    D("окно Who: HideWhoFrame вызван")
+    D("who window: HideWhoFrame called")
     pcall(function()
         for f in pairs(whoShownByMe) do
             if f.Hide then f:Hide() end
@@ -701,7 +840,7 @@ local function FinishZoneScan(reason)
         if WhoFrameEditBox then WhoFrameEditBox:SetText("") end
     end)
     HideWhoFrame()
-    D(("/who %s: скан готов%s — запросов %d, найдено %d, новых %d"):format(
+    D(("/who %s: scan done%s — queries %d, found %d, new %d"):format(
         s.zone, reason and (" (" .. reason .. ")") or "", s.sent, s.results, s.added))
 end
 
@@ -717,8 +856,8 @@ local function CheckWhoThrottle(msg)
         db.debug.lastErrorMsg = msg:sub(1, 120)
         db.whoPauseUntil = time() + 300
         lastWhoSent = time()
-        if whoScan then FinishZoneScan("остановлен: сервер троттлит /who") end
-        P("сервер троттлит /who — пауза 5 минут")
+        if whoScan then FinishZoneScan("stopped: server throttles /who") end
+        P(L("WHO_THROTTLED"))
         return true
     end
     if msg:find("[Пп]одожд") then
@@ -778,10 +917,10 @@ local function PumpWhoQueue()
                 if WhoFrameEditBox then WhoFrameEditBox:SetText(query) end
             end)
             pcall(function() PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end)
-            P(("suggest: вписал «%s» — ЖМИ ЛУПУ (в очереди ещё %d)"):format(query, #whoQueue))
+            P(L("SUGGEST_INSCRIBED"):format(query, #whoQueue))
             C_Timer.After(45, function()
                 if whoScan and whoScan.suggest and whoScan.current == q and not q.answered then
-                    P(("suggest: всё ещё жду твой клик по лупе («%s»)"):format(query))
+                    P(L("SUGGEST_WAITING"):format(query))
                 end
             end)
             return
@@ -791,7 +930,7 @@ local function PumpWhoQueue()
         if ok then
             whoScan.sent = whoScan.sent + 1
             GetDB().debug.whoSent = (GetDB().debug.whoSent or 0) + 1
-            D(("/who %s → жду ответ… (%s)"):format(query, tostring(err)))
+            D(("/who %s → waiting for reply… (%s)"):format(query, tostring(err)))
             -- сторож: ответ не пришёл за 15 сек — сервер дропает часть запросов
             -- молча (пропускает ~1-2 в минуту). Диапазон не теряем: повтор до 3 раз.
             C_Timer.After(15, function()
@@ -799,16 +938,16 @@ local function PumpWhoQueue()
                     q.retries = (q.retries or 0) + 1
                     if q.retries <= 3 then
                         table.insert(whoQueue, q)
-                        D(("/who %s: нет ответа, повтор позже (%d/3)"):format(query, q.retries))
+                        D(("/who %s: no reply, retrying later (%d/3)"):format(query, q.retries))
                     else
-                        D(("/who %s: нет ответа после 3 попыток — пропускаю"):format(query))
+                        D(("/who %s: no reply after 3 attempts — skipping"):format(query))
                     end
                     PumpWhoQueue()
                 end
             end)
         else
             GetDB().debug.whoErr = (GetDB().debug.whoErr or 0) + 1
-            FinishZoneScan("ошибка: " .. tostring(err))
+            FinishZoneScan("error: " .. tostring(err))
         end
     end)
 end
@@ -817,10 +956,10 @@ local function StartZoneScan(zone, manual, mode, suggest)
     local db = GetDB()
     mode = mode or "level"
     if whoScan then
-        return false, ("скан уже идёт (%s)"):format(whoScan.zone)
+        return false, L("ERR_SCAN_RUNNING"):format(whoScan.zone)
     end
     if WhoPauseLeft() > 0 then
-        return false, ("пауза троттла: %dс — сервер недавно ругался"):format(WhoPauseLeft())
+        return false, L("ERR_THROTTLE_PAUSE"):format(WhoPauseLeft())
     end
     whoQueue = {}
     local ml = MaxLevel()
@@ -840,17 +979,16 @@ local function StartZoneScan(zone, manual, mode, suggest)
         table.insert(whoQueue, { lo = 1, hi = ml })
     end
     if #whoQueue == 0 then
-        return false, "очередь пуста (нет имён для фильтра)"
+        return false, L("ERR_QUEUE_EMPTY")
     end
     whoScan = { zone = zone, mode = mode, sent = 0, results = 0, added = 0, started = time(),
         suggest = suggest or nil }
     local fac = PlayerFaction()
     if fac then
-        local ru = fac == "Alliance" and "Альянс" or "Орда"
-        P(("who видит только фракцию %s — полное покрытие: скан под персонажем каждой фракции"):format(ru))
+        P(L("WHO_FACTION_COVER"):format(fac == "Alliance" and L("ALLIANCE") or L("HORDE")))
     end
     PumpWhoQueue()
-    return true, (#whoQueue) .. " запросов"
+    return true, L("QUERIES_FMT"):format(#whoQueue)
 end
 
 local function HandleWhoList()
@@ -935,25 +1073,25 @@ local function HandleWhoList()
                     table.insert(whoQueue, 1, { base = WHO_TOKEN_CLASS .. "\"" .. locName .. "\"", lo = q.lo, hi = q.hi })
                     sub = sub + 1
                 end
-                D(("/who: %d (лимит) — режу %d-%d по %d классам"):format(num, q.lo, q.hi, sub))
+                D(("/who: %d (cap) — splitting %d-%d into %d class slices"):format(num, q.lo, q.hi, sub))
             else
                 -- 10.10.2026: сервер ИГНОРИРУЕТ диапазон уровней в /who
                 -- (к-"Друид" 51-60 отдал 50 при капе 30 и нуле игроков >30
                 -- в базе из 8800) — резать по уровням бессмысленно,
                 -- класс — последний рабочий фильтр. Дальше не дробим.
-                D(("/who: %d (лимит) — %s переполнен; сервер игнорирует уровни, берём что дают"):format(num, q.base or "?"))
+                D(("/who: %d (cap) — %s overflowed; server ignores level ranges, taking what we get"):format(num, q.base or "?"))
             end
         end
         PumpWhoQueue()
     else
         -- ответ на одиночный общий запрос
         if added > 0 then
-            D(("/who %s: в списке %d, новых %d"):format(db.debug.whoZone or "?", num, added))
+            D(("/who %s: list %d, new %d"):format(db.debug.whoZone or "?", num, added))
         end
         -- автозапуск программного скана УБРАН (1.5.0): с билда 70291 программный
         -- /who мёртв (hardware-гейт) — вместо него предлагаем расширенный режим
         if num >= WHO_CAP then
-            D(("/who: ответ полный (%d) — данных больше. /nspy suggest — вписываю запросы, ты жмёшь лупу"):format(num))
+            D(("/who: full reply (%d) — more data exists. /nspy suggest types queries, you click search"):format(num))
         end
     end
 end
@@ -976,7 +1114,7 @@ local function EnsureNameplates(db, announceFix)
                     if okR then db.debug["cv_" .. cvar .. "_after"] = tostring(after) end
                     db.debug.nsfFixed = (db.debug.nsfFixed or 0) + 1
                     if announceFix then
-                        P(("включил %s=1"):format(cvar))
+                        P(L("CVAR_FIX"):format(cvar))
                     end
                 end
             end
@@ -1025,7 +1163,7 @@ local function ScheduleTick()
             for _ in pairs(db.players) do n = n + 1 end
             for k, v in pairs(db.debug.src or {}) do parts[#parts + 1] = k .. "=" .. v end
             table.sort(parts)
-            D(("дайджест: база %d, сессия +%d, src[%s]"):format(
+            D(("digest: db %d, session +%d, src[%s]"):format(
                 n, newThisSession,
                 #parts > 0 and table.concat(parts, ",") or "-"))
         end
@@ -1044,10 +1182,10 @@ end
 local function DebugSummary(db)
     local d = db.debug or {}
     local age = d.lastTickAt and (time() - d.lastTickAt) or -1
-    return ("тиков: %d (последний %dс назад), плашек/игроков в тике: %s/%s, " ..
-           "событий PLATE_ADDED: %d, CVar: friends=%s enemies=%s all=%s (фиксов %d), " ..
-           "/who: отправлено %d, последний список %d, новых %d, ошибок who %d, ошибок скана/CVar %d/%d, " ..
-           "токены: %s%s%s (%s, локаль %s)"):format(
+    return ("ticks: %d (last %ds ago), plates/players in tick: %s/%s, " ..
+           "PLATE_ADDED events: %d, CVar: friends=%s enemies=%s all=%s (fixes %d), " ..
+           "/who: sent %d, last list %d, new %d, who errors %d, scan/CVar errors %d/%d, " ..
+           "tokens: %s%s%s (%s, locale %s)"):format(
         d.ticks or 0, age < 0 and 9999 or age,
         tostring(d.lastPlates or "?"), tostring(d.lastPlayers or "?"),
         d.addedEvents or 0,
@@ -1172,7 +1310,7 @@ local function BuildCopyWindow()
 
     local title = NewText(copyWin, 16)
     title:SetPoint("TOPLEFT", 14, -14)
-    title:SetText("NearbySpy - экспорт (сырые данные)")
+    title:SetText(L("EXPORT_TITLE"))
 
     local okClose, close = pcall(CreateFrame, "Button", nil, copyWin, "UIPanelCloseButton")
     if okClose and close then
@@ -1182,7 +1320,7 @@ local function BuildCopyWindow()
 
     local hint = NewText(copyWin, 11, 0.7, 0.7, 0.7)
     hint:SetPoint("BOTTOMLEFT", 14, 10)
-    hint:SetText("Клик по тексту -> Ctrl+A, Ctrl+C; Esc или × - закрыть")
+    hint:SetText(L("EXPORT_HINT"))
 
     local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, copyWin, "UIPanelScrollFrameTemplate")
     if not okSf or not sf then
@@ -1219,7 +1357,7 @@ local function ShowCopyWindow()
         copyWin:Show()
     end)
     if not ok then
-        P("ОШИБКА окна экспорта: " .. tostring(err))
+        P(L("ERR_EXPORT") .. tostring(err))
     end
 end
 
@@ -1258,9 +1396,9 @@ end
 local function TimeAgo(ts)
     if not ts or ts == 0 then return "?" end
     local d = time() - ts
-    if d < 60 then return "только что" end
-    if d < 3600 then return math.floor(d / 60) .. " мин назад" end
-    if d < 86400 then return math.floor(d / 3600) .. " ч назад" end
+    if d < 60 then return L("TIME_NOW") end
+    if d < 3600 then return L("TIME_MIN"):format(math.floor(d / 60)) end
+    if d < 86400 then return L("TIME_HOUR"):format(math.floor(d / 3600)) end
     return date("%d.%m", ts)
 end
 
@@ -1283,12 +1421,12 @@ local function RefreshRows()
         row.name:SetTextColor(ClassColorRGB(p.class))
 
         local classStr = p.classLoc or p.class or "?"
-        local lvl = p.level and ("ур. " .. p.level) or "?"
-        local fac = p.faction or "?"
+        local lvl = p.level and (L("LVL_PREFIX") .. p.level) or "?"
+        local fac = (p.faction == "Horde" and L("HORDE")) or (p.faction == "Alliance" and L("ALLIANCE")) or "?"
         row.mid:SetText(("%s, %s · %s"):format(classStr, lvl, fac))
-        if fac == "Horde" then
+        if p.faction == "Horde" then
             row.mid:SetTextColor(1, 0.3, 0.3)
-        elseif fac == "Alliance" then
+        elseif p.faction == "Alliance" then
             row.mid:SetTextColor(0.35, 0.55, 1)
         else
             row.mid:SetTextColor(0.8, 0.8, 0.8)
@@ -1352,7 +1490,7 @@ local function SrcLine()
             parts[#parts + 1] = tostring(k) .. " " .. v
         end
     end
-    return "Кто кормит: " .. table.concat(parts, " · ")
+    return L("SRC_LINE") .. table.concat(parts, " · ")
 end
 
 -- Заполнение окна: вынесено из OnShow и вызывается ещё и из
@@ -1361,15 +1499,15 @@ end
 -- дубли безопасен (идемпотентный SetText).
 local function UpdateWindowUI()
     local ok, err = pcall(function()
-        winSummary:SetText(("Всего: %d игроков · новых за сессию: %d"):format(
+        winSummary:SetText(L("WIN_TOTAL"):format(
             CountPlayers(), newThisSession))
         local st = WinStats()
-        winSummary2:SetText(("Свежие: 5м=%d · 15м=%d · 1ч=%d"):format(
+        winSummary2:SetText(L("WIN_FRESH"):format(
             st.f5, st.f15, st.f60))
         -- демо-строка без топа классов: топ теперь графиком-барами ниже
         local demo = ""
         if st.lmin then
-            demo = ("Ур. %d–%d (ср. %d)"):format(st.lmin, st.lmax, st.lavg)
+            demo = L("WIN_DEMO"):format(st.lmin, st.lmax, st.lavg)
         end
         winSummary3:SetText(demo ~= "" and demo or "—")
         winSummary4:SetText(SrcLine())
@@ -1402,10 +1540,10 @@ local function UpdateWindowUI()
             end
         end
         if maxC > 0 then
-            chartLabel:SetText(("Уровни 1–60: всего с уровнем %d · макс %d игроков ур. %d · ср. %.1f"):format(
+            chartLabel:SetText(L("CHART_LABEL"):format(
                 lvlN, maxC, maxL, lvlSum / lvlN))
         else
-            chartLabel:SetText("Уровни 1–60: данных нет")
+            chartLabel:SetText(L("CHART_EMPTY"))
         end
         -- топ-3 класса горизонтальными барами (top уже посчитан WinStats)
         for i = 1, CLASS_BARS do
@@ -1423,7 +1561,7 @@ local function UpdateWindowUI()
         RefreshRows()
     end)
     if not ok then
-        P("ОШИБКА списка: " .. tostring(err))
+        P(L("ERR_LIST") .. tostring(err))
     end
 end
 
@@ -1537,7 +1675,7 @@ local function BuildWindow()
     if okBtn and copyBtn then
         copyBtn:SetSize(120, 22)
         copyBtn:SetPoint("BOTTOMRIGHT", -14, 8)
-        copyBtn:SetText("Копировать")
+        copyBtn:SetText(L("BTN_COPY"))
         copyBtn:SetScript("OnClick", ShowCopyWindow)
     else
         copyBtn = CreateFrame("Button", nil, win)
@@ -1545,13 +1683,13 @@ local function BuildWindow()
         copyBtn:SetPoint("BOTTOMRIGHT", -14, 8)
         local bt = NewText(copyBtn, 12, 0.4, 1, 0.6)
         bt:SetPoint("CENTER")
-        bt:SetText("Копировать")
+        bt:SetText(L("BTN_COPY"))
         copyBtn:SetScript("OnClick", ShowCopyWindow)
     end
 
     local hint = NewText(win, 10, 0.5, 0.5, 0.5)
     hint:SetPoint("BOTTOMLEFT", 14, 12)
-    hint:SetText("Esc - закрыть · /nspy count - статистика · /nspy who - скан зоны")
+    hint:SetText(L("WIN_HINT"))
 
     -- список
     local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
@@ -1577,7 +1715,7 @@ local function ShowWindow()
         UpdateWindowUI()  -- OnShow в этой бете не стреляет (см. выше) — дубль
     end)
     if not ok then
-        P("ОШИБКА окна: " .. tostring(err))
+        P(L("ERR_WINDOW") .. tostring(err))
     end
 end
 
@@ -1614,57 +1752,55 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         ShowCopyWindow()
     elseif msg == "who" or msg == "whoclass" or msg == "whorace" then
         local mode = ({ who = "level", whoclass = "class", whorace = "race" })[msg]
-        local modeRu = ({ level = "широкий + классы", class = "по классам", race = "по расам" })[mode]
+        local modeL = ({ level = L("MODE_LEVEL"), class = L("MODE_CLASS"), race = L("MODE_RACE") })[mode]
         local ok, info = StartZoneScan(PlayerZone() or "?", true, mode)
         if ok then
-            P(("скан %s запущен (%s), пауза 45-75 сек между запросами"):format(modeRu, info))
+            P(L("SCAN_STARTED"):format(modeL, info))
         else
-            P("скан не ушёл: " .. info)
+            P(L("SCAN_FAILED") .. info)
         end
     elseif msg == "whostop" then
         if whoScan then
-            FinishZoneScan("остановлен вручную")
+            FinishZoneScan("stopped manually")
         else
-            P("скан не идёт")
+            P(L("SCAN_NOT_RUNNING"))
         end
     elseif msg == "suggest" then
         -- расширенный режим (70291): очередь скана вписывается в поле who по
         -- одному запросу, пользователь жмёт лупу; ответ двигает очередь дальше
         if whoScan and whoScan.suggest then
-            FinishZoneScan("suggest выключен")
+            FinishZoneScan("suggest off")
         elseif whoScan then
-            P("идёт программный скан — сначала /nspy whostop")
+            P(L("SUGGEST_PROG_BLOCK"))
         else
             -- сразу классовые срезы: широкий 1-60 бессмысленен — на этом сервере
             -- переполнен даже 1-1, первый клик всегда уходит в лимит 50
             local okS, infoS = StartZoneScan(PlayerZone() or "?", true, "class", true)
             if okS then
-                P("suggest: вписываю запросы в поле who — твоё дело только жать лупу. Стоп: /nspy suggest")
+                P(L("SUGGEST_STARTED"))
             else
-                P("suggest не стартовал: " .. tostring(infoS))
+                P(L("SUGGEST_FAILED") .. tostring(infoS))
             end
         end
     elseif msg == "count" then
-        P(("всего игроков: %d, новых за сессию: %d, анонсы: %s"):format(
-            CountPlayers(), newThisSession, db.announce and "вкл" or "выкл"))
+        P(L("COUNT"):format(
+            CountPlayers(), newThisSession, db.announce and L("ON") or L("OFF")))
         P(DebugSummary(db))
     elseif msg == "announce" then
         db.announce = not db.announce
-        P("анонсы новых игроков: " .. (db.announce and "вкл" or "выкл"))
+        P(L("ANNOUNCE_TOGGLE") .. (db.announce and L("ON") or L("OFF")))
     elseif msg == "debug" then
         -- режим дебага: вкл → логи (дайджесты, прогресс скана, блокировки
         -- гейта) печатаются в чат; выкл → скрытный режим, в чате только ответы
         -- на команды, анонсы и ошибки. Всё пишется в SV-кольцо в обоих режимах.
         db.debugMode = not db.debugMode
-        P("режим дебага: " .. (db.debugMode
-            and "вкл — логи в чат (дайджесты, скан, who, блокировки гейта)"
-            or "выкл — скрытный, логи только в SV-кольцо"))
+        P(db.debugMode and L("DEBUG_ON") or L("DEBUG_OFF"))
     elseif msg == "reset" then
         db.players = {}
         newThisSession = 0
-        P("база встреч очищена")
+        P(L("DB_CLEARED"))
     else
-        P("команды: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]")
+        P(L("CMDS"))
     end
 end
 
@@ -1758,7 +1894,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         local db = GetDB()
         EnsureNameplates(db, true)
         ScheduleTick()
-        P(("запущен, в базе %d игроков. Команды: /nspy (suggest — расширенный /who)"):format(CountPlayers()))
+        P(L("STARTUP"):format(CountPlayers()))
         RequestGuildRoster()
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         local db = GetDB()
@@ -1801,7 +1937,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         db.debug.blocked = db.debug.blocked or {}
         db.debug.blocked[func] = (db.debug.blocked[func] or 0) + 1
         if addon:find("NearbySpy", 1, true) then
-            D(("клиент заблокировал наш вызов: %s (%s)"):format(func, event))
+            D(("client blocked our call: %s (%s)"):format(func, event))
         end
     elseif event == "LUA_WARNING" then
         D(("LUA_WARNING: %s | %s"):format(tostring(arg1), tostring(arg2)))
