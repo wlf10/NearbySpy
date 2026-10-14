@@ -73,7 +73,7 @@ File: `WTF/Account/<ACCOUNT>/SavedVariables/NearbySpy.lua`
 
 ## Localization
 
-English (default), Russian, Simplified Chinese, German, French, Korean.
+English (default), Simplified Chinese, Russian, German, French, Korean.
 The bundled font includes Cyrillic; zhCN/koKR clients use the client's native fonts.
 
 ## License
