@@ -1,70 +1,81 @@
 # NearbySpy
 
-Аддон WoW, который пассивно записывает **встреченных игроков** в SavedVariables.
-Поставил и играешь — ничего нажимать не нужно. Данные потом заливаются на сайт
-статистики (RealmPulse, wow.bitwolff.com).
+A WoW addon that passively records **players you encounter** into SavedVariables.
+Install and play — nothing to click. The data is later uploaded to the
+statistics site (RealmPulse, wow.bitwolff.com).
 
-## Что делает
+## What it does
 
-Пассивный сбор (основной режим, работает сам):
+Passive collection (the main mode, works on its own):
 
-- **Таргет, фокус, наведение мыши** — каждый, на кого ты смотришь.
-- **Nameplate'ы** (`nameplate1..40` + тик раз в 2 сек) — точные координаты;
-  в текущей бете nameplate-события молчат, оставлено на случай включения.
-- **Группа/рейд** — весь состав при изменениях.
-- **Гильдия** — ростер (уровень, класс, зона всех согильдийцев), обновление раз в 10 мин.
-- **Чат** (`CHAT_MSG_SAY/YELL/CHANNEL`, 1.6.0) — имя говорящего в /say, /yell и
-  каналах (трейд, локальные и т.д.) без класса/уровня/зоны: городские каналы
-  показывают тех, до кого остальные источники не доходят.
+- **Target, focus, mouseover** — everyone you look at.
+- **Nameplates** (`nameplate1..40` + a 2-second tick) — exact coordinates;
+  in the current beta nameplate events are silent, kept in case they return.
+- **Party/raid** — the full roster on changes.
+- **Guild** — roster (level, class, zone of every guildmate), refreshed every 10 min.
+- **Chat** (`CHAT_MSG_SAY/YELL/CHANNEL`) — the speaker's name from /say, /yell
+  and channels (trade, local defense, etc.) without class/level/zone: city
+  channels show players the other sources never reach.
 
-Для каждого игрока хранит: имя-сервер, класс, уровень, фракцию, расу, зону/карту,
-координаты, время первой и последней встречи, счётчик заходов (заход = пауза
-дольше 10 минут), источник (unit/who/guild/chat).
+For each player it stores: name-realm, class, level, faction, race, zone/map,
+coordinates, first/last seen time, encounter counter (a new encounter = a gap
+longer than 10 minutes), source (unit/who/guild/chat).
 
-Всё пишется в `WTF/.../SavedVariables/NearbySpy.lua` (глобальная таблица `NearbySpy`).
+Everything is written to `WTF/.../SavedVariables/NearbySpy.lua` (the global
+`NearbySpy` table).
 
-## Расширенный режим: /nspy suggest
+## Assisted mode: /nspy suggest
 
-С билда 1.60.1.70291 сервер отвечает на `/who` **только на ручной клик**
-(аппаратный гейт — программный who мёртв). Поэтому работает так:
+Since build 1.60.1.70291 the server answers `/who` **only to a physical click**
+(a hardware gate — programmatic who is dead). So it works like this:
 
-1. Вводишь `/nspy suggest`.
-2. Аддон сам вписывает очередной запрос в поле поиска who (с расколом
-   переполненных ответов по классам) и пишет в чат «ЖМИ ЛУПУ».
-3. Ты кликаешь лупу — аддон собирает ответ и вписывает следующий запрос.
-4. Стоп: повторный `/nspy suggest`.
+1. Type `/nspy suggest`.
+2. The addon types the next query into the who search box (splitting
+   overflowed replies by class) and tells you in chat to click the button.
+3. You click the search button — the addon collects the reply and types the
+   next query.
+4. Stop: type `/nspy suggest` again.
 
-Твоя работа — только кликать лупу, текст набирать не нужно.
+Your only job is clicking the search button — no typing required.
 
-## Установка
+## Installation
 
-1. Папку `NearbySpy` скопировать в `World of Warcraft/_classic_beta_/Interface/AddOns/`.
-2. На экране выбора персонажа включить аддон (если ругается «устарел» — включить
-   галочку «Load out of date add-ons»).
-3. Зайти в игру — в чате появится `NearbySpy: запущен, в базе N игроков`.
+1. Copy the `NearbySpy` folder into `World of Warcraft/_classic_beta_/Interface/AddOns/`.
+2. Enable the addon on the character select screen (if flagged "out of date" —
+   tick "Load out of date add-ons").
+3. Enter the game — chat shows `NearbySpy: started, N players in db`.
 
-## Команды
+## Commands
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `/nspy` (или `/nearbyspy`) | окно-список записанных игроков |
-| `/nspy suggest` | расширенный /who-режим: аддон вписывает запрос, ты жмёшь лупу |
-| `/nspy export` (или кнопка «Копировать») | окно с сырыми данными (Ctrl+A, Ctrl+C) |
-| `/nspy count` | счётчики + debug |
-| `/nspy announce` | вкл/выкл сообщения «впервые рядом» в чат |
-| `/nspy debug` | режим дебага: вкл → логи (дайджесты, прогресс скана, блокировки гейта) в чат; выкл → скрытный режим, логи только в SV-кольцо |
-| `/nspy reset` | очистить базу |
+| `/nspy` (or `/nearbyspy`) | window listing recorded players |
+| `/nspy suggest` | assisted /who mode: the addon types the query, you click search |
+| `/nspy export` (or the Copy button) | raw data window (Ctrl+A, Ctrl+C) |
+| `/nspy count` | counters + debug summary |
+| `/nspy announce` | toggle "first seen nearby" chat messages |
+| `/nspy debug` | debug mode: on → logs (digests, scan progress, gate blocks) in chat; off → stealth mode, logs only to the SV ring |
+| `/nspy reset` | clear the database |
 
-## Как отдавать данные
+## Sharing the data
 
-Файл: `WTF/Account/<АККАУНТ>/SavedVariables/NearbySpy.lua`
-(пишется при выходе из игры или `/reload`).
+File: `WTF/Account/<ACCOUNT>/SavedVariables/NearbySpy.lua`
+(written on logout or `/reload`).
 
-## Ограничения (честно)
+## Limitations (honest list)
 
-- Программный `/who` мёртв с билда 1.60.1.70291 — только ручной клик (см. suggest).
-- `/who` показывает только свою фракцию — полное покрытие = персонажи обеих фракций.
-- Видит только то, что отдаёт клиент: mouseover/таргет — в радиусе видимости,
-  комбат-лог — участников боя, гильдию — только свою.
-- В стелсе не видит (Blizzard API не отдаёт).
-- Уровень из комбат-лога недоступен — у таких записей класс/раса есть, уровня нет.
+- Programmatic `/who` is dead since build 1.60.1.70291 — physical click only (see suggest).
+- `/who` shows only your own faction — full coverage needs characters of both factions.
+- Sees only what the client exposes: mouseover/target within visibility range,
+  combat log participants, your own guild only.
+- Cannot see stealthed players (the Blizzard API doesn't expose them).
+- Level is unavailable from the combat log — those entries have class/race but no level.
+
+## Localization
+
+English (default), Russian, Simplified Chinese, German, French, Korean.
+The bundled font includes Cyrillic; zhCN/koKR clients use the client's native fonts.
+
+## License
+
+MIT. Bundled font: Liberation Sans (SIL OFL 1.1).
