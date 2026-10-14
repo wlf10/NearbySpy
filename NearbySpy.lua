@@ -1249,6 +1249,13 @@ local FONT_FILES = {
     "Fonts\\SKURRI.TTF",
 }
 
+-- zhCN: Liberation Sans без CJK-глифов — на китайском клиенте сначала
+-- штатные CJK-шрифты клиента, иначе иероглифы будут «квадратиками».
+if GetLocale() == "zhCN" then
+    table.insert(FONT_FILES, 1, "Fonts\\ARHei.TTF")
+    table.insert(FONT_FILES, 2, "Fonts\\ARKai_T.TTF")
+end
+
 local function ApplyFont(fs, size, flags)
     for _, path in ipairs(FONT_FILES) do
         local ok, res = pcall(fs.SetFont, fs, path, size, flags or "")
