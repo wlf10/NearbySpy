@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.0.0
+    NearbySpy 1.0.1
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
