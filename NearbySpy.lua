@@ -327,7 +327,7 @@ end
 
 GetDB = function()
     if type(NearbySpy) ~= "table" then
-        NearbySpy = { players = {}, announce = true, created = time() }
+        NearbySpy = { players = {}, announce = false, created = time() }
     end
     if type(NearbySpy.players) ~= "table" then
         NearbySpy.players = {}
