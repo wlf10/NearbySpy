@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.1.0
+    NearbySpy 1.2.0
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -57,13 +57,15 @@ local LOCALE = {
         ERR_WINDOW = "window ERROR: ",
         TIME_NOW = "just now", TIME_MIN = "%d min ago", TIME_HOUR = "%d h ago",
         SRC_LINE = "Sources: ",
-        WIN_TOTAL = "Total: %d players · new this session: %d",
-        WIN_FRESH = "Fresh: 5m=%d · 15m=%d · 1h=%d",
-        WIN_DEMO = "Lvl %d–%d (avg %d)",
         CHART_LABEL = "Levels 1–60: %d with a level · peak %d players at lvl %d · avg %.1f",
         CHART_EMPTY = "Levels 1–60: no data",
         BTN_COPY = "Copy",
         WIN_HINT = "Esc - close · /nspy count - stats · /nspy who - zone scan",
+        UI_SUBTITLE = "LIVE SERVER INTELLIGENCE",
+        UI_DETECTED = "DETECTED", UI_ACTIVE5 = "ACTIVE ≤ 5 MIN", UI_FACTIONS = "FACTIONS",
+        UI_CLASSES = "CLASSES", UI_ALL = "All", UI_FRESH = "Fresh", UI_NEW = "New", UI_NEW_SHORT = "new",
+        UI_PLAYER = "PLAYER", UI_PROFILE = "PROFILE", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
+        UI_FIRST = "First seen", UI_SOURCE = "Source", UI_ENCOUNTERS = "Encounters", UI_LIVE = "COLLECTING",
         MODE_LEVEL = "wide + classes", MODE_CLASS = "by classes", MODE_RACE = "by races",
         SCAN_STARTED = "%s scan started (%s), 45-75 sec pause between queries",
         SCAN_FAILED = "scan did not start: ",
@@ -98,13 +100,15 @@ local LOCALE = {
         ERR_WINDOW = "窗口错误: ",
         TIME_NOW = "刚刚", TIME_MIN = "%d分钟前", TIME_HOUR = "%d小时前",
         SRC_LINE = "数据来源: ",
-        WIN_TOTAL = "总计: %d名玩家 · 本次会话新增: %d",
-        WIN_FRESH = "最近活跃: 5分钟=%d · 15分钟=%d · 1小时=%d",
-        WIN_DEMO = "等级 %d–%d（平均%d）",
         CHART_LABEL = "等级 1–60: 有等级的%d名 · %d级最多%d名玩家 · 平均%.1f",
         CHART_EMPTY = "等级 1–60: 暂无数据",
         BTN_COPY = "复制",
         WIN_HINT = "Esc - 关闭 · /nspy count - 统计 · /nspy who - 区域扫描",
+        UI_SUBTITLE = "实时服务器情报",
+        UI_DETECTED = "已发现", UI_ACTIVE5 = "5分钟内活跃", UI_FACTIONS = "阵营",
+        UI_CLASSES = "职业", UI_ALL = "全部", UI_FRESH = "最近", UI_NEW = "新增", UI_NEW_SHORT = "新增",
+        UI_PLAYER = "玩家", UI_PROFILE = "资料", UI_ZONE = "区域", UI_CONTACT = "最后发现",
+        UI_FIRST = "首次发现", UI_SOURCE = "来源", UI_ENCOUNTERS = "相遇次数", UI_LIVE = "正在收集",
         MODE_LEVEL = "广域+职业", MODE_CLASS = "按职业", MODE_RACE = "按种族",
         SCAN_STARTED = "%s扫描已启动（%s），查询间隔45-75秒",
         SCAN_FAILED = "扫描未能启动: ",
@@ -139,13 +143,15 @@ local LOCALE = {
         ERR_WINDOW = "ОШИБКА окна: ",
         TIME_NOW = "только что", TIME_MIN = "%d мин назад", TIME_HOUR = "%d ч назад",
         SRC_LINE = "Кто кормит: ",
-        WIN_TOTAL = "Всего: %d игроков · новых за сессию: %d",
-        WIN_FRESH = "Свежие: 5м=%d · 15м=%d · 1ч=%d",
-        WIN_DEMO = "Ур. %d–%d (ср. %d)",
         CHART_LABEL = "Уровни 1–60: всего с уровнем %d · макс %d игроков ур. %d · ср. %.1f",
         CHART_EMPTY = "Уровни 1–60: данных нет",
         BTN_COPY = "Копировать",
         WIN_HINT = "Esc - закрыть · /nspy count - статистика · /nspy who - скан зоны",
+        UI_SUBTITLE = "РАЗВЕДКА СЕРВЕРА В РЕАЛЬНОМ ВРЕМЕНИ",
+        UI_DETECTED = "ОБНАРУЖЕНО", UI_ACTIVE5 = "АКТИВНЫ ≤ 5 МИН", UI_FACTIONS = "ФРАКЦИИ",
+        UI_CLASSES = "КЛАССЫ", UI_ALL = "Все", UI_FRESH = "Свежие", UI_NEW = "Новые", UI_NEW_SHORT = "новых",
+        UI_PLAYER = "ИГРОК", UI_PROFILE = "ПРОФИЛЬ", UI_ZONE = "ЗОНА", UI_CONTACT = "КОНТАКТ",
+        UI_FIRST = "Первая встреча", UI_SOURCE = "Источник", UI_ENCOUNTERS = "Встреч", UI_LIVE = "СБОР АКТИВЕН",
         MODE_LEVEL = "широкий + классы", MODE_CLASS = "по классам", MODE_RACE = "по расам",
         SCAN_STARTED = "скан %s запущен (%s), пауза 45-75 сек между запросами",
         SCAN_FAILED = "скан не ушёл: ",
@@ -180,13 +186,15 @@ local LOCALE = {
         ERR_WINDOW = "Fenster-FEHLER: ",
         TIME_NOW = "gerade eben", TIME_MIN = "vor %d Min", TIME_HOUR = "vor %d Std",
         SRC_LINE = "Quellen: ",
-        WIN_TOTAL = "Gesamt: %d Spieler · neu diese Sitzung: %d",
-        WIN_FRESH = "Frisch: 5m=%d · 15m=%d · 1h=%d",
-        WIN_DEMO = "Stufe %d–%d (Ø %d)",
         CHART_LABEL = "Stufen 1–60: %d mit Stufe · max %d Spieler auf Stufe %d · Ø %.1f",
         CHART_EMPTY = "Stufen 1–60: keine Daten",
         BTN_COPY = "Kopieren",
         WIN_HINT = "Esc - schließen · /nspy count - Statistik · /nspy who - Zonenscan",
+        UI_SUBTITLE = "LIVE-SERVER-AUFKLÄRUNG",
+        UI_DETECTED = "ENTDECKT", UI_ACTIVE5 = "AKTIV ≤ 5 MIN", UI_FACTIONS = "FRAKTIONEN",
+        UI_CLASSES = "KLASSEN", UI_ALL = "Alle", UI_FRESH = "Aktuell", UI_NEW = "Neu", UI_NEW_SHORT = "neu",
+        UI_PLAYER = "SPIELER", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "KONTAKT",
+        UI_FIRST = "Zuerst gesehen", UI_SOURCE = "Quelle", UI_ENCOUNTERS = "Begegnungen", UI_LIVE = "SAMMLUNG AKTIV",
         MODE_LEVEL = "breit + Klassen", MODE_CLASS = "nach Klassen", MODE_RACE = "nach Völkern",
         SCAN_STARTED = "%s-Scan gestartet (%s), 45-75 Sek Pause zwischen Anfragen",
         SCAN_FAILED = "Scan nicht gestartet: ",
@@ -221,13 +229,15 @@ local LOCALE = {
         ERR_WINDOW = "ERREUR fenêtre : ",
         TIME_NOW = "à l'instant", TIME_MIN = "il y a %d min", TIME_HOUR = "il y a %d h",
         SRC_LINE = "Sources : ",
-        WIN_TOTAL = "Total : %d joueurs · nouveaux cette session : %d",
-        WIN_FRESH = "Frais : 5m=%d · 15m=%d · 1h=%d",
-        WIN_DEMO = "Niv. %d–%d (moy. %d)",
         CHART_LABEL = "Niveaux 1–60 : %d avec niveau · max %d joueurs niv. %d · moy. %.1f",
         CHART_EMPTY = "Niveaux 1–60 : aucune donnée",
         BTN_COPY = "Copier",
         WIN_HINT = "Échap - fermer · /nspy count - stats · /nspy who - scan de zone",
+        UI_SUBTITLE = "RENSEIGNEMENT SERVEUR EN DIRECT",
+        UI_DETECTED = "DÉTECTÉS", UI_ACTIVE5 = "ACTIFS ≤ 5 MIN", UI_FACTIONS = "FACTIONS",
+        UI_CLASSES = "CLASSES", UI_ALL = "Tous", UI_FRESH = "Récents", UI_NEW = "Nouveaux", UI_NEW_SHORT = "nouveaux",
+        UI_PLAYER = "JOUEUR", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
+        UI_FIRST = "Première vue", UI_SOURCE = "Source", UI_ENCOUNTERS = "Rencontres", UI_LIVE = "COLLECTE ACTIVE",
         MODE_LEVEL = "large + classes", MODE_CLASS = "par classes", MODE_RACE = "par races",
         SCAN_STARTED = "scan %s lancé (%s), pause de 45-75 s entre les requêtes",
         SCAN_FAILED = "scan non lancé : ",
@@ -262,13 +272,15 @@ local LOCALE = {
         ERR_WINDOW = "창 오류: ",
         TIME_NOW = "방금", TIME_MIN = "%d분 전", TIME_HOUR = "%d시간 전",
         SRC_LINE = "데이터 출처: ",
-        WIN_TOTAL = "전체: 플레이어 %d명 · 이번 세션 신규: %d",
-        WIN_FRESH = "최근 활동: 5분=%d · 15분=%d · 1시간=%d",
-        WIN_DEMO = "레벨 %d–%d (평균 %d)",
         CHART_LABEL = "레벨 1–60: 레벨 있는 %d명 · 최다 %d명 %d레벨 · 평균 %.1f",
         CHART_EMPTY = "레벨 1–60: 데이터 없음",
         BTN_COPY = "복사",
         WIN_HINT = "Esc - 닫기 · /nspy count - 통계 · /nspy who - 지역 스캔",
+        UI_SUBTITLE = "실시간 서버 정보",
+        UI_DETECTED = "발견", UI_ACTIVE5 = "5분 내 활동", UI_FACTIONS = "진영",
+        UI_CLASSES = "직업", UI_ALL = "전체", UI_FRESH = "최근", UI_NEW = "신규", UI_NEW_SHORT = "신규",
+        UI_PLAYER = "플레이어", UI_PROFILE = "프로필", UI_ZONE = "지역", UI_CONTACT = "마지막 접촉",
+        UI_FIRST = "최초 발견", UI_SOURCE = "출처", UI_ENCOUNTERS = "조우", UI_LIVE = "수집 중",
         MODE_LEVEL = "광역+직업", MODE_CLASS = "직업별", MODE_RACE = "종족별",
         SCAN_STARTED = "%s 스캔 시작 (%s), 요청 간 45-75초 간격",
         SCAN_FAILED = "스캔 시작 실패: ",
@@ -1678,37 +1690,58 @@ local function ShowHelpWindow()
     helpWin:Show()
 end
 
--- Main window: the pretty list
-local win, winList, winSummary, winSummary2, winSummary3, winSummary4
-local levelBars, classRows, chartLabel, chartFrame  -- window charts
-local rowPool = {}
+-- Main window state.
+local win, winList
 
 local function HideWindow()
-    if win then
-        win:Hide()
+    if win then win:Hide() end
+end
+
+-- Scout / Tactical window. It intentionally uses only basic textures and
+-- frames: this keeps the UI compatible with the custom Forever client while
+-- still looking distinct from the old flat list.
+local tactical = {rows = {}, bars = {}, classes = {}, filters = {}, filter = "all", started = time()}
+local TACTICAL_ROW_H = 30
+local TACTICAL_FRESH = 300
+local TacticalUpdate
+
+local function TacticalPanel(parent)
+    local panel = CreateFrame("Frame", nil, parent)
+    local bg = panel:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.035, 0.075, 0.085, 0.97)
+    local accent = panel:CreateTexture(nil, "BORDER")
+    accent:SetPoint("TOPLEFT")
+    accent:SetPoint("BOTTOMLEFT")
+    accent:SetWidth(2)
+    accent:SetColorTexture(0.18, 0.64, 0.49, 0.9)
+    return panel
+end
+
+local function TacticalClassIcon(texture, classFile)
+    local key = classFile and string.upper(classFile) or nil
+    local coords = key and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[key]
+    if coords then
+        texture:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
+        texture:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+        texture:SetVertexColor(1, 1, 1, 1)
+    else
+        texture:SetTexture(nil)
+        texture:SetColorTexture(0.16, 0.25, 0.27, 1)
+        texture:SetTexCoord(0, 1, 0, 1)
     end
 end
 
-local function MakeRow(parent, index)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(600, 16)
-    row.name = NewText(row, 12)
-    row.name:SetPoint("LEFT", 4, 0)
-    row.name:SetWidth(150)
-    row.name:SetJustifyH("LEFT")
-    row.mid = NewText(row, 12)
-    row.mid:SetPoint("LEFT", row.name, "RIGHT", 8, 0)
-    row.mid:SetWidth(180)
-    row.mid:SetJustifyH("LEFT")
-    row.right = NewText(row, 11, 0.65, 0.65, 0.65)
-    row.right:SetPoint("LEFT", row.mid, "RIGHT", 8, 0)
-    row.right:SetWidth(250)
-    row.right:SetJustifyH("LEFT")
-    rowPool[index] = row
-    return row
+local function TacticalVisible(p, now)
+    if tactical.filter == "fresh" then
+        return now - (p.lastSeen or 0) <= TACTICAL_FRESH
+    elseif tactical.filter == "new" then
+        return (p.firstSeen or 0) >= tactical.started
+    end
+    return true
 end
 
--- Relative time for the right column: freshness reads at a glance
+-- Relative time for the contact column: freshness reads at a glance
 -- ("3 min ago"), old entries get a short date. Lua 5.1: math.floor only.
 local function TimeAgo(ts)
     if not ts or ts == 0 then return "?" end
@@ -1719,173 +1752,222 @@ local function TimeAgo(ts)
     return date("%d.%m", ts)
 end
 
-local function RefreshRows()
-    if not winList then return 0 end
-    for _, row in ipairs(rowPool) do row:Hide() end
-
-    local db = GetDB()
-    local list = SortedPlayers(db)
-    local n = math.min(#list, MAX_ROWS)
-    local y = -6
-
-    for i = 1, n do
-        local p = list[i]
-        local row = rowPool[i] or MakeRow(winList, i)
-        row:SetPoint("TOPLEFT", 0, y)
-        y = y - 18
-
-        row.name:SetText(p.name or "?")
-        row.name:SetTextColor(ClassColorRGB(p.class))
-
-        local classStr = p.classLoc or p.class or "?"
-        local lvl = p.level and (L("LVL_PREFIX") .. p.level) or "?"
-        local fac = (p.faction == "Horde" and L("HORDE")) or (p.faction == "Alliance" and L("ALLIANCE")) or "?"
-        row.mid:SetText(("%s, %s · %s"):format(classStr, lvl, fac))
-        if p.faction == "Horde" then
-            row.mid:SetTextColor(1, 0.3, 0.3)
-        elseif p.faction == "Alliance" then
-            row.mid:SetTextColor(0.35, 0.55, 1)
-        else
-            row.mid:SetTextColor(0.8, 0.8, 0.8)
-        end
-
-        local realm = p.realm and ("(" .. p.realm .. ") ") or ""
-        local zone = p.zone or "?"
-        local cnt = p.count or 1
-        local when = TimeAgo(p.lastSeen)
-        row.right:SetText(("%s%s · x%d · %s"):format(realm, zone, cnt, when))
-
-        row:Show()
-    end
-    winList:SetHeight(math.max(1, n * 18 + 12))
-    return n
+local function TacticalRow(parent, index)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(632, TACTICAL_ROW_H)
+    row:EnableMouse(true)
+    row.bg = row:CreateTexture(nil, "BACKGROUND")
+    row.bg:SetAllPoints()
+    row.bg:SetColorTexture(index % 2 == 0 and 0.055 or 0.035, index % 2 == 0 and 0.09 or 0.06, index % 2 == 0 and 0.1 or 0.07, 0.9)
+    row.hover = row:CreateTexture(nil, "ARTWORK")
+    row.hover:SetAllPoints()
+    row.hover:SetColorTexture(0.08, 0.28, 0.23, 0.75)
+    row.hover:Hide()
+    row.icon = row:CreateTexture(nil, "OVERLAY")
+    row.icon:SetSize(20, 20)
+    row.icon:SetPoint("LEFT", 6, 0)
+    row.name = NewText(row, 12)
+    row.name:SetPoint("LEFT", 34, 0)
+    row.name:SetWidth(142)
+    row.name:SetJustifyH("LEFT")
+    row.profile = NewText(row, 11, 0.78, 0.82, 0.82)
+    row.profile:SetPoint("LEFT", 180, 0)
+    row.profile:SetWidth(150)
+    row.profile:SetJustifyH("LEFT")
+    row.zone = NewText(row, 11, 0.55, 0.62, 0.62)
+    row.zone:SetPoint("LEFT", 334, 0)
+    row.zone:SetWidth(195)
+    row.zone:SetJustifyH("LEFT")
+    row.seen = NewText(row, 10, 0.45, 0.5, 0.5)
+    row.seen:SetPoint("LEFT", 533, 0)
+    row.seen:SetWidth(94)
+    row.seen:SetJustifyH("LEFT")
+    row:SetScript("OnEnter", function(self)
+        self.hover:Show()
+        local p = self.player
+        if not p or not GameTooltip then return end
+        local r, g, b = ClassColorRGB(p.class)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(p.name or "?", r, g, b)
+        GameTooltip:AddLine((p.classLoc or p.class or "?") .. " · " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
+        GameTooltip:AddLine(L("UI_ZONE") .. ": " .. tostring(p.zone or "?"), 0.65, 0.72, 0.72)
+        GameTooltip:AddLine(L("UI_FIRST") .. ": " .. (p.firstSeen and date("%d.%m.%Y %H:%M", p.firstSeen) or "?"), 0.58, 0.65, 0.65)
+        GameTooltip:AddLine(L("UI_CONTACT") .. ": " .. (p.lastSeen and date("%d.%m.%Y %H:%M", p.lastSeen) or "?"), 0.58, 0.65, 0.65)
+        GameTooltip:AddLine(L("UI_SOURCE") .. ": " .. tostring(p.source or "?"), 0.45, 0.72, 0.62)
+        GameTooltip:AddLine(L("UI_ENCOUNTERS") .. ": " .. tostring(p.count or 1), 0.45, 0.72, 0.62)
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function(self)
+        self.hover:Hide()
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+    tactical.rows[index] = row
+    return row
 end
 
--- Window summary: everything computed over db.players in one pass — freshness
--- (Spy's "nearby now" equivalent), level slice and top classes (like CensusPlus
--- counters), sources from debug.src — instantly shows who really feeds the db.
-local function WinStats()
-    local db = GetDB()
+local function TacticalRows()
+    for _, row in ipairs(tactical.rows) do row:Hide() end
+    local now, shown = time(), 0
+    for _, p in ipairs(SortedPlayers(GetDB())) do
+        if TacticalVisible(p, now) then
+            shown = shown + 1
+            if shown > MAX_ROWS then break end
+            local row = tactical.rows[shown] or TacticalRow(winList, shown)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
+            row.player = p
+            TacticalClassIcon(row.icon, p.class)
+            row.name:SetText(p.name or "?")
+            row.name:SetTextColor(ClassColorRGB(p.class))
+            row.profile:SetText(("%s · %s%s"):format(p.classLoc or p.class or "?", L("LVL_PREFIX"), tostring(p.level or "?")))
+            row.zone:SetText(p.zone or "?")
+            local age = now - (p.lastSeen or 0)
+            row.seen:SetText(TimeAgo(p.lastSeen))
+            if age <= 300 then row.seen:SetTextColor(0.3, 0.9, 0.62)
+            elseif age <= 3600 then row.seen:SetTextColor(0.88, 0.72, 0.32)
+            else row.seen:SetTextColor(0.45, 0.5, 0.5) end
+            row:Show()
+        end
+    end
+    winList:SetHeight(math.max(1, shown * TACTICAL_ROW_H))
+    return shown
+end
+
+local function TacticalStats()
+    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
     local now = time()
-    local f5, f15, f60 = 0, 0, 0
-    local lmin, lmax, lsum, ln = nil, nil, 0, 0
-    local cls = {}
-    for _, p in pairs(db.players) do
+    for _, p in pairs(GetDB().players) do
+        st.total = st.total + 1
         local age = now - (p.lastSeen or 0)
-        if age <= 300 then f5 = f5 + 1 end
-        if age <= 900 then f15 = f15 + 1 end
-        if age <= 3600 then f60 = f60 + 1 end
-        local lv = tonumber(p.level)
-        if lv and lv > 0 and lv <= 60 then
-            if not lmin or lv < lmin then lmin = lv end
-            if not lmax or lv > lmax then lmax = lv end
-            lsum = lsum + lv
-            ln = ln + 1
+        if age <= 300 then st.f5 = st.f5 + 1 end
+        if age <= 900 then st.f15 = st.f15 + 1 end
+        if age <= 3600 then st.f60 = st.f60 + 1 end
+        if (p.firstSeen or 0) >= tactical.started then st.newN = st.newN + 1 end
+        if p.faction == "Alliance" then st.alliance = st.alliance + 1
+        elseif p.faction == "Horde" then st.horde = st.horde + 1
+        else st.unknown = st.unknown + 1 end
+        local level = tonumber(p.level)
+        if level and level >= 1 and level <= 60 then
+            st.levelN = st.levelN + 1
+            st.levelSum = st.levelSum + level
+            st.level[level] = (st.level[level] or 0) + 1
         end
-        local c = (p.classLoc and p.classLoc ~= "") and p.classLoc or p.class
-        if c and c ~= "" then cls[c] = (cls[c] or 0) + 1 end
+        local file = p.class or "UNKNOWN"
+        if not st.classes[file] then
+            st.classes[file] = {file = file, label = p.classLoc or p.class or "?", count = 0}
+        end
+        st.classes[file].count = st.classes[file].count + 1
     end
-    local top = {}
-    for k, v in pairs(cls) do top[#top + 1] = { k = k, v = v } end
-    table.sort(top, function(a, b) return a.v > b.v end)
-    return { f5 = f5, f15 = f15, f60 = f60, lmin = lmin, lmax = lmax,
-             lavg = (ln > 0) and math.floor(lsum / ln) or nil, top = top }
+    st.top = {}
+    for _, item in pairs(st.classes) do st.top[#st.top + 1] = item end
+    table.sort(st.top, function(a, b) return a.count > b.count end)
+    return st
 end
 
--- "Who feeds" line: fixed order of the important sources (unit — world and
--- party via Record, guild, chat, who); everything else with a nonzero counter
--- is appended in bulk — new sources won't be lost.
-local function SrcLine()
+local function TacticalSources()
     local s = (GetDB().debug and GetDB().debug.src) or {}
     local parts, shown = {}, {}
-    for _, k in ipairs({ "unit", "guild", "chat", "who" }) do
-        parts[#parts + 1] = k .. " " .. (s[k] or 0)
-        shown[k] = true
+    for _, key in ipairs({"unit", "guild", "chat", "who"}) do
+        parts[#parts + 1] = key .. " " .. tostring(s[key] or 0)
+        shown[key] = true
     end
-    for k, v in pairs(s) do
-        if not shown[k] and type(v) == "number" and v > 0 then
-            parts[#parts + 1] = tostring(k) .. " " .. v
+    -- any new data source with a nonzero counter is appended — it must not
+    -- silently vanish from the status bar
+    for key, value in pairs(s) do
+        if not shown[key] and type(value) == "number" and value > 0 then
+            parts[#parts + 1] = tostring(key) .. " " .. value
         end
     end
     return L("SRC_LINE") .. table.concat(parts, " · ")
 end
 
--- Window population: extracted from OnShow and also called from
--- ShowWindow. An empty window with a visible title (only the title renders)
--- = OnShow in this custom beta 1.60 doesn't fire on win:Show() — a double
--- call fixes it; duplicates are safe (idempotent SetText).
-local function UpdateWindowUI()
+local function TacticalFilterState(button, active)
+    button.bg:SetColorTexture(active and 0.08 or 0.045, active and 0.29 or 0.085, active and 0.23 or 0.095, 1)
+    if active then button.label:SetTextColor(0.62, 0.96, 0.82)
+    else button.label:SetTextColor(0.48, 0.67, 0.62) end
+end
+
+local function TacticalFilter(parent, key, x)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(112, 25)
+    button:SetPoint("LEFT", x, 0)
+    button.bg = button:CreateTexture(nil, "BACKGROUND")
+    button.bg:SetAllPoints()
+    button.label = NewText(button, 10)
+    button.label:SetPoint("CENTER")
+    button.label:SetWidth(106)
+    button.key = key
+    button:SetScript("OnClick", function(self) tactical.filter = self.key; TacticalUpdate() end)
+    button:SetScript("OnEnter", function(self) if tactical.filter ~= self.key then self.bg:SetColorTexture(0.07, 0.16, 0.16, 1) end end)
+    button:SetScript("OnLeave", function(self) TacticalFilterState(self, tactical.filter == self.key) end)
+    tactical.filters[key] = button
+end
+
+local function TacticalMetric(parent, x, width, label)
+    local card = TacticalPanel(parent)
+    card:SetPoint("TOPLEFT", x, -52)
+    card:SetSize(width, 55)
+    card.label = NewText(card, 9, 0.44, 0.62, 0.58)
+    card.label:SetPoint("TOPLEFT", 10, -7)
+    card.label:SetText(label)
+    card.value = NewText(card, 17, 0.9, 0.96, 0.94)
+    card.value:SetPoint("BOTTOMLEFT", 10, 8)
+    card.detail = NewText(card, 9, 0.34, 0.72, 0.58)
+    card.detail:SetPoint("BOTTOMRIGHT", -9, 9)
+    return card
+end
+
+TacticalUpdate = function()
     local ok, err = pcall(function()
-        local db = GetDB()
-        winSummary:SetText(L("WIN_TOTAL"):format(
-            CountPlayers(), newThisSession))
-        local st = WinStats()
-        winSummary2:SetText(L("WIN_FRESH"):format(
-            st.f5, st.f15, st.f60))
-        -- demo line without the class top: the top is now bar-charted below
-        local demo = ""
-        if st.lmin then
-            demo = L("WIN_DEMO"):format(st.lmin, st.lmax, st.lavg)
+        local st = TacticalStats()
+        tactical.total.value:SetText(tostring(st.total))
+        tactical.total.detail:SetText("+" .. tostring(st.newN) .. " " .. L("UI_NEW_SHORT"))
+        tactical.fresh.value:SetText(tostring(st.f5))
+        tactical.fresh.detail:SetText(("15m %d · 1h %d"):format(st.f15, st.f60))
+        tactical.factions.value:SetText(("|cffff6666%s %d|r  ·  |cff6699ff%s %d|r"):format(L("HORDE"), st.horde, L("ALLIANCE"), st.alliance))
+        tactical.factions.detail:SetText(st.unknown > 0 and ("? " .. st.unknown) or "")
+
+        local maxCount, peakLevel = 0, 0
+        for level = 1, 60 do
+            local count = st.level[level] or 0
+            if count > maxCount then maxCount, peakLevel = count, level end
         end
-        winSummary3:SetText(demo ~= "" and demo or "—")
-        winSummary4:SetText(SrcLine())
-        -- level histogram: bars 1..60 from db.players. The client beta has no
-        -- graphics API (no lines, no shaders) — draw with colored textures,
-        -- like CensusPlus. maxL is brighter than the rest.
-        local lvlCount, lvlN, lvlSum, maxC, maxL = {}, 0, 0, 0, 0
-        for _, p in pairs(db.players) do
-            local lv = tonumber(p.level)
-            if lv and lv >= 1 and lv <= 60 then
-                lvlN = lvlN + 1
-                lvlSum = lvlSum + lv
-                local c = (lvlCount[lv] or 0) + 1
-                lvlCount[lv] = c
-                if c > maxC then maxC, maxL = c, lv end
-            end
+        for level = 1, 60 do
+            local bar, count = tactical.bars[level], st.level[level] or 0
+            bar:SetHeight(maxCount > 0 and math.max(1, math.floor(LEVEL_CHART_H * count / maxCount + 0.5)) or 1)
+            if level == peakLevel then bar:SetColorTexture(0.6, 1, 0.83, 1)
+            else bar:SetColorTexture(0.12, 0.55 + level / 400, 0.42 + level / 500, 0.92) end
         end
-        for i = 1, 60 do
-            local bar = levelBars[i]
-            local c = lvlCount[i] or 0
-            if maxC > 0 then
-                bar:SetHeight(math.max(1, math.floor(LEVEL_CHART_H * c / maxC + 0.5)))
-                if i == maxL then
-                    bar:SetColorTexture(0.5, 1, 0.55, 1)
-                else
-                    bar:SetColorTexture(0.3, 0.62, 0.36, 0.9)
-                end
-            else
-                bar:SetHeight(1)
-            end
-        end
-        if maxC > 0 then
-            chartLabel:SetText(L("CHART_LABEL"):format(
-                lvlN, maxC, maxL, lvlSum / lvlN))
-        else
-            chartLabel:SetText(L("CHART_EMPTY"))
-        end
-        -- top-3 classes as horizontal bars (top already computed by WinStats)
+        if maxCount > 0 then
+            tactical.chartLabel:SetText(L("CHART_LABEL"):format(st.levelN, maxCount, peakLevel, st.levelSum / st.levelN))
+        else tactical.chartLabel:SetText(L("CHART_EMPTY")) end
+
         for i = 1, CLASS_BARS do
-            local row = classRows[i]
-            local t = st.top[i]
-            if t and st.top[1] and st.top[1].v > 0 then
+            local row, item = tactical.classes[i], st.top[i]
+            if item and st.top[1].count > 0 then
                 row:Show()
-                row.label:SetText(t.k)
-                row.value:SetText(t.v)
-                row.fill:SetWidth(math.max(1, math.floor(470 * t.v / st.top[1].v + 0.5)))
-            else
-                row:Hide()
-            end
+                TacticalClassIcon(row.icon, item.file)
+                row.label:SetText(item.label)
+                row.value:SetText(item.count)
+                row.fill:SetWidth(math.max(1, math.floor(126 * item.count / st.top[1].count + 0.5)))
+                local r, g, b = ClassColorRGB(item.file)
+                row.fill:SetColorTexture(r, g, b, 0.9)
+            else row:Hide() end
         end
-        RefreshRows()
+
+        tactical.filters.all.label:SetText(L("UI_ALL") .. " " .. st.total)
+        tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. st.f5)
+        tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. st.newN)
+        for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
+        tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
+        tactical.status:SetText("|cff45dc9b●|r " .. L("UI_LIVE") .. "  ·  " .. TacticalSources())
     end)
-    if not ok then
-        P(L("ERR_LIST") .. tostring(err))
-    end
+    if not ok then P(L("ERR_LIST") .. tostring(err)) end
 end
 
 local function BuildWindow()
     win = CreateFrame("Frame", "NearbySpyWindow", UIParent)
-    win:SetSize(680, 540)
+    win:SetSize(700, 640)
     win:SetPoint("CENTER")
     win:SetFrameStrata("DIALOG")
     win:SetMovable(true)
@@ -1895,133 +1977,107 @@ local function BuildWindow()
     win:SetScript("OnDragStop", win.StopMovingOrSizing)
     win:EnableKeyboard(true)
     win:SetScript("OnKeyDown", function(_, key)
-        if key == "ESCAPE" then
-            win:SetPropagateKeyboardInput(false)
-            HideWindow()
-        else
-            win:SetPropagateKeyboardInput(true)
-        end
+        if key == "ESCAPE" then win:SetPropagateKeyboardInput(false); HideWindow()
+        else win:SetPropagateKeyboardInput(true) end
     end)
 
-    -- manual frame: background, top border (templates may be missing in the custom beta)
     local bg = win:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.05, 0.05, 0.08, 0.95)
-    local edge = win:CreateTexture(nil, "OVERLAY")
-    edge:SetPoint("TOPLEFT")
-    edge:SetPoint("TOPRIGHT")
-    edge:SetHeight(2)
-    edge:SetColorTexture(0.4, 0.7, 0.4, 0.8)
-
-    local title = NewText(win, 16, 0.4, 1, 0.6)
-    title:SetPoint("TOPLEFT", 14, -14)
-    title:SetText("NearbySpy")
+    bg:SetAllPoints(); bg:SetColorTexture(0.02, 0.045, 0.055, 0.98)
+    local header = win:CreateTexture(nil, "BORDER")
+    header:SetPoint("TOPLEFT", 1, -1); header:SetPoint("TOPRIGHT", -1, -1); header:SetHeight(42)
+    header:SetColorTexture(0.055, 0.14, 0.14, 1)
+    for _, edge in ipairs({
+        {"TOPLEFT", "TOPRIGHT", 1, true}, {"BOTTOMLEFT", "BOTTOMRIGHT", 1, true},
+        {"TOPLEFT", "BOTTOMLEFT", 1, false}, {"TOPRIGHT", "BOTTOMRIGHT", 1, false},
+    }) do
+        local texture = win:CreateTexture(nil, "OVERLAY")
+        texture:SetPoint(edge[1]); texture:SetPoint(edge[2])
+        if edge[4] then texture:SetHeight(edge[3]) else texture:SetWidth(edge[3]) end
+        texture:SetColorTexture(0.14, 0.49, 0.4, 1)
+    end
+    local title = NewText(win, 17, 0.39, 0.92, 0.72)
+    ApplyFont(title, 17, "OUTLINE")
+    title:SetPoint("TOPLEFT", 15, -13)
+    title:SetText("NEARBY|cffdbe8e4SPY|r")
+    local subtitle = NewText(win, 8, 0.38, 0.55, 0.51)
+    subtitle:SetPoint("LEFT", title, "RIGHT", 10, -2)
+    subtitle:SetWidth(400)
+    subtitle:SetText(L("UI_SUBTITLE"))
 
     local okClose, close = pcall(CreateFrame, "Button", nil, win, "UIPanelCloseButton")
-    if okClose and close then
-        close:SetPoint("TOPRIGHT", -6, -6)
-        close:SetScript("OnClick", HideWindow)
-    else
-        local xbtn = CreateFrame("Button", nil, win)
-        xbtn:SetSize(24, 24)
-        xbtn:SetPoint("TOPRIGHT", -8, -8)
-        local xt = NewText(xbtn, 16, 1, 0.4, 0.4)
-        xt:SetPoint("CENTER")
-        xt:SetText("X")
-        xbtn:SetScript("OnClick", HideWindow)
+    if not okClose or not close then
+        close = CreateFrame("Button", nil, win); close:SetSize(26, 26)
+        local text = NewText(close, 15, 0.45, 0.9, 0.72); text:SetPoint("CENTER"); text:SetText("×")
     end
+    close:SetPoint("TOPRIGHT", -6, -6)
+    close:SetScript("OnClick", HideWindow)
 
-    -- summary: 4 lines (counters, freshness, demo, sources)
-    winSummary = NewText(win, 12, 0.9, 0.9, 0.9)
-    winSummary:SetPoint("TOPLEFT", 20, -44)
-    winSummary:SetJustifyH("LEFT")
-    winSummary2 = NewText(win, 12, 0.65, 0.95, 0.65)  -- freshness: live entries — greenish
-    winSummary2:SetPoint("TOPLEFT", 20, -58)
-    winSummary2:SetJustifyH("LEFT")
-    winSummary3 = NewText(win, 12, 0.8, 0.8, 0.8)     -- demo slice
-    winSummary3:SetPoint("TOPLEFT", 20, -72)
-    winSummary3:SetJustifyH("LEFT")
-    winSummary4 = NewText(win, 12, 0.6, 0.6, 0.65)    -- sources
-    winSummary4:SetPoint("TOPLEFT", 20, -86)
-    winSummary4:SetJustifyH("LEFT")
+    tactical.total = TacticalMetric(win, 16, 208, L("UI_DETECTED"))
+    tactical.fresh = TacticalMetric(win, 232, 208, L("UI_ACTIVE5"))
+    tactical.factions = TacticalMetric(win, 448, 236, L("UI_FACTIONS"))
+    ApplyFont(tactical.factions.value, 11)
 
-    -- charts: the pool is created once; UpdateWindowUI recomputes only
-    -- heights/colors/labels. (1) level histogram 1–60 — bars grow upward from
-    -- the axis; (2) top-3 classes as horizontal bars.
-    chartLabel = NewText(win, 10, 0.55, 0.65, 0.55)
-    chartLabel:SetPoint("TOPLEFT", 22, -100)
-    chartFrame = CreateFrame("Frame", nil, win)
-    chartFrame:SetPoint("TOPLEFT", 20, -110)
-    chartFrame:SetSize(620, LEVEL_CHART_H + 2)
-    levelBars = {}
-    for i = 1, 60 do
-        local bar = chartFrame:CreateTexture(nil, "ARTWORK")
-        bar:SetColorTexture(0.3, 0.62, 0.36, 0.9)
-        bar:SetPoint("BOTTOMLEFT", 2 + (i - 1) * 10, 1)
-        bar:SetWidth(9)
-        bar:SetHeight(1)
-        levelBars[i] = bar
+    local chart = TacticalPanel(win)
+    chart:SetPoint("TOPLEFT", 16, -116); chart:SetSize(412, 100)
+    tactical.chartLabel = NewText(chart, 9, 0.46, 0.65, 0.6)
+    tactical.chartLabel:SetPoint("TOPLEFT", 9, -7)
+    for level = 1, 60 do
+        local bar = chart:CreateTexture(nil, "ARTWORK")
+        bar:SetPoint("BOTTOMLEFT", 9 + (level - 1) * 6.5, 10)
+        bar:SetWidth(5.5); bar:SetHeight(1)
+        tactical.bars[level] = bar
     end
-    local axis = chartFrame:CreateTexture(nil, "ARTWORK")
-    axis:SetColorTexture(0.4, 0.45, 0.4, 0.7)
-    axis:SetPoint("BOTTOMLEFT", 0, 0)
-    axis:SetSize(602, 1)
-    classRows = {}
+    local axis = chart:CreateTexture(nil, "ARTWORK")
+    axis:SetPoint("BOTTOMLEFT", 8, 9); axis:SetSize(391, 1); axis:SetColorTexture(0.14, 0.32, 0.3, 1)
+
+    local classes = TacticalPanel(win)
+    classes:SetPoint("TOPLEFT", 436, -116); classes:SetSize(248, 100)
+    local classTitle = NewText(classes, 9, 0.46, 0.65, 0.6)
+    classTitle:SetPoint("TOPLEFT", 9, -7); classTitle:SetText(L("UI_CLASSES"))
     for i = 1, CLASS_BARS do
-        local row = CreateFrame("Frame", nil, win)
-        row:SetSize(620, 11)
-        row:SetPoint("TOPLEFT", 22, -176 - (i - 1) * 14)
-        local fill = row:CreateTexture(nil, "ARTWORK")
-        fill:SetColorTexture(0.35, 0.5, 0.95, 0.85)
-        fill:SetPoint("LEFT", 112, 0)
-        fill:SetHeight(10)
-        fill:SetWidth(1)
-        local lbl = NewText(row, 10, 0.85, 0.85, 0.9)
-        lbl:SetPoint("LEFT", 2, 0)
-        lbl:SetJustifyH("LEFT")
-        local val = NewText(row, 10, 1, 1, 1)
-        val:SetPoint("LEFT", 118, 0)
-        row.fill = fill
-        row.label = lbl
-        row.value = val
-        row:Hide()
-        classRows[i] = row
+        local row = CreateFrame("Frame", nil, classes)
+        row:SetSize(230, 20); row:SetPoint("TOPLEFT", 9, -23 - (i - 1) * 23)
+        row.icon = row:CreateTexture(nil, "ARTWORK"); row.icon:SetSize(18, 18); row.icon:SetPoint("LEFT")
+        row.label = NewText(row, 9, 0.8, 0.85, 0.84); row.label:SetPoint("LEFT", 23, 0); row.label:SetWidth(68); row.label:SetJustifyH("LEFT")
+        local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 92, 0); track:SetSize(126, 8); track:SetColorTexture(0.06, 0.11, 0.12, 1)
+        row.fill = row:CreateTexture(nil, "ARTWORK"); row.fill:SetPoint("LEFT", 92, 0); row.fill:SetHeight(8); row.fill:SetWidth(1)
+        row.value = NewText(row, 9); row.value:SetPoint("RIGHT", -1, 0)
+        tactical.classes[i] = row
     end
 
-    -- copy button
+    local toolbar = TacticalPanel(win)
+    toolbar:SetPoint("TOPLEFT", 16, -224); toolbar:SetSize(668, 31)
+    TacticalFilter(toolbar, "all", 6); TacticalFilter(toolbar, "fresh", 122); TacticalFilter(toolbar, "new", 238)
+    tactical.count = NewText(toolbar, 9, 0.42, 0.6, 0.56); tactical.count:SetPoint("RIGHT", -9, 0)
+
+    local tableHeader = CreateFrame("Frame", nil, win)
+    tableHeader:SetPoint("TOPLEFT", 16, -260); tableHeader:SetSize(668, 24)
+    local thBg = tableHeader:CreateTexture(nil, "BACKGROUND"); thBg:SetAllPoints(); thBg:SetColorTexture(0.04, 0.08, 0.09, 1)
+    local h1 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h1:SetPoint("LEFT", 34, 0); h1:SetText(L("UI_PLAYER"))
+    local h2 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h2:SetPoint("LEFT", 180, 0); h2:SetText(L("UI_PROFILE"))
+    local h3 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h3:SetPoint("LEFT", 334, 0); h3:SetText(L("UI_ZONE"))
+    local h4 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h4:SetPoint("LEFT", 533, 0); h4:SetText(L("UI_CONTACT"))
+
+    local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
+    if not okSf or not sf then sf = CreateFrame("ScrollFrame", nil, win) end
+    sf:SetPoint("TOPLEFT", 16, -284); sf:SetPoint("BOTTOMRIGHT", -32, 43)
+    local content = CreateFrame("Frame", nil, sf); content:SetSize(632, 1); sf:SetScrollChild(content); winList = content
+
+    tactical.status = NewText(win, 9, 0.43, 0.59, 0.55); tactical.status:SetPoint("BOTTOMLEFT", 17, 14)
+    local hint = NewText(win, 9, 0.35, 0.4, 0.4)
+    hint:SetPoint("BOTTOMLEFT", 17, 3)
+    hint:SetText(L("WIN_HINT"))
     local okBtn, copyBtn = pcall(CreateFrame, "Button", nil, win, "UIPanelButtonTemplate")
     if okBtn and copyBtn then
-        copyBtn:SetSize(120, 22)
-        copyBtn:SetPoint("BOTTOMRIGHT", -14, 8)
+        copyBtn:SetSize(112, 24); copyBtn:SetPoint("BOTTOMRIGHT", -15, 9)
         copyBtn:SetText(L("BTN_COPY"))
-        copyBtn:SetScript("OnClick", ShowCopyWindow)
     else
         copyBtn = CreateFrame("Button", nil, win)
-        copyBtn:SetSize(120, 22)
-        copyBtn:SetPoint("BOTTOMRIGHT", -14, 8)
-        local bt = NewText(copyBtn, 12, 0.4, 1, 0.6)
-        bt:SetPoint("CENTER")
-        bt:SetText(L("BTN_COPY"))
-        copyBtn:SetScript("OnClick", ShowCopyWindow)
+        copyBtn:SetSize(112, 24); copyBtn:SetPoint("BOTTOMRIGHT", -15, 9)
+        local text = NewText(copyBtn, 10, 0.58, 0.94, 0.79); text:SetPoint("CENTER"); text:SetText(L("BTN_COPY"))
     end
-
-    local hint = NewText(win, 10, 0.5, 0.5, 0.5)
-    hint:SetPoint("BOTTOMLEFT", 14, 12)
-    hint:SetText(L("WIN_HINT"))
-
-    -- the list
-    local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
-    if not okSf or not sf then
-        sf = CreateFrame("ScrollFrame", nil, win)
-    end
-    sf:SetPoint("TOPLEFT", 20, -220)
-    sf:SetPoint("BOTTOMRIGHT", -34, 36)
-    local content = CreateFrame("Frame", nil, sf)
-    content:SetSize(600, 1)
-    sf:SetScrollChild(content)
-    winList = content
-
-    win:SetScript("OnShow", UpdateWindowUI)
+    copyBtn:SetScript("OnClick", ShowCopyWindow)
+    win:SetScript("OnShow", TacticalUpdate)
 end
 
 local function ShowWindow()
@@ -2030,7 +2086,7 @@ local function ShowWindow()
             BuildWindow()
         end
         win:Show()
-        UpdateWindowUI()  -- OnShow doesn't fire in this beta (see above) — duplicate call
+        TacticalUpdate()  -- the custom beta may skip OnShow on programmatic Show()
     end)
     if not ok then
         P(L("ERR_WINDOW") .. tostring(err))
