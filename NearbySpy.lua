@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.2.0
+    NearbySpy 1.3.0
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -1709,12 +1709,12 @@ local function TacticalPanel(parent)
     local panel = CreateFrame("Frame", nil, parent)
     local bg = panel:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.035, 0.075, 0.085, 0.97)
+    bg:SetColorTexture(0.075, 0.06, 0.04, 0.97)
     local accent = panel:CreateTexture(nil, "BORDER")
     accent:SetPoint("TOPLEFT")
     accent:SetPoint("BOTTOMLEFT")
     accent:SetWidth(2)
-    accent:SetColorTexture(0.18, 0.64, 0.49, 0.9)
+    accent:SetColorTexture(0.55, 0.42, 0.18, 0.95)
     return panel
 end
 
@@ -1727,7 +1727,7 @@ local function TacticalClassIcon(texture, classFile)
         texture:SetVertexColor(1, 1, 1, 1)
     else
         texture:SetTexture(nil)
-        texture:SetColorTexture(0.16, 0.25, 0.27, 1)
+        texture:SetColorTexture(0.2, 0.16, 0.1, 1)
         texture:SetTexCoord(0, 1, 0, 1)
     end
 end
@@ -1758,10 +1758,10 @@ local function TacticalRow(parent, index)
     row:EnableMouse(true)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
-    row.bg:SetColorTexture(index % 2 == 0 and 0.055 or 0.035, index % 2 == 0 and 0.09 or 0.06, index % 2 == 0 and 0.1 or 0.07, 0.9)
+    row.bg:SetColorTexture(index % 2 == 0 and 0.09 or 0.06, index % 2 == 0 and 0.075 or 0.05, index % 2 == 0 and 0.05 or 0.035, 0.9)
     row.hover = row:CreateTexture(nil, "ARTWORK")
     row.hover:SetAllPoints()
-    row.hover:SetColorTexture(0.08, 0.28, 0.23, 0.75)
+    row.hover:SetColorTexture(0.24, 0.17, 0.06, 0.75)
     row.hover:Hide()
     row.icon = row:CreateTexture(nil, "OVERLAY")
     row.icon:SetSize(20, 20)
@@ -1770,11 +1770,11 @@ local function TacticalRow(parent, index)
     row.name:SetPoint("LEFT", 34, 0)
     row.name:SetWidth(142)
     row.name:SetJustifyH("LEFT")
-    row.profile = NewText(row, 11, 0.78, 0.82, 0.82)
+    row.profile = NewText(row, 11, 0.82, 0.79, 0.72)
     row.profile:SetPoint("LEFT", 180, 0)
     row.profile:SetWidth(150)
     row.profile:SetJustifyH("LEFT")
-    row.zone = NewText(row, 11, 0.55, 0.62, 0.62)
+    row.zone = NewText(row, 11, 0.6, 0.55, 0.45)
     row.zone:SetPoint("LEFT", 334, 0)
     row.zone:SetWidth(195)
     row.zone:SetJustifyH("LEFT")
@@ -1882,9 +1882,9 @@ local function TacticalSources()
 end
 
 local function TacticalFilterState(button, active)
-    button.bg:SetColorTexture(active and 0.08 or 0.045, active and 0.29 or 0.085, active and 0.23 or 0.095, 1)
-    if active then button.label:SetTextColor(0.62, 0.96, 0.82)
-    else button.label:SetTextColor(0.48, 0.67, 0.62) end
+    button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
+    if active then button.label:SetTextColor(1, 0.85, 0.45)
+    else button.label:SetTextColor(0.62, 0.55, 0.42) end
 end
 
 local function TacticalFilter(parent, key, x)
@@ -1898,7 +1898,7 @@ local function TacticalFilter(parent, key, x)
     button.label:SetWidth(106)
     button.key = key
     button:SetScript("OnClick", function(self) tactical.filter = self.key; TacticalUpdate() end)
-    button:SetScript("OnEnter", function(self) if tactical.filter ~= self.key then self.bg:SetColorTexture(0.07, 0.16, 0.16, 1) end end)
+    button:SetScript("OnEnter", function(self) if tactical.filter ~= self.key then self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end end)
     button:SetScript("OnLeave", function(self) TacticalFilterState(self, tactical.filter == self.key) end)
     tactical.filters[key] = button
 end
@@ -1907,12 +1907,12 @@ local function TacticalMetric(parent, x, width, label)
     local card = TacticalPanel(parent)
     card:SetPoint("TOPLEFT", x, -52)
     card:SetSize(width, 55)
-    card.label = NewText(card, 9, 0.44, 0.62, 0.58)
+    card.label = NewText(card, 9, 0.62, 0.55, 0.4)
     card.label:SetPoint("TOPLEFT", 10, -7)
     card.label:SetText(label)
-    card.value = NewText(card, 17, 0.9, 0.96, 0.94)
+    card.value = NewText(card, 17, 0.95, 0.92, 0.85)
     card.value:SetPoint("BOTTOMLEFT", 10, 8)
-    card.detail = NewText(card, 9, 0.34, 0.72, 0.58)
+    card.detail = NewText(card, 9, 0.75, 0.6, 0.3)
     card.detail:SetPoint("BOTTOMRIGHT", -9, 9)
     return card
 end
@@ -1935,7 +1935,7 @@ TacticalUpdate = function()
         for level = 1, 60 do
             local bar, count = tactical.bars[level], st.level[level] or 0
             bar:SetHeight(maxCount > 0 and math.max(1, math.floor(LEVEL_CHART_H * count / maxCount + 0.5)) or 1)
-            if level == peakLevel then bar:SetColorTexture(0.6, 1, 0.83, 1)
+            if level == peakLevel then bar:SetColorTexture(0.98, 0.8, 0.35, 1)
             else bar:SetColorTexture(0.12, 0.55 + level / 400, 0.42 + level / 500, 0.92) end
         end
         if maxCount > 0 then
@@ -1966,7 +1966,38 @@ TacticalUpdate = function()
 end
 
 local function BuildWindow()
-    win = CreateFrame("Frame", "NearbySpyWindow", UIParent)
+    -- Blizzard-native chrome first: the Forever build ships the modern panel
+    -- template (Blizzard_UIPanelTemplates/Mainline/UIPanelTemplates.xml).
+    -- Template text uses GameFont objects, which are empty in this client, so
+    -- the bundled font is applied onto TitleText explicitly. If the template
+    -- is missing, fall back to hand-drawn gold chrome in the same palette.
+    local okTpl, tplWin = pcall(CreateFrame, "Frame", "NearbySpyWindow", UIParent, "BasicFrameTemplateWithInset")
+    if okTpl and tplWin and tplWin.TitleText and tplWin.Bg and tplWin.CloseButton then
+        win = tplWin
+    else
+        if tplWin and tplWin.Hide then tplWin:Hide() end
+        win = CreateFrame("Frame", "NearbySpyWindow", UIParent)
+        local bg = win:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(0.03, 0.025, 0.02, 0.97)
+        local header = win:CreateTexture(nil, "BORDER")
+        header:SetPoint("TOPLEFT", 1, -1); header:SetPoint("TOPRIGHT", -1, -1); header:SetHeight(42)
+        header:SetColorTexture(0.18, 0.13, 0.06, 1)
+        for _, edge in ipairs({
+            {"TOPLEFT", "TOPRIGHT", true}, {"BOTTOMLEFT", "BOTTOMRIGHT", true},
+            {"TOPLEFT", "BOTTOMLEFT", false}, {"TOPRIGHT", "BOTTOMRIGHT", false},
+        }) do
+            local texture = win:CreateTexture(nil, "OVERLAY")
+            texture:SetPoint(edge[1]); texture:SetPoint(edge[2])
+            if edge[3] then texture:SetHeight(1) else texture:SetWidth(1) end
+            texture:SetColorTexture(0.55, 0.42, 0.18, 1)
+        end
+        win.TitleText = NewText(win, 14, 1, 0.82, 0)
+        ApplyFont(win.TitleText, 14, "OUTLINE")
+        win.TitleText:SetPoint("TOPLEFT", 15, -14)
+        win.CloseButton = CreateFrame("Button", nil, win)
+        win.CloseButton:SetSize(26, 26); win.CloseButton:SetPoint("TOPRIGHT", -8, -8)
+        local text = NewText(win.CloseButton, 15, 0.85, 0.65, 0.25); text:SetPoint("CENTER"); text:SetText("×")
+    end
     win:SetSize(700, 640)
     win:SetPoint("CENTER")
     win:SetFrameStrata("DIALOG")
@@ -1981,36 +2012,15 @@ local function BuildWindow()
         else win:SetPropagateKeyboardInput(true) end
     end)
 
-    local bg = win:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints(); bg:SetColorTexture(0.02, 0.045, 0.055, 0.98)
-    local header = win:CreateTexture(nil, "BORDER")
-    header:SetPoint("TOPLEFT", 1, -1); header:SetPoint("TOPRIGHT", -1, -1); header:SetHeight(42)
-    header:SetColorTexture(0.055, 0.14, 0.14, 1)
-    for _, edge in ipairs({
-        {"TOPLEFT", "TOPRIGHT", 1, true}, {"BOTTOMLEFT", "BOTTOMRIGHT", 1, true},
-        {"TOPLEFT", "BOTTOMLEFT", 1, false}, {"TOPRIGHT", "BOTTOMRIGHT", 1, false},
-    }) do
-        local texture = win:CreateTexture(nil, "OVERLAY")
-        texture:SetPoint(edge[1]); texture:SetPoint(edge[2])
-        if edge[4] then texture:SetHeight(edge[3]) else texture:SetWidth(edge[3]) end
-        texture:SetColorTexture(0.14, 0.49, 0.4, 1)
-    end
-    local title = NewText(win, 17, 0.39, 0.92, 0.72)
-    ApplyFont(title, 17, "OUTLINE")
-    title:SetPoint("TOPLEFT", 15, -13)
-    title:SetText("NEARBY|cffdbe8e4SPY|r")
-    local subtitle = NewText(win, 8, 0.38, 0.55, 0.51)
-    subtitle:SetPoint("LEFT", title, "RIGHT", 10, -2)
+    -- Blizzard panel title: NORMAL_FONT gold
+    ApplyFont(win.TitleText, 14, "OUTLINE")
+    win.TitleText:SetText("NearbySpy")
+    win.TitleText:SetTextColor(1, 0.82, 0, 1)
+    local subtitle = NewText(win, 8, 0.55, 0.47, 0.32)
+    subtitle:SetPoint("LEFT", win.TitleText, "RIGHT", 10, -2)
     subtitle:SetWidth(400)
     subtitle:SetText(L("UI_SUBTITLE"))
-
-    local okClose, close = pcall(CreateFrame, "Button", nil, win, "UIPanelCloseButton")
-    if not okClose or not close then
-        close = CreateFrame("Button", nil, win); close:SetSize(26, 26)
-        local text = NewText(close, 15, 0.45, 0.9, 0.72); text:SetPoint("CENTER"); text:SetText("×")
-    end
-    close:SetPoint("TOPRIGHT", -6, -6)
-    close:SetScript("OnClick", HideWindow)
+    win.CloseButton:SetScript("OnClick", HideWindow)
 
     tactical.total = TacticalMetric(win, 16, 208, L("UI_DETECTED"))
     tactical.fresh = TacticalMetric(win, 232, 208, L("UI_ACTIVE5"))
@@ -2019,7 +2029,7 @@ local function BuildWindow()
 
     local chart = TacticalPanel(win)
     chart:SetPoint("TOPLEFT", 16, -116); chart:SetSize(412, 100)
-    tactical.chartLabel = NewText(chart, 9, 0.46, 0.65, 0.6)
+    tactical.chartLabel = NewText(chart, 9, 0.62, 0.55, 0.42)
     tactical.chartLabel:SetPoint("TOPLEFT", 9, -7)
     for level = 1, 60 do
         local bar = chart:CreateTexture(nil, "ARTWORK")
@@ -2028,18 +2038,18 @@ local function BuildWindow()
         tactical.bars[level] = bar
     end
     local axis = chart:CreateTexture(nil, "ARTWORK")
-    axis:SetPoint("BOTTOMLEFT", 8, 9); axis:SetSize(391, 1); axis:SetColorTexture(0.14, 0.32, 0.3, 1)
+    axis:SetPoint("BOTTOMLEFT", 8, 9); axis:SetSize(391, 1); axis:SetColorTexture(0.3, 0.24, 0.12, 1)
 
     local classes = TacticalPanel(win)
     classes:SetPoint("TOPLEFT", 436, -116); classes:SetSize(248, 100)
-    local classTitle = NewText(classes, 9, 0.46, 0.65, 0.6)
+    local classTitle = NewText(classes, 9, 0.62, 0.55, 0.42)
     classTitle:SetPoint("TOPLEFT", 9, -7); classTitle:SetText(L("UI_CLASSES"))
     for i = 1, CLASS_BARS do
         local row = CreateFrame("Frame", nil, classes)
         row:SetSize(230, 20); row:SetPoint("TOPLEFT", 9, -23 - (i - 1) * 23)
         row.icon = row:CreateTexture(nil, "ARTWORK"); row.icon:SetSize(18, 18); row.icon:SetPoint("LEFT")
-        row.label = NewText(row, 9, 0.8, 0.85, 0.84); row.label:SetPoint("LEFT", 23, 0); row.label:SetWidth(68); row.label:SetJustifyH("LEFT")
-        local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 92, 0); track:SetSize(126, 8); track:SetColorTexture(0.06, 0.11, 0.12, 1)
+        row.label = NewText(row, 9, 0.85, 0.82, 0.75); row.label:SetPoint("LEFT", 23, 0); row.label:SetWidth(68); row.label:SetJustifyH("LEFT")
+        local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 92, 0); track:SetSize(126, 8); track:SetColorTexture(0.1, 0.08, 0.05, 1)
         row.fill = row:CreateTexture(nil, "ARTWORK"); row.fill:SetPoint("LEFT", 92, 0); row.fill:SetHeight(8); row.fill:SetWidth(1)
         row.value = NewText(row, 9); row.value:SetPoint("RIGHT", -1, 0)
         tactical.classes[i] = row
@@ -2048,23 +2058,23 @@ local function BuildWindow()
     local toolbar = TacticalPanel(win)
     toolbar:SetPoint("TOPLEFT", 16, -224); toolbar:SetSize(668, 31)
     TacticalFilter(toolbar, "all", 6); TacticalFilter(toolbar, "fresh", 122); TacticalFilter(toolbar, "new", 238)
-    tactical.count = NewText(toolbar, 9, 0.42, 0.6, 0.56); tactical.count:SetPoint("RIGHT", -9, 0)
+    tactical.count = NewText(toolbar, 9, 0.6, 0.53, 0.4); tactical.count:SetPoint("RIGHT", -9, 0)
 
     local tableHeader = CreateFrame("Frame", nil, win)
     tableHeader:SetPoint("TOPLEFT", 16, -260); tableHeader:SetSize(668, 24)
-    local thBg = tableHeader:CreateTexture(nil, "BACKGROUND"); thBg:SetAllPoints(); thBg:SetColorTexture(0.04, 0.08, 0.09, 1)
-    local h1 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h1:SetPoint("LEFT", 34, 0); h1:SetText(L("UI_PLAYER"))
-    local h2 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h2:SetPoint("LEFT", 180, 0); h2:SetText(L("UI_PROFILE"))
-    local h3 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h3:SetPoint("LEFT", 334, 0); h3:SetText(L("UI_ZONE"))
-    local h4 = NewText(tableHeader, 9, 0.43, 0.62, 0.57); h4:SetPoint("LEFT", 533, 0); h4:SetText(L("UI_CONTACT"))
+    local thBg = tableHeader:CreateTexture(nil, "BACKGROUND"); thBg:SetAllPoints(); thBg:SetColorTexture(0.07, 0.055, 0.035, 1)
+    local h1 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h1:SetPoint("LEFT", 34, 0); h1:SetText(L("UI_PLAYER"))
+    local h2 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h2:SetPoint("LEFT", 180, 0); h2:SetText(L("UI_PROFILE"))
+    local h3 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h3:SetPoint("LEFT", 334, 0); h3:SetText(L("UI_ZONE"))
+    local h4 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h4:SetPoint("LEFT", 533, 0); h4:SetText(L("UI_CONTACT"))
 
     local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
     if not okSf or not sf then sf = CreateFrame("ScrollFrame", nil, win) end
     sf:SetPoint("TOPLEFT", 16, -284); sf:SetPoint("BOTTOMRIGHT", -32, 43)
     local content = CreateFrame("Frame", nil, sf); content:SetSize(632, 1); sf:SetScrollChild(content); winList = content
 
-    tactical.status = NewText(win, 9, 0.43, 0.59, 0.55); tactical.status:SetPoint("BOTTOMLEFT", 17, 14)
-    local hint = NewText(win, 9, 0.35, 0.4, 0.4)
+    tactical.status = NewText(win, 9, 0.55, 0.5, 0.4); tactical.status:SetPoint("BOTTOMLEFT", 17, 14)
+    local hint = NewText(win, 9, 0.4, 0.36, 0.28)
     hint:SetPoint("BOTTOMLEFT", 17, 3)
     hint:SetText(L("WIN_HINT"))
     local okBtn, copyBtn = pcall(CreateFrame, "Button", nil, win, "UIPanelButtonTemplate")
@@ -2074,7 +2084,7 @@ local function BuildWindow()
     else
         copyBtn = CreateFrame("Button", nil, win)
         copyBtn:SetSize(112, 24); copyBtn:SetPoint("BOTTOMRIGHT", -15, 9)
-        local text = NewText(copyBtn, 10, 0.58, 0.94, 0.79); text:SetPoint("CENTER"); text:SetText(L("BTN_COPY"))
+        local text = NewText(copyBtn, 10, 1, 0.82, 0.3); text:SetPoint("CENTER"); text:SetText(L("BTN_COPY"))
     end
     copyBtn:SetScript("OnClick", ShowCopyWindow)
     win:SetScript("OnShow", TacticalUpdate)
