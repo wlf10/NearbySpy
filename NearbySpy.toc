@@ -8,7 +8,7 @@
 ## Notes-frFR: Enregistre passivement les joueurs rencontrés (monde, groupe, guilde, chat) + mode /who assisté (/nspy suggest)
 ## Notes-koKR: 만난 플레이어를 자동으로 기록 (필드, 파티, 길드, 채팅) + 보조 /who 모드 (/nspy suggest)
 ## Author: bitwolff
-## Version: 1.2.3
+## Version: 1.2.2
 ## SavedVariables: NearbySpy
 
 NearbySpy.lua
