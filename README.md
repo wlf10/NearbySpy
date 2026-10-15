@@ -1,8 +1,8 @@
 # NearbySpy
 
 A WoW addon that passively records **players you encounter** into SavedVariables.
-Install and play — nothing to click. The data is later uploaded to the
-statistics site (RealmPulse, wow.bitwolff.com).
+Install and play — nothing to click. You export the data yourself and feed the
+statistics site (RealmPulse, wow.bitwolff.com); the addon never uploads anything.
 
 ## What it does
 
