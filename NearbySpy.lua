@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.0.1
+    NearbySpy 1.1.0
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -50,7 +50,6 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "throttle pause: %ds — the server complained recently",
         ERR_QUEUE_EMPTY = "queue is empty (no names to filter)",
         WHO_FACTION_COVER = "/who sees only the %s faction — full coverage needs a scan on a character of each faction",
-        CVAR_FIX = "enabled %s=1",
         EXPORT_TITLE = "NearbySpy - export (raw data)",
         EXPORT_HINT = "Click the text -> Ctrl+A, Ctrl+C; Esc or × to close",
         ERR_EXPORT = "export window ERROR: ",
@@ -77,7 +76,6 @@ local LOCALE = {
         DEBUG_ON = "debug mode: on — logs to chat (digests, scan, who, gate blocks)",
         DEBUG_OFF = "debug mode: off — stealth mode, logs go only to the SV ring",
         DB_CLEARED = "encounter database cleared",
-        CMDS = "commands: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
         QUERIES_FMT = "%d queries",
         STARTUP = "started, %d players in db. Commands: /nspy (suggest — assisted /who)",
     },
@@ -93,7 +91,6 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "限流暂停: %d秒 —— 服务器最近发出过限制警告",
         ERR_QUEUE_EMPTY = "队列为空（没有可过滤的名字）",
         WHO_FACTION_COVER = "/who 只能看到%s阵营 —— 完整覆盖需要在每个阵营的角色上扫描",
-        CVAR_FIX = "已启用 %s=1",
         EXPORT_TITLE = "NearbySpy - 导出（原始数据）",
         EXPORT_HINT = "点击文本 -> Ctrl+A, Ctrl+C；Esc 或 × 关闭",
         ERR_EXPORT = "导出窗口错误: ",
@@ -120,7 +117,6 @@ local LOCALE = {
         DEBUG_ON = "调试模式: 开启 —— 日志输出到聊天（摘要、扫描、who、门禁拦截）",
         DEBUG_OFF = "调试模式: 关闭 —— 静默模式，日志仅写入SV环形缓冲区",
         DB_CLEARED = "遭遇数据库已清空",
-        CMDS = "命令: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
         QUERIES_FMT = "%d 个查询",
         STARTUP = "已启动，数据库中有%d名玩家。命令: /nspy（suggest —— 辅助 /who）",
     },
@@ -136,7 +132,6 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "пауза троттла: %dс — сервер недавно ругался",
         ERR_QUEUE_EMPTY = "очередь пуста (нет имён для фильтра)",
         WHO_FACTION_COVER = "who видит только фракцию %s — полное покрытие: скан под персонажем каждой фракции",
-        CVAR_FIX = "включил %s=1",
         EXPORT_TITLE = "NearbySpy - экспорт (сырые данные)",
         EXPORT_HINT = "Клик по тексту -> Ctrl+A, Ctrl+C; Esc или × - закрыть",
         ERR_EXPORT = "ОШИБКА окна экспорта: ",
@@ -163,7 +158,6 @@ local LOCALE = {
         DEBUG_ON = "режим дебага: вкл — логи в чат (дайджесты, скан, who, блокировки гейта)",
         DEBUG_OFF = "режим дебага: выкл — скрытный, логи только в SV-кольцо",
         DB_CLEARED = "база встреч очищена",
-        CMDS = "команды: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
         QUERIES_FMT = "%d запросов",
         STARTUP = "запущен, в базе %d игроков. Команды: /nspy (suggest — расширенный /who)",
     },
@@ -179,7 +173,6 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "Drossel-Pause: %ds — der Server hat sich kürzlich beschwert",
         ERR_QUEUE_EMPTY = "Warteschlange ist leer (keine Namen zum Filtern)",
         WHO_FACTION_COVER = "/who sieht nur die Fraktion %s — volle Abdeckung: Scan mit einem Charakter jeder Fraktion",
-        CVAR_FIX = "%s=1 aktiviert",
         EXPORT_TITLE = "NearbySpy - Export (Rohdaten)",
         EXPORT_HINT = "Text anklicken -> Strg+A, Strg+C; Esc oder × zum Schließen",
         ERR_EXPORT = "Exportfenster-FEHLER: ",
@@ -206,7 +199,6 @@ local LOCALE = {
         DEBUG_ON = "Debug-Modus: an — Logs im Chat (Digests, Scan, Who, Gate-Blockierungen)",
         DEBUG_OFF = "Debug-Modus: aus — versteckt, Logs nur im SV-Ring",
         DB_CLEARED = "Begegnungs-Datenbank geleert",
-        CMDS = "Befehle: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
         QUERIES_FMT = "%d Anfragen",
         STARTUP = "gestartet, %d Spieler in der DB. Befehle: /nspy (suggest — assistiertes /who)",
     },
@@ -222,7 +214,6 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "pause de limitation : %ds — le serveur a râlé récemment",
         ERR_QUEUE_EMPTY = "file vide (aucun nom à filtrer)",
         WHO_FACTION_COVER = "/who ne voit que la faction %s — couverture complète : scan avec un personnage de chaque faction",
-        CVAR_FIX = "%s=1 activé",
         EXPORT_TITLE = "NearbySpy - export (données brutes)",
         EXPORT_HINT = "Clique sur le texte -> Ctrl+A, Ctrl+C ; Échap ou × pour fermer",
         ERR_EXPORT = "ERREUR fenêtre d'export : ",
@@ -249,7 +240,6 @@ local LOCALE = {
         DEBUG_ON = "mode debug : activé — logs dans le chat (digests, scan, who, blocages du gate)",
         DEBUG_OFF = "mode debug : désactivé — furtif, logs uniquement dans le ring SV",
         DB_CLEARED = "base des rencontres vidée",
-        CMDS = "commandes : /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
         QUERIES_FMT = "%d requêtes",
         STARTUP = "démarré, %d joueurs en base. Commandes : /nspy (suggest — /who assisté)",
     },
@@ -265,7 +255,6 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "제한 일시 중지: %d초 — 서버가 최근에 경고함",
         ERR_QUEUE_EMPTY = "대기열이 비어 있음 (필터링할 이름 없음)",
         WHO_FACTION_COVER = "/who 는 %s 진영만 볼 수 있음 — 전체 커버리지: 각 진영 캐릭터로 스캔",
-        CVAR_FIX = "%s=1 활성화됨",
         EXPORT_TITLE = "NearbySpy -보내기 (원시 데이터)",
         EXPORT_HINT = "텍스트 클릭 -> Ctrl+A, Ctrl+C; Esc 또는 × 닫기",
         ERR_EXPORT = "보내기 창 오류: ",
@@ -292,7 +281,6 @@ local LOCALE = {
         DEBUG_ON = "디버그 모드: 켜짐 — 채팅에 로그 출력 (다이제스트, 스캔, who, 게이트 차단)",
         DEBUG_OFF = "디버그 모드: 꺼짐 — 스텔스 모드, 로그는 SV 링에만 기록",
         DB_CLEARED = "조우 데이터베이스 삭제됨",
-        CMDS = "명령어: /nspy [show|export|who|whoclass|whorace|whostop|suggest|count|announce|debug|reset]",
         QUERIES_FMT = "%d개 쿼리",
         STARTUP = "시작됨, DB에 플레이어 %d명. 명령어: /nspy (suggest — 보조 /who)",
     },
@@ -360,7 +348,7 @@ GetDB = function()
             db.migratedNames = true
             local merged = {}
             for _, p in pairs(db.players) do
-                if p.name and p.realm and p.realm ~= ""
+                if p.name and p.realm and p.realm ~= "" and p.realm ~= "?"
                     and p.realm ~= realRealm and not p.name:find(" ") then
                     -- surname got stuck in realm — move it back into the name
                     p.name = p.name .. " " .. p.realm
@@ -388,6 +376,19 @@ GetDB = function()
         end
     end
     return db
+end
+
+-- Keep a bounded sample of Blizzard HC broadcasts for future parsing.
+-- This is not a death database: older messages are dropped after 200 entries.
+local function RecordHardcoreDeath(message)
+    if type(message) ~= "string" or (canaccessvalue and not canaccessvalue(message)) then return end
+    if message == "" then return end
+    local db = GetDB()
+    db.debug.hardcoreDeathCount = (db.debug.hardcoreDeathCount or 0) + 1
+    local samples = db.debug.hardcoreDeathSamples
+    if type(samples) ~= "table" then samples = {}; db.debug.hardcoreDeathSamples = samples end
+    samples[#samples + 1] = { at = time(), realm = GetRealmName(), message = message:sub(1, 500) }
+    if #samples > 200 then table.remove(samples, 1) end
 end
 
 -- ring without chat (digests every 5 min — don't spam the player)
@@ -476,6 +477,7 @@ local function ClassFileFromLocalized(classStr)
 end
 
 -- shared record/upsert
+local QueuePeerNew -- assigned below; only local discoveries may call it
 local function UpsertPlayer(db, data)
     local key = data.key
     if not key then return false end
@@ -512,6 +514,7 @@ local function UpsertPlayer(db, data)
                 data.level and (L("LVL_PREFIX") .. data.level) or "?",
                 data.zone or "?"))
         end
+        if data.source ~= "peer" and QueuePeerNew then QueuePeerNew(db, data) end
         return true
     end
     if nowT - (entry.lastSeen or 0) > REAP_SECONDS then
@@ -535,6 +538,116 @@ local function UpsertPlayer(db, data)
     end
     entry.guid = entry.guid or data.guid
     return false
+end
+
+-- Opt-in, realm-local peer exchange. Received records never re-enter the queue.
+local PEER_CHANNEL = "nearbyspydata"
+local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
+local peerQueue, peerQueued, peerSent = {}, {}, {}
+local peerIncoming = {start = 0, count = 0}
+local lastPeerSend = 0
+local peerStats = {sent = 0, received = 0, dropped = 0}
+local function PeerField(s, maxLen)
+    return type(s) == "string" and #s > 0 and #s <= maxLen
+        and not s:find("[%c|;]")
+end
+
+QueuePeerNew = function(db, data)
+    if not db.peerEnabled or not PeerField(data.name, 60)
+        or not PeerField(data.realm, 100) or not PeerField(db.game, 16)
+        or not PeerField(data.class, 32) then return end
+    local level = tonumber(data.level)
+    if not level or level < 1 or level > 80 or level % 1 ~= 0 then return end
+    if not data.class:match("^[A-Z]+$") then return end
+    local race = PeerField(data.race, 32) and data.race:match("^[A-Za-z]+$") and data.race or "?"
+    local faction = (data.faction == "Alliance" or data.faction == "Horde") and data.faction or "?"
+    local key = db.game .. "|" .. data.key
+    if peerSent[key] or peerQueued[key] then return end
+    local payload = table.concat({"N2", db.game, data.realm, data.name,
+        data.class, tostring(level), race, faction}, ";")
+    if #payload > 220 then return end
+    if #peerQueue >= PEER_QUEUE_MAX then
+        local old = table.remove(peerQueue, 1)
+        peerQueued[old.key] = nil
+        peerStats.dropped = peerStats.dropped + 1
+    end
+    peerQueue[#peerQueue + 1] = {key = key, payload = payload, at = time()}
+    peerQueued[key] = true
+end
+
+local function DrainPeerQueue()
+    local db = GetDB()
+    if not db.peerEnabled or #peerQueue == 0 then return end
+    local nowT = time()
+    if nowT - lastPeerSend < PEER_GAP then return end
+    while #peerQueue > 0 and nowT - peerQueue[1].at > PEER_TTL do
+        local old = table.remove(peerQueue, 1)
+        peerQueued[old.key] = nil
+        peerStats.dropped = peerStats.dropped + 1
+    end
+    if #peerQueue == 0 then return end
+    local channel = GetChannelName(PEER_CHANNEL)
+    if not channel or channel == 0 then return end
+    -- The beta may require a hardware input event for sending channel chat.
+    local send = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
+    if not send then return end
+    local item = peerQueue[1]
+    local ok, result = pcall(send, item.payload, "CHANNEL", nil, channel)
+    if not ok or result == false then
+        db.debug.peerSendError = tostring(result):sub(1, 150)
+        return
+    end
+    table.remove(peerQueue, 1)
+    peerQueued[item.key] = nil
+    peerSent[item.key] = true
+    lastPeerSend = nowT
+    peerStats.sent = peerStats.sent + 1
+    db.debug.peerSendError = nil
+end
+
+local function ReceivePeerMessage(message, sender)
+    local db = GetDB()
+    if not db.peerEnabled or type(message) ~= "string" or #message > 220
+        or (canaccessvalue and not canaccessvalue(message)) then return end
+    if type(sender) ~= "string" or (canaccessvalue and not canaccessvalue(sender))
+        or not PeerField(sender, 120) then return end
+    local nowT = time()
+    if nowT - peerIncoming.start >= 60 then
+        peerIncoming.start, peerIncoming.count = nowT, 0
+    end
+    peerIncoming.count = peerIncoming.count + 1
+    if peerIncoming.count > 120 then return end
+    local fields = {}
+    for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
+    if #fields ~= 8 or fields[1] ~= "N2" or fields[2] ~= db.game
+        or fields[3] ~= PlayerRealm() then return end
+    local realm, name, class = fields[3], fields[4], fields[5]
+    if not PeerField(name, 60) or not PeerField(realm, 100)
+        or not class:match("^[A-Z]+$") or #class > 32 then return end
+    local level = tonumber(fields[6])
+    if not level or level < 1 or level > 80 or level % 1 ~= 0 then return end
+    local race = fields[7]
+    if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return end
+    local faction = fields[8]
+    if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return end
+    if UpsertPlayer(db, {key = name .. "-" .. realm, name = name, realm = realm,
+        class = class, level = level, race = race ~= "?" and race or nil,
+        faction = faction ~= "?" and faction or nil, source = "peer", silent = true}) then
+        peerStats.received = peerStats.received + 1
+    end
+end
+
+local function JoinPeerChannel()
+    if not GetDB().peerEnabled then return end
+    if GetChannelName(PEER_CHANNEL) == 0 then
+        JoinChannelByName(PEER_CHANNEL, nil, nil, false)
+    end
+    if ChatFrame_RemoveChannel then
+        for i = 1, 10 do
+            local chat = _G["ChatFrame" .. i]
+            if chat then ChatFrame_RemoveChannel(chat, PEER_CHANNEL) end
+        end
+    end
 end
 
 -- Race -> faction (file keys from UnitRace: Human, Orc, ...)
@@ -1134,6 +1247,7 @@ local function HandleWhoList()
     local ownZone = PlayerZone()
     local ownZoneId = PlayerZoneId()
     for i = 1, num do
+        local okRow, errRow = pcall(function()
         local okI, info = pcall(C_FriendList.GetWhoInfo, i)
         if okI and info and info.fullName then
             -- one-time dump of raw /who entry fields into debug (beta field diagnostics)
@@ -1178,6 +1292,8 @@ local function HandleWhoList()
                 added = added + 1
             end
         end
+        end)
+        if not okRow then DbgErr("whoRow", errRow) end
     end
     db.debug.whoAdded = (db.debug.whoAdded or 0) + added
     -- hide the Who window only after our own scan, with a human-like delay
@@ -1229,32 +1345,18 @@ local function HandleWhoList()
     end
 end
 
--- Nameplates: nameplateShowEnemies/ShowAll exist in the beta, nameplateShowFriends
--- does not (GetCVar returns nil). Non-existent CVars are never touched at all.
+-- Observe nameplate CVars for diagnostics; never change a player's settings.
 local NAMEPLATE_CVARS = { "nameplateShowFriends", "nameplateShowEnemies", "nameplateShowAll" }
 
-local function EnsureNameplates(db, announceFix)
+local function EnsureNameplates(db)
     for _, cvar in ipairs(NAMEPLATE_CVARS) do
         local ok, value = pcall(GetCVar, cvar)
         if not ok then
             db.debug.cvarErr = (db.debug.cvarErr or 0) + 1
         else
             db.debug["cv_" .. cvar] = tostring(value)
-            if value ~= nil and value ~= "1" then
-                local okS = pcall(SetCVar, cvar, "1")
-                if okS then
-                    local okR, after = pcall(GetCVar, cvar)
-                    if okR then db.debug["cv_" .. cvar .. "_after"] = tostring(after) end
-                    db.debug.nsfFixed = (db.debug.nsfFixed or 0) + 1
-                    if announceFix then
-                        P(L("CVAR_FIX"):format(cvar))
-                    end
-                end
-            end
         end
     end
-    -- backward compatibility with the 1.1/1.2 debug field
-    db.debug.nsf = db.debug.cv_nameplateShowFriends
 end
 
 local function ScanNameplates()
@@ -1285,7 +1387,7 @@ local function ScheduleTick()
             db.debug.scanErr = (db.debug.scanErr or 0) + 1
         end
         if (db.debug.ticks % 15) == 0 then
-            EnsureNameplates(db, false)
+            EnsureNameplates(db)
         end
         if (db.debug.ticks % (GUILD_REFRESH / TICK_SECONDS)) == 0 then
             RequestGuildRoster()
@@ -1316,7 +1418,7 @@ local function DebugSummary(db)
     local d = db.debug or {}
     local age = d.lastTickAt and (time() - d.lastTickAt) or -1
     return ("ticks: %d (last %ds ago), plates/players in tick: %s/%s, " ..
-           "PLATE_ADDED events: %d, CVar: friends=%s enemies=%s all=%s (fixes %d), " ..
+           "PLATE_ADDED events: %d, CVar: friends=%s enemies=%s all=%s, " ..
            "/who: sent %d, last list %d, new %d, who errors %d, scan/CVar errors %d/%d, " ..
            "tokens: %s%s%s (%s, locale %s)"):format(
         d.ticks or 0, age < 0 and 9999 or age,
@@ -1325,7 +1427,6 @@ local function DebugSummary(db)
         tostring(d.cv_nameplateShowFriends or "?"),
         tostring(d.cv_nameplateShowEnemies or "?"),
         tostring(d.cv_nameplateShowAll or "?"),
-        d.nsfFixed or 0,
         d.whoSent or 0, d.whoResults or 0, d.whoAdded or 0, d.whoErr or 0,
         d.scanErr or 0, d.cvarErr or 0,
         WHO_TOKEN_ZONE, WHO_TOKEN_CLASS, WHO_TOKEN_RACE, WHO_TOKEN_SRC, GetLocale())
@@ -1504,6 +1605,79 @@ local function ShowCopyWindow()
     end
 end
 
+-- Command help is a separate, read-only window; never put help into an EditBox.
+local HELP_COMMANDS = {
+    "/nspy [show]", "/nspy help", "/nspy export", "/nspy suggest",
+    "/nspy who", "/nspy whoclass", "/nspy whorace", "/nspy whostop",
+    "/nspy count", "/nspy announce", "/nspy debug",
+    "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy reset",
+}
+local HELP_TEXT = {
+    enUS = {"Player window", "This command list", "Copy the local database", "Assisted /who: you click search; repeat to stop", "Start a wide /who scan", "Scan by class", "Scan by race", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database"},
+    zhCN = {"玩家窗口", "命令列表", "复制本地数据库", "辅助 /who：点击搜索；再次输入可停止", "启动广域 /who 扫描", "按职业扫描", "按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库"},
+    ruRU = {"Окно игроков", "Список команд", "Скопировать локальную базу", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий скан /who", "Скан по классам", "Скан по расам", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Lokale Datenbank kopieren", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breiten /who-Scan starten", "Nach Klasse scannen", "Nach Volk scannen", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "Copier la base locale", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "Lancer un scan /who large", "Scanner par classe", "Scanner par race", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs"},
+    koKR = {"플레이어 창", "명령어 목록", "로컬 데이터베이스 복사", "보조 /who: 검색 클릭, 다시 입력하면 중지", "전체 /who 스캔 시작", "직업별 스캔", "종족별 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제"},
+}
+local helpWin
+local function ShowHelpWindow()
+    if not helpWin then
+        helpWin = CreateFrame("Frame", "NearbySpyHelpWindow", UIParent)
+        helpWin:SetSize(670, 445)
+        helpWin:SetPoint("CENTER")
+        helpWin:SetFrameStrata("DIALOG")
+        helpWin:SetMovable(true)
+        helpWin:EnableMouse(true)
+        helpWin:RegisterForDrag("LeftButton")
+        helpWin:SetScript("OnDragStart", helpWin.StartMoving)
+        helpWin:SetScript("OnDragStop", helpWin.StopMovingOrSizing)
+        helpWin:EnableKeyboard(true)
+        helpWin:SetScript("OnKeyDown", function(_, key)
+            if key == "ESCAPE" then
+                helpWin:SetPropagateKeyboardInput(false)
+                helpWin:Hide()
+            else
+                helpWin:SetPropagateKeyboardInput(true)
+            end
+        end)
+        local bg = helpWin:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.05, 0.05, 0.08, 0.96)
+        local title = NewText(helpWin, 16, 0.4, 1, 0.6)
+        title:SetPoint("TOPLEFT", 16, -14)
+        title:SetText("NearbySpy — /nspy help  (/nearbyspy)")
+        local okClose, close = pcall(CreateFrame, "Button", nil, helpWin, "UIPanelCloseButton")
+        if okClose and close then
+            close:SetPoint("TOPRIGHT", -6, -6)
+            close:SetScript("OnClick", function() helpWin:Hide() end)
+        else
+            local btn = CreateFrame("Button", nil, helpWin)
+            btn:SetSize(26, 26)
+            btn:SetPoint("TOPRIGHT", -8, -8)
+            local label = NewText(btn, 16, 1, 0.4, 0.4)
+            label:SetPoint("CENTER")
+            label:SetText("X")
+            btn:SetScript("OnClick", function() helpWin:Hide() end)
+        end
+        local descriptions = HELP_TEXT[GetLocale()] or HELP_TEXT.enUS
+        for i, command in ipairs(HELP_COMMANDS) do
+            local y = -49 - (i - 1) * 25
+            local cmd = NewText(helpWin, 12, 0.5, 1, 0.6)
+            cmd:SetPoint("TOPLEFT", 16, y)
+            cmd:SetWidth(155)
+            cmd:SetJustifyH("LEFT")
+            cmd:SetText(command)
+            local desc = NewText(helpWin, 12, 0.9, 0.9, 0.9)
+            desc:SetPoint("TOPLEFT", 178, y)
+            desc:SetWidth(475)
+            desc:SetJustifyH("LEFT")
+            desc:SetText(descriptions[i])
+        end
+    end
+    helpWin:Show()
+end
+
 -- Main window: the pretty list
 local win, winList, winSummary, winSummary2, winSummary3, winSummary4
 local levelBars, classRows, chartLabel, chartFrame  -- window charts
@@ -1642,6 +1816,7 @@ end
 -- call fixes it; duplicates are safe (idempotent SetText).
 local function UpdateWindowUI()
     local ok, err = pcall(function()
+        local db = GetDB()
         winSummary:SetText(L("WIN_TOTAL"):format(
             CountPlayers(), newThisSession))
         local st = WinStats()
@@ -1891,6 +2066,9 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     local db = GetDB()
     if msg == "" or msg == "show" then
         ShowWindow()
+    elseif msg == "help" then
+        local ok, err = pcall(ShowHelpWindow)
+        if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
     elseif msg == "export" then
         ShowCopyWindow()
     elseif msg == "who" or msg == "whoclass" or msg == "whorace" then
@@ -1938,12 +2116,28 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         -- announcements and errors. Everything goes to the SV ring in both modes.
         db.debugMode = not db.debugMode
         P(db.debugMode and L("DEBUG_ON") or L("DEBUG_OFF"))
+    elseif msg == "peer on" then
+        db.peerEnabled = true
+        local ok, err = pcall(JoinPeerChannel)
+        if not ok then DbgErr("peerJoin", err) end
+        P("Peer sharing enabled (channel: " .. PEER_CHANNEL .. "). Sends only new, detailed encounters.")
+    elseif msg == "peer off" then
+        db.peerEnabled = false
+        peerQueue, peerQueued = {}, {}
+        if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
+        P("Peer sharing disabled.")
+    elseif msg == "peer" then
+        P(("Peer %s: channel=%s, queued=%d, sent=%d, received=%d, dropped=%d%s"):format(
+            db.peerEnabled and "on" or "off", tostring(GetChannelName(PEER_CHANNEL)),
+            #peerQueue, peerStats.sent, peerStats.received, peerStats.dropped,
+            db.debug.peerSendError and (", error=" .. db.debug.peerSendError) or ""))
     elseif msg == "reset" then
         db.players = {}
         newThisSession = 0
         P(L("DB_CLEARED"))
     else
-        P(L("CMDS"))
+        local ok, err = pcall(ShowHelpWindow)
+        if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
     end
 end
 
@@ -1963,6 +2157,25 @@ end
 local chatFrame = CreateFrame("Frame")
 local chatSampled = 0
 local CHAT_SAMPLE_MAX = 15
+local function IsPeerChannel(channelName)
+    if type(channelName) ~= "string" or (canaccessvalue and not canaccessvalue(channelName)) then return false end
+    channelName = channelName:lower()
+    return channelName == PEER_CHANNEL or
+        channelName:match("^%d+%. " .. PEER_CHANNEL .. "$") ~= nil
+end
+-- Hide only our data messages, never suppress channel notices or other channels.
+local addMessageFilter = ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter or ChatFrame_AddMessageEventFilter
+if addMessageFilter then
+    addMessageFilter("CHAT_MSG_CHANNEL", function(_, _, _, _, _, channelName, _, _, _, _, rawChannel)
+        return IsPeerChannel(rawChannel) or IsPeerChannel(channelName)
+    end)
+end
+if WorldFrame and WorldFrame.HookScript then
+    WorldFrame:HookScript("OnMouseDown", function()
+        local ok, err = pcall(DrainPeerQueue)
+        if not ok then DbgErr("peerSend", err) end
+    end)
+end
 chatFrame:RegisterEvent("CHAT_MSG_SAY")
 chatFrame:RegisterEvent("CHAT_MSG_YELL")
 chatFrame:RegisterEvent("CHAT_MSG_CHANNEL")
@@ -1975,8 +2188,17 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
     -- function can't see the outer `...` — Lua 5.1 (client) raises the compile
     -- error "cannot use '...' outside a vararg function", luaparser missed that.
     local okP, errP = pcall(function(ev, ...)
+        if ev == "CHAT_MSG_CHANNEL" and
+            (IsPeerChannel(select(9, ...)) or IsPeerChannel(select(4, ...))) then
+            ReceivePeerMessage(select(1, ...), select(2, ...))
+            return -- peer speaker is not a new encounter; no rebroadcast
+        end
         local speaker = select(2, ...)
-        if type(speaker) ~= "string" or speaker == "" then return end
+        if type(speaker) ~= "string" or speaker == "" or
+            (canaccessvalue and not canaccessvalue(speaker)) then return end
+        local me, surname = UnitName("player")
+        if me and (speaker == me or (surname and surname ~= "" and speaker == me .. " " .. surname)
+            or speaker == me .. "-" .. PlayerRealm()) then return end
         local db = GetDB()
         -- debug dump of the first events: speaker position verified on the live client
         if chatSampled < CHAT_SAMPLE_MAX then
@@ -2024,6 +2246,7 @@ frame:RegisterEvent("WHO_LIST_UPDATE")
 frame:RegisterEvent("UI_ERROR_MESSAGE")
 frame:RegisterEvent("UI_INFO_MESSAGE")
 frame:RegisterEvent("CHAT_MSG_SYSTEM")
+frame:RegisterEvent("HARDCORE_DEATHS")
 frame:RegisterEvent("ADDON_ACTION_BLOCKED")
 frame:RegisterEvent("ADDON_ACTION_FORBIDDEN")
 frame:RegisterEvent("MACRO_ACTION_BLOCKED")
@@ -2037,9 +2260,13 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         end
     elseif event == "PLAYER_LOGIN" then
         local db = GetDB()
-        EnsureNameplates(db, true)
+        EnsureNameplates(db)
         ScheduleTick()
-        P(L("STARTUP"):format(CountPlayers()))
+        if db.peerEnabled then
+            local ok, err = pcall(JoinPeerChannel)
+            if not ok then DbgErr("peerJoin", err) end
+        end
+        D(L("STARTUP"):format(CountPlayers()))
         RequestGuildRoster()
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         local db = GetDB()
@@ -2086,6 +2313,9 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         end
     elseif event == "LUA_WARNING" then
         D(("LUA_WARNING: %s | %s"):format(tostring(arg1), tostring(arg2)))
+    elseif event == "HARDCORE_DEATHS" then
+        local okE, errE = pcall(RecordHardcoreDeath, arg1)
+        if not okE then DbgErr("hardcoreDeaths", errE) end
     elseif event == "CHAT_MSG_SYSTEM" then
         -- custom server messages ("Интересная операция…") arrive via system chat
         LogSysMsg("sys", arg1)

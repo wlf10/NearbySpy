@@ -22,9 +22,9 @@
 **NearbySpy** is a lightweight, passive player-recording addon built for
 **World of Warcraft: Forever**. It quietly keeps a local
 database of every player you meet — in the open world, in your group, in your
-guild roster and in chat — and periodically contributes anonymous statistics
-(name, class, level, zone, realm) to RealmPulse, a public demographics project
-for the Forever server (link at the bottom of this page).
+guild roster and in chat. You can export observations (including names) to
+RealmPulse, a public demographics project for the Forever server (link at the
+bottom of this page). The addon does not upload them automatically.
 
 ### Features
 
@@ -36,8 +36,9 @@ for the Forever server (link at the bottom of this page).
 - Full localization: English (default), Simplified Chinese, Russian, German,
   French and Korean UI (the bundled font includes Cyrillic; zhCN/koKR clients
   use the client's native fonts)
-- Zero network traffic except the periodic stats upload
-- No passwords, no coordinates, no personal data — see the Privacy section
+- Optional peer sharing (`/nspy peer on`): sends newly encountered players with
+  a known class and level to other NearbySpy users on the same realm; off by default
+- No passwords or account data — the Privacy section lists what is stored and shared
 
 ### Installation
 
@@ -54,12 +55,27 @@ Full illustrated instructions in your language are on the RealmPulse site
 - `/nspy count` — counters and debug totals
 - `/nspy suggest` — prepare a zone `/who` query for review
 - `/nspy debug` — toggle verbose chat logging (off by default)
+- `/nspy help` — open the full in-game command reference
+- `/nspy peer on|off` — opt in/out of realm-local peer exchange; `/nspy peer` — status
 
 ### Privacy
 
-Only the name, class, level, zone and realm of *encountered* players is
-collected. Names read from chat channels also enter the database — if that is
-unwanted for you, simply don't use the addon.
+Only the name, class, level, zone, realm, faction and race of *encountered*
+players is stored, together with the approximate coordinates of your own
+position at the time of the encounter (used to resolve the zone) and first /
+last seen timestamps. Names read from chat channels also enter the database —
+if that is unwanted for you, simply don't use the addon.
+
+The addon does not upload to a web server. Peer sharing is off by default.
+If you enable it with `/nspy peer on`, the addon joins an in-game channel
+(`nearbyspydata`) and queues only *new local records with known class and level*.
+It sends name, realm, game, class, level, race and faction, one message per
+mouse click and at most one per 10 seconds. It does not send coordinates, chat
+text or subsequent updates. The channel's messages are hidden from ordinary
+chat windows, but channel membership and traffic are not private from other
+members or the game server. Received records are not retransmitted. Other
+members may submit inaccurate records. `/nspy peer off` leaves the channel.
+With sharing off, your database stays in SavedVariables until you export it.
 
 ### License
 

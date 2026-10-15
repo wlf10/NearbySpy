@@ -2,7 +2,8 @@
 
 A WoW addon that passively records **players you encounter** into SavedVariables.
 Install and play — nothing to click. You export the data yourself and feed the
-statistics site (RealmPulse, wow.bitwolff.com); the addon never uploads anything.
+statistics site (RealmPulse, wow.bitwolff.com); the addon never uploads anything
+to a web server. Optional in-game peer sharing is off by default.
 
 ## What it does
 
@@ -43,19 +44,35 @@ Your only job is clicking the search button — no typing required.
 1. Copy the `NearbySpy` folder into `World of Warcraft/_classic_beta_/Interface/AddOns/`.
 2. Enable the addon on the character select screen (if flagged "out of date" —
    tick "Load out of date add-ons").
-3. Enter the game — chat shows `NearbySpy: started, N players in db`.
+3. Enter the game — no startup chat message unless debug mode is enabled.
+   Existing `announce` settings are preserved; `/nspy announce` toggles encounter messages.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `/nspy` (or `/nearbyspy`) | window listing recorded players |
+| `/nspy help` | in-game command reference window |
 | `/nspy suggest` | assisted /who mode: the addon types the query, you click search |
 | `/nspy export` (or the Copy button) | raw data window (Ctrl+A, Ctrl+C) |
 | `/nspy count` | counters + debug summary |
 | `/nspy announce` | toggle "first seen nearby" chat messages |
 | `/nspy debug` | debug mode: on → logs (digests, scan progress, gate blocks) in chat; off → stealth mode, logs only to the SV ring |
+| `/nspy peer on` / `off` | opt in/out of same-realm in-game channel sharing; off by default |
+| `/nspy peer` | channel and queue status |
 | `/nspy reset` | clear the database |
+
+## In-game peer sharing (optional)
+
+`/nspy peer on` joins `nearbyspydata` on the current realm. Only the first
+locally discovered record with a known class and level is queued; subsequent
+updates and records received from peers are not sent. Each message contains
+game, realm, name, class, level, race and faction — not coordinates or chat text.
+Queue limit: 60; age limit: 120 seconds; at most one send per 10 seconds,
+on a mouse click. Messages are hidden from ordinary chat windows but visible
+to channel members and the game server. Peer data is untrusted and can be
+inaccurate. `/nspy peer off` leaves the channel and clears the pending queue.
+There is no web-server upload and no cross-realm sync.
 
 ## Sharing the data
 
