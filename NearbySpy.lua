@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.2.1
+    NearbySpy 1.2.2
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -50,16 +50,12 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "throttle pause: %ds — the server complained recently",
         ERR_QUEUE_EMPTY = "queue is empty (no names to filter)",
         WHO_FACTION_COVER = "/who sees only the %s faction — full coverage needs a scan on a character of each faction",
-        EXPORT_TITLE = "NearbySpy - export (raw data)",
-        EXPORT_HINT = "Click the text -> Ctrl+A, Ctrl+C; Esc or × to close",
-        ERR_EXPORT = "export window ERROR: ",
         ERR_LIST = "list ERROR: ",
         ERR_WINDOW = "window ERROR: ",
         TIME_NOW = "just now", TIME_MIN = "%d min ago", TIME_HOUR = "%d h ago",
         SRC_LINE = "Sources: ",
         CHART_LABEL = "Levels 1–60: %d with a level · peak %d players at lvl %d · avg %.1f",
         CHART_EMPTY = "Levels 1–60: no data",
-        BTN_COPY = "Copy",
         WIN_HINT = "Esc - close · /nspy count - stats · /nspy who - zone scan",
         UI_SUBTITLE = "LIVE SERVER INTELLIGENCE",
         UI_DETECTED = "DETECTED", UI_ACTIVE5 = "ACTIVE ≤ 5 MIN", UI_FACTIONS = "FACTIONS",
@@ -93,16 +89,12 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "限流暂停: %d秒 —— 服务器最近发出过限制警告",
         ERR_QUEUE_EMPTY = "队列为空（没有可过滤的名字）",
         WHO_FACTION_COVER = "/who 只能看到%s阵营 —— 完整覆盖需要在每个阵营的角色上扫描",
-        EXPORT_TITLE = "NearbySpy - 导出（原始数据）",
-        EXPORT_HINT = "点击文本 -> Ctrl+A, Ctrl+C；Esc 或 × 关闭",
-        ERR_EXPORT = "导出窗口错误: ",
         ERR_LIST = "列表错误: ",
         ERR_WINDOW = "窗口错误: ",
         TIME_NOW = "刚刚", TIME_MIN = "%d分钟前", TIME_HOUR = "%d小时前",
         SRC_LINE = "数据来源: ",
         CHART_LABEL = "等级 1–60: 有等级的%d名 · %d级最多%d名玩家 · 平均%.1f",
         CHART_EMPTY = "等级 1–60: 暂无数据",
-        BTN_COPY = "复制",
         WIN_HINT = "Esc - 关闭 · /nspy count - 统计 · /nspy who - 区域扫描",
         UI_SUBTITLE = "实时服务器情报",
         UI_DETECTED = "已发现", UI_ACTIVE5 = "5分钟内活跃", UI_FACTIONS = "阵营",
@@ -136,16 +128,12 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "пауза троттла: %dс — сервер недавно ругался",
         ERR_QUEUE_EMPTY = "очередь пуста (нет имён для фильтра)",
         WHO_FACTION_COVER = "who видит только фракцию %s — полное покрытие: скан под персонажем каждой фракции",
-        EXPORT_TITLE = "NearbySpy - экспорт (сырые данные)",
-        EXPORT_HINT = "Клик по тексту -> Ctrl+A, Ctrl+C; Esc или × - закрыть",
-        ERR_EXPORT = "ОШИБКА окна экспорта: ",
         ERR_LIST = "ОШИБКА списка: ",
         ERR_WINDOW = "ОШИБКА окна: ",
         TIME_NOW = "только что", TIME_MIN = "%d мин назад", TIME_HOUR = "%d ч назад",
         SRC_LINE = "Кто кормит: ",
         CHART_LABEL = "Уровни 1–60: всего с уровнем %d · макс %d игроков ур. %d · ср. %.1f",
         CHART_EMPTY = "Уровни 1–60: данных нет",
-        BTN_COPY = "Копировать",
         WIN_HINT = "Esc - закрыть · /nspy count - статистика · /nspy who - скан зоны",
         UI_SUBTITLE = "РАЗВЕДКА СЕРВЕРА В РЕАЛЬНОМ ВРЕМЕНИ",
         UI_DETECTED = "ОБНАРУЖЕНО", UI_ACTIVE5 = "АКТИВНЫ ≤ 5 МИН", UI_FACTIONS = "ФРАКЦИИ",
@@ -179,16 +167,12 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "Drossel-Pause: %ds — der Server hat sich kürzlich beschwert",
         ERR_QUEUE_EMPTY = "Warteschlange ist leer (keine Namen zum Filtern)",
         WHO_FACTION_COVER = "/who sieht nur die Fraktion %s — volle Abdeckung: Scan mit einem Charakter jeder Fraktion",
-        EXPORT_TITLE = "NearbySpy - Export (Rohdaten)",
-        EXPORT_HINT = "Text anklicken -> Strg+A, Strg+C; Esc oder × zum Schließen",
-        ERR_EXPORT = "Exportfenster-FEHLER: ",
         ERR_LIST = "Listen-FEHLER: ",
         ERR_WINDOW = "Fenster-FEHLER: ",
         TIME_NOW = "gerade eben", TIME_MIN = "vor %d Min", TIME_HOUR = "vor %d Std",
         SRC_LINE = "Quellen: ",
         CHART_LABEL = "Stufen 1–60: %d mit Stufe · max %d Spieler auf Stufe %d · Ø %.1f",
         CHART_EMPTY = "Stufen 1–60: keine Daten",
-        BTN_COPY = "Kopieren",
         WIN_HINT = "Esc - schließen · /nspy count - Statistik · /nspy who - Zonenscan",
         UI_SUBTITLE = "LIVE-SERVER-AUFKLÄRUNG",
         UI_DETECTED = "ENTDECKT", UI_ACTIVE5 = "AKTIV ≤ 5 MIN", UI_FACTIONS = "FRAKTIONEN",
@@ -222,16 +206,12 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "pause de limitation : %ds — le serveur a râlé récemment",
         ERR_QUEUE_EMPTY = "file vide (aucun nom à filtrer)",
         WHO_FACTION_COVER = "/who ne voit que la faction %s — couverture complète : scan avec un personnage de chaque faction",
-        EXPORT_TITLE = "NearbySpy - export (données brutes)",
-        EXPORT_HINT = "Clique sur le texte -> Ctrl+A, Ctrl+C ; Échap ou × pour fermer",
-        ERR_EXPORT = "ERREUR fenêtre d'export : ",
         ERR_LIST = "ERREUR liste : ",
         ERR_WINDOW = "ERREUR fenêtre : ",
         TIME_NOW = "à l'instant", TIME_MIN = "il y a %d min", TIME_HOUR = "il y a %d h",
         SRC_LINE = "Sources : ",
         CHART_LABEL = "Niveaux 1–60 : %d avec niveau · max %d joueurs niv. %d · moy. %.1f",
         CHART_EMPTY = "Niveaux 1–60 : aucune donnée",
-        BTN_COPY = "Copier",
         WIN_HINT = "Échap - fermer · /nspy count - stats · /nspy who - scan de zone",
         UI_SUBTITLE = "RENSEIGNEMENT SERVEUR EN DIRECT",
         UI_DETECTED = "DÉTECTÉS", UI_ACTIVE5 = "ACTIFS ≤ 5 MIN", UI_FACTIONS = "FACTIONS",
@@ -265,16 +245,12 @@ local LOCALE = {
         ERR_THROTTLE_PAUSE = "제한 일시 중지: %d초 — 서버가 최근에 경고함",
         ERR_QUEUE_EMPTY = "대기열이 비어 있음 (필터링할 이름 없음)",
         WHO_FACTION_COVER = "/who 는 %s 진영만 볼 수 있음 — 전체 커버리지: 각 진영 캐릭터로 스캔",
-        EXPORT_TITLE = "NearbySpy -보내기 (원시 데이터)",
-        EXPORT_HINT = "텍스트 클릭 -> Ctrl+A, Ctrl+C; Esc 또는 × 닫기",
-        ERR_EXPORT = "보내기 창 오류: ",
         ERR_LIST = "목록 오류: ",
         ERR_WINDOW = "창 오류: ",
         TIME_NOW = "방금", TIME_MIN = "%d분 전", TIME_HOUR = "%d시간 전",
         SRC_LINE = "데이터 출처: ",
         CHART_LABEL = "레벨 1–60: 레벨 있는 %d명 · 최다 %d명 %d레벨 · 평균 %.1f",
         CHART_EMPTY = "레벨 1–60: 데이터 없음",
-        BTN_COPY = "복사",
         WIN_HINT = "Esc - 닫기 · /nspy count - 통계 · /nspy who - 지역 스캔",
         UI_SUBTITLE = "실시간 서버 정보",
         UI_DETECTED = "발견", UI_ACTIVE5 = "5분 내 활동", UI_FACTIONS = "진영",
@@ -1455,30 +1431,6 @@ local function SortedPlayers(db)
     return list
 end
 
-local function BuildExportText()
-    local db = GetDB()
-    local lines = {
-        "#name-realm|class|level|faction|zone|count|firstSeen|lastSeen|x,y|source",
-    }
-    for _, p in ipairs(SortedPlayers(db)) do
-        lines[#lines + 1] = string.format(
-            "%s-%s|%s|%s|%s|%s|%d|%s|%s|%s|%s",
-            p.name or "?",
-            p.realm or "?",
-            p.class or "?",
-            tostring(p.level or "?"),
-            p.faction or "?",
-            p.zone or "?",
-            p.count or 1,
-            p.firstSeen and date("%Y-%m-%d %H:%M", p.firstSeen) or "?",
-            p.lastSeen and date("%Y-%m-%d %H:%M", p.lastSeen) or "?",
-            (p.x and p.y) and string.format("%.4f,%.4f", p.x, p.y) or "?",
-            p.source or "unit"
-        )
-    end
-    return table.concat(lines, "\n")
-end
-
 -- ============ UI ============
 -- No GameFont objects: in the custom beta they may be missing/empty
 -- (the window renders, the text doesn't). Set the font explicitly by file
@@ -1530,107 +1482,20 @@ local function ClassColorRGB(classFile)
     return 1, 1, 1
 end
 
--- Copy window: separate, so the pretty list doesn't mix with the raw data
-local copyWin, copyEdit
-
-local function HideCopyWindow()
-    if copyWin then
-        if copyEdit then copyEdit:ClearFocus() end
-        copyWin:Hide()
-    end
-end
-
-local function BuildCopyWindow()
-    copyWin = CreateFrame("Frame", "NearbySpyCopyWindow", UIParent)
-    copyWin:SetSize(700, 480)
-    copyWin:SetPoint("CENTER")
-    copyWin:SetFrameStrata("TOOLTIP")
-    copyWin:SetMovable(true)
-    copyWin:EnableMouse(true)
-    copyWin:RegisterForDrag("LeftButton")
-    copyWin:SetScript("OnDragStart", copyWin.StartMoving)
-    copyWin:SetScript("OnDragStop", copyWin.StopMovingOrSizing)
-    copyWin:EnableKeyboard(true)
-    copyWin:SetScript("OnKeyDown", function(_, key)
-        if key == "ESCAPE" then
-            copyWin:SetPropagateKeyboardInput(false)
-            HideCopyWindow()
-        else
-            copyWin:SetPropagateKeyboardInput(true)
-        end
-    end)
-
-    local bg = copyWin:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.02, 0.02, 0.02, 0.95)
-
-    local title = NewText(copyWin, 16)
-    title:SetPoint("TOPLEFT", 14, -14)
-    title:SetText(L("EXPORT_TITLE"))
-
-    local okClose, close = pcall(CreateFrame, "Button", nil, copyWin, "UIPanelCloseButton")
-    if okClose and close then
-        close:SetPoint("TOPRIGHT", -6, -6)
-        close:SetScript("OnClick", HideCopyWindow)
-    end
-
-    local hint = NewText(copyWin, 11, 0.7, 0.7, 0.7)
-    hint:SetPoint("BOTTOMLEFT", 14, 10)
-    hint:SetText(L("EXPORT_HINT"))
-
-    local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, copyWin, "UIPanelScrollFrameTemplate")
-    if not okSf or not sf then
-        sf = CreateFrame("ScrollFrame", nil, copyWin)
-    end
-    sf:SetPoint("TOPLEFT", 12, -44)
-    sf:SetPoint("BOTTOMRIGHT", -30, 28)
-
-    -- No SetFocus()/HighlightText(): focus auto-grab on Show crashed the
-    -- client (assert CSimpleEditBox code 11). Focus is set only by the user
-    -- clicking inside the EditBox (EnableMouse=true).
-    local eb = CreateFrame("EditBox", nil, sf)
-    eb:SetMultiLine(true)
-    ApplyFont(eb, 12)
-    eb:SetTextColor(1, 1, 1, 1)
-    eb:SetAutoFocus(false)
-    eb:SetWidth(660)
-    eb:EnableMouse(true)
-    eb:SetScript("OnEscapePressed", HideCopyWindow)
-    sf:SetScrollChild(eb)
-    copyEdit = eb
-
-    copyWin:SetScript("OnShow", function()
-        copyEdit:SetText(BuildExportText())
-    end)
-end
-
-local function ShowCopyWindow()
-    local ok, err = pcall(function()
-        if not copyWin then
-            BuildCopyWindow()
-        end
-        copyEdit:SetText(BuildExportText())
-        copyWin:Show()
-    end)
-    if not ok then
-        P(L("ERR_EXPORT") .. tostring(err))
-    end
-end
-
 -- Command help is a separate, read-only window; never put help into an EditBox.
 local HELP_COMMANDS = {
-    "/nspy [show]", "/nspy help", "/nspy export", "/nspy suggest",
+    "/nspy [show]", "/nspy help", "/nspy suggest",
     "/nspy who", "/nspy whoclass", "/nspy whorace", "/nspy whostop",
     "/nspy count", "/nspy announce", "/nspy debug",
     "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy reset",
 }
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Copy the local database", "Assisted /who: you click search; repeat to stop", "Start a wide /who scan", "Scan by class", "Scan by race", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database"},
-    zhCN = {"玩家窗口", "命令列表", "复制本地数据库", "辅助 /who：点击搜索；再次输入可停止", "启动广域 /who 扫描", "按职业扫描", "按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库"},
-    ruRU = {"Окно игроков", "Список команд", "Скопировать локальную базу", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий скан /who", "Скан по классам", "Скан по расам", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Lokale Datenbank kopieren", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breiten /who-Scan starten", "Nach Klasse scannen", "Nach Volk scannen", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "Copier la base locale", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "Lancer un scan /who large", "Scanner par classe", "Scanner par race", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs"},
-    koKR = {"플레이어 창", "명령어 목록", "로컬 데이터베이스 복사", "보조 /who: 검색 클릭, 다시 입력하면 중지", "전체 /who 스캔 시작", "직업별 스캔", "종족별 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Start a wide /who scan", "Scan by class", "Scan by race", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "启动广域 /who 扫描", "按职业扫描", "按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий скан /who", "Скан по классам", "Скан по расам", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breiten /who-Scan starten", "Nach Klasse scannen", "Nach Volk scannen", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "Lancer un scan /who large", "Scanner par classe", "Scanner par race", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "전체 /who 스캔 시작", "직업별 스캔", "종족별 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제"},
 }
 local helpWin
 local function ShowHelpWindow()
@@ -2077,16 +1942,6 @@ local function BuildWindow()
     local hint = NewText(win, 9, 0.4, 0.36, 0.28)
     hint:SetPoint("BOTTOMLEFT", 17, 3)
     hint:SetText(L("WIN_HINT"))
-    local okBtn, copyBtn = pcall(CreateFrame, "Button", nil, win, "UIPanelButtonTemplate")
-    if okBtn and copyBtn then
-        copyBtn:SetSize(112, 24); copyBtn:SetPoint("BOTTOMRIGHT", -15, 9)
-        copyBtn:SetText(L("BTN_COPY"))
-    else
-        copyBtn = CreateFrame("Button", nil, win)
-        copyBtn:SetSize(112, 24); copyBtn:SetPoint("BOTTOMRIGHT", -15, 9)
-        local text = NewText(copyBtn, 10, 1, 0.82, 0.3); text:SetPoint("CENTER"); text:SetText(L("BTN_COPY"))
-    end
-    copyBtn:SetScript("OnClick", ShowCopyWindow)
     win:SetScript("OnShow", TacticalUpdate)
 end
 
@@ -2135,8 +1990,6 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     elseif msg == "help" then
         local ok, err = pcall(ShowHelpWindow)
         if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
-    elseif msg == "export" then
-        ShowCopyWindow()
     elseif msg == "who" or msg == "whoclass" or msg == "whorace" then
         local mode = ({ who = "level", whoclass = "class", whorace = "race" })[msg]
         local modeL = ({ level = L("MODE_LEVEL"), class = L("MODE_CLASS"), race = L("MODE_RACE") })[mode]

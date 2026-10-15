@@ -22,9 +22,10 @@
 **NearbySpy** is a lightweight, passive player-recording addon built for
 **World of Warcraft: Forever**. It quietly keeps a local
 database of every player you meet — in the open world, in your group, in your
-guild roster and in chat. You can export observations (including names) to
-RealmPulse, a public demographics project for the Forever server (link at the
-bottom of this page). The addon does not upload them automatically.
+guild roster and in chat. You can contribute your observations (including
+names) to RealmPulse, a public demographics project for the Forever server,
+by uploading your SavedVariables file on the site (link at the bottom of this
+page). The addon does not upload anything itself.
 
 ### Features
 
@@ -75,7 +76,8 @@ text or subsequent updates. The channel's messages are hidden from ordinary
 chat windows, but channel membership and traffic are not private from other
 members or the game server. Received records are not retransmitted. Other
 members may submit inaccurate records. `/nspy peer off` leaves the channel.
-With sharing off, your database stays in SavedVariables until you export it.
+With sharing off, your database stays in SavedVariables until you upload the
+file to the site yourself.
 
 ### License
 

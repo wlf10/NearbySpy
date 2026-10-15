@@ -1,9 +1,10 @@
 # NearbySpy
 
 A WoW addon that passively records **players you encounter** into SavedVariables.
-Install and play — nothing to click. You export the data yourself and feed the
-statistics site (RealmPulse, wow.bitwolff.com); the addon never uploads anything
-to a web server. Optional in-game peer sharing is off by default.
+Install and play — nothing to click. To feed the statistics site (RealmPulse,
+wow.bitwolff.com) upload your `SavedVariables/NearbySpy.lua` file there after
+logging out; the addon never uploads anything to a web server. Optional in-game
+peer sharing is off by default.
 
 ## What it does
 
@@ -54,7 +55,6 @@ Your only job is clicking the search button — no typing required.
 | `/nspy` (or `/nearbyspy`) | window listing recorded players |
 | `/nspy help` | in-game command reference window |
 | `/nspy suggest` | assisted /who mode: the addon types the query, you click search |
-| `/nspy export` (or the Copy button) | raw data window (Ctrl+A, Ctrl+C) |
 | `/nspy count` | counters + debug summary |
 | `/nspy announce` | toggle "first seen nearby" chat messages |
 | `/nspy debug` | debug mode: on → logs (digests, scan progress, gate blocks) in chat; off → stealth mode, logs only to the SV ring |
