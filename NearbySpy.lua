@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.2.2
+    NearbySpy 1.2.3
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -16,8 +16,9 @@
         server answers only a hardware click (hardware gate in C++, programmatic
         who is dead), so the addon types the query into the box and the user
         clicks the search button.
-    Commands: /nearbyspy (or /nspy) — window with the list,
-              /nspy suggest | count | who | announce | debug | reset
+    Commands: /nearbyspy (or /nspy) — window with the list; suggest/who/
+              whoclass/whorace — assisted /who (you click the search button),
+              count | announce | debug | peer | reset
 
 ]]
 
@@ -26,7 +27,6 @@ local ADDON_NAME = ...
 local PREFIX = "|cff33ff99NearbySpy|r: "
 local REAP_SECONDS = 600      -- an encounter after a longer pause = a new "visit" in the counter
 local TICK_SECONDS = 2
-local WHO_GAP = 45            -- base pause between scan queries, sec (+ random 0-30 — not a metronome)
 local WHO_CAP = 50            -- server limit of rows in a /who reply
 local MAX_ROWS = 500          -- how many rows we draw in the list (guard against giant databases)
 local GROUP_TROTTLE = 10      -- GROUP_ROSTER_UPDATE is spammy — pass no more often than this, sec
@@ -62,11 +62,7 @@ local LOCALE = {
         UI_CLASSES = "CLASSES", UI_ALL = "All", UI_FRESH = "Fresh", UI_NEW = "New", UI_NEW_SHORT = "new",
         UI_PLAYER = "PLAYER", UI_PROFILE = "PROFILE", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
         UI_FIRST = "First seen", UI_SOURCE = "Source", UI_ENCOUNTERS = "Encounters", UI_LIVE = "COLLECTING",
-        MODE_LEVEL = "wide + classes", MODE_CLASS = "by classes", MODE_RACE = "by races",
-        SCAN_STARTED = "%s scan started (%s), 45-75 sec pause between queries",
-        SCAN_FAILED = "scan did not start: ",
         SCAN_NOT_RUNNING = "no scan running",
-        SUGGEST_PROG_BLOCK = "programmatic scan running — /nspy whostop first",
         SUGGEST_STARTED = "suggest: typing queries into the who box — you only click the search button. Stop: /nspy suggest",
         SUGGEST_FAILED = "suggest did not start: ",
         COUNT = "total players: %d, new this session: %d, announcements: %s",
@@ -101,11 +97,7 @@ local LOCALE = {
         UI_CLASSES = "职业", UI_ALL = "全部", UI_FRESH = "最近", UI_NEW = "新增", UI_NEW_SHORT = "新增",
         UI_PLAYER = "玩家", UI_PROFILE = "资料", UI_ZONE = "区域", UI_CONTACT = "最后发现",
         UI_FIRST = "首次发现", UI_SOURCE = "来源", UI_ENCOUNTERS = "相遇次数", UI_LIVE = "正在收集",
-        MODE_LEVEL = "广域+职业", MODE_CLASS = "按职业", MODE_RACE = "按种族",
-        SCAN_STARTED = "%s扫描已启动（%s），查询间隔45-75秒",
-        SCAN_FAILED = "扫描未能启动: ",
         SCAN_NOT_RUNNING = "没有进行中的扫描",
-        SUGGEST_PROG_BLOCK = "程序扫描正在运行 —— 请先 /nspy whostop",
         SUGGEST_STARTED = "suggest: 正在将查询填入搜索框 —— 你只需点击搜索按钮。停止: /nspy suggest",
         SUGGEST_FAILED = "suggest 未能启动: ",
         COUNT = "玩家总数: %d，本次会话新增: %d，公告: %s",
@@ -140,11 +132,7 @@ local LOCALE = {
         UI_CLASSES = "КЛАССЫ", UI_ALL = "Все", UI_FRESH = "Свежие", UI_NEW = "Новые", UI_NEW_SHORT = "новых",
         UI_PLAYER = "ИГРОК", UI_PROFILE = "ПРОФИЛЬ", UI_ZONE = "ЗОНА", UI_CONTACT = "КОНТАКТ",
         UI_FIRST = "Первая встреча", UI_SOURCE = "Источник", UI_ENCOUNTERS = "Встреч", UI_LIVE = "СБОР АКТИВЕН",
-        MODE_LEVEL = "широкий + классы", MODE_CLASS = "по классам", MODE_RACE = "по расам",
-        SCAN_STARTED = "скан %s запущен (%s), пауза 45-75 сек между запросами",
-        SCAN_FAILED = "скан не ушёл: ",
         SCAN_NOT_RUNNING = "скан не идёт",
-        SUGGEST_PROG_BLOCK = "идёт программный скан — сначала /nspy whostop",
         SUGGEST_STARTED = "suggest: вписываю запросы в поле who — твоё дело только жать лупу. Стоп: /nspy suggest",
         SUGGEST_FAILED = "suggest не стартовал: ",
         COUNT = "всего игроков: %d, новых за сессию: %d, анонсы: %s",
@@ -179,11 +167,7 @@ local LOCALE = {
         UI_CLASSES = "KLASSEN", UI_ALL = "Alle", UI_FRESH = "Aktuell", UI_NEW = "Neu", UI_NEW_SHORT = "neu",
         UI_PLAYER = "SPIELER", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "KONTAKT",
         UI_FIRST = "Zuerst gesehen", UI_SOURCE = "Quelle", UI_ENCOUNTERS = "Begegnungen", UI_LIVE = "SAMMLUNG AKTIV",
-        MODE_LEVEL = "breit + Klassen", MODE_CLASS = "nach Klassen", MODE_RACE = "nach Völkern",
-        SCAN_STARTED = "%s-Scan gestartet (%s), 45-75 Sek Pause zwischen Anfragen",
-        SCAN_FAILED = "Scan nicht gestartet: ",
         SCAN_NOT_RUNNING = "kein Scan aktiv",
-        SUGGEST_PROG_BLOCK = "programmgesteuerter Scan läuft — zuerst /nspy whostop",
         SUGGEST_STARTED = "suggest: trage Anfragen ins Who-Feld ein — du klickst nur die Lupe. Stopp: /nspy suggest",
         SUGGEST_FAILED = "suggest nicht gestartet: ",
         COUNT = "Spieler gesamt: %d, neu diese Sitzung: %d, Ansagen: %s",
@@ -218,11 +202,7 @@ local LOCALE = {
         UI_CLASSES = "CLASSES", UI_ALL = "Tous", UI_FRESH = "Récents", UI_NEW = "Nouveaux", UI_NEW_SHORT = "nouveaux",
         UI_PLAYER = "JOUEUR", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
         UI_FIRST = "Première vue", UI_SOURCE = "Source", UI_ENCOUNTERS = "Rencontres", UI_LIVE = "COLLECTE ACTIVE",
-        MODE_LEVEL = "large + classes", MODE_CLASS = "par classes", MODE_RACE = "par races",
-        SCAN_STARTED = "scan %s lancé (%s), pause de 45-75 s entre les requêtes",
-        SCAN_FAILED = "scan non lancé : ",
         SCAN_NOT_RUNNING = "aucun scan en cours",
-        SUGGEST_PROG_BLOCK = "scan programmatique en cours — /nspy whostop d'abord",
         SUGGEST_STARTED = "suggest : je saisis les requêtes dans le champ who — tu n'as qu'à cliquer la loupe. Stop : /nspy suggest",
         SUGGEST_FAILED = "suggest non lancé : ",
         COUNT = "joueurs au total : %d, nouveaux cette session : %d, annonces : %s",
@@ -257,11 +237,7 @@ local LOCALE = {
         UI_CLASSES = "직업", UI_ALL = "전체", UI_FRESH = "최근", UI_NEW = "신규", UI_NEW_SHORT = "신규",
         UI_PLAYER = "플레이어", UI_PROFILE = "프로필", UI_ZONE = "지역", UI_CONTACT = "마지막 접촉",
         UI_FIRST = "최초 발견", UI_SOURCE = "출처", UI_ENCOUNTERS = "조우", UI_LIVE = "수집 중",
-        MODE_LEVEL = "광역+직업", MODE_CLASS = "직업별", MODE_RACE = "종족별",
-        SCAN_STARTED = "%s 스캔 시작 (%s), 요청 간 45-75초 간격",
-        SCAN_FAILED = "스캔 시작 실패: ",
         SCAN_NOT_RUNNING = "진행 중인 스캔 없음",
-        SUGGEST_PROG_BLOCK = "프로그램 스캔 진행 중 — 먼저 /nspy whostop",
         SUGGEST_STARTED = "suggest: 검색창에 쿼리를 입력합니다 — 돋보기 버튼만 클릭하세요. 중지: /nspy suggest",
         SUGGEST_FAILED = "suggest 시작 실패: ",
         COUNT = "전체 플레이어: %d, 이번 세션 신규: %d, 알림: %s",
@@ -829,19 +805,6 @@ local function MaxLevel()
     return 60
 end
 
--- Sending /who WITHOUT chat (user decision 07.10.2026: "let's do it without chat").
--- User observation 07.10.2026: SetText puts text into the Who box,
--- but the search does NOT start — the manual reference only works with the
--- window OPEN, while the addon just hides the window and clicks a dead button. So:
---   * before the enter/button paths, show the Who window and its parents;
---   * paths rotate by attempt number (PumpWhoQueue bumps q.retries):
---     1. box OnEnterPressed (equivalent of "type + Enter");
---     2. button click (equivalent of a manual click);
---     3. quiet C_FriendList.SendWho (API, no window);
---   * if the chosen path fails synchronously (no handler/button) —
---     the SAME send tries the next one, the scan doesn't die;
---   * returns: true, "<path>" | false, "<failure details>".
-local WHO_PATHS = { "button", "enter", "api" }
 local whoShownByMe = {}    -- frames we showed to send /who
 local whoHiddenPanels = {} -- foreign LFG panels hidden by us (HideWhoFrame will restore them)
 
@@ -892,77 +855,6 @@ local function EnsureWhoVisible()
             whoShownByMe[who] = true
         end
     end)
-end
-
-local WhoSearchButton  -- definition below; local here
-    -- so WhoSendRaw sees the same variable, not a nil global
-
--- Press the "magnifier" like a player (08.10): the client handler
--- (WhoSearchMixin:OnClick) reads LFGWhoListFrame.EditBox and sends
--- SendWho(text, Social, filters). We take the widgets DIRECTLY from the XML
--- parentKey fields (WhoSearch/EditBox), duplicate SetWhoToUi(true) (the
--- panel's OnShow sets it — after showing a hidden parent it may not have
--- run; if the window gets hidden, OnHide resets it to false and the reply
--- leaves the UI, bug 06.10) and give visible feedback: a programmatic Click()
--- doesn't animate the button texture — the user sees "doesn't press".
-local function WhoPress(query)
-    EnsureWhoVisible()
-    pcall(function()
-        if C_FriendList and C_FriendList.SetWhoToUi then
-            C_FriendList.SetWhoToUi(true)
-        end
-    end)
-    local box = (LFGWhoListFrame and LFGWhoListFrame.EditBox) or WhoFrameEditBox
-    if not box then error("who edit box not found") end
-    box:SetText(query)
-    local txtAtClick = (box.GetText and box:GetText()) or "?"
-    local btn = (LFGWhoListFrame and LFGWhoListFrame.WhoSearch) or WhoSearchButton()
-    if not btn then error("who search button not found") end
-    pcall(function() PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end)
-    pcall(function() btn:LockHighlight() end)
-    C_Timer.After(0.2, function() pcall(function() btn:UnlockHighlight() end) end)
-    btn:Click("LeftButton")
-    local txtAfter = (box.GetText and box:GetText()) or "?"
-    return btn, box, txtAtClick, txtAfter
-end
-
-local function WhoSendRaw(query, attempt)
-    -- 08.10: the button with Click("LeftButton") is the only confirmed live non-chat
-    -- path (whotest clickL: 50, levels 27-30). Attempt rotation was removed:
-    -- watchdog retries ALWAYS go through the button; enter/api are only a
-    -- synchronous fallback when the window or button is unavailable.
-    -- attempt is kept in the signature (callers pass it).
-    local errs = {}
-    for i = 1, #WHO_PATHS do
-        local path = WHO_PATHS[i]
-        local ok, err
-        if path == "enter" then
-            ok, err = pcall(function()
-                EnsureWhoVisible()
-                if not WhoFrameEditBox then error("WhoFrameEditBox=nil") end
-                WhoFrameEditBox:SetText(query)
-                local fn = WhoFrameEditBox.GetScript
-                    and WhoFrameEditBox:GetScript("OnEnterPressed")
-                if not fn then error("OnEnterPressed=nil") end
-                fn(WhoFrameEditBox)
-            end)
-        elseif path == "button" then
-            ok, err = pcall(function()
-                WhoPress(query)
-            end)
-        else
-            ok, err = pcall(function()
-                if not (C_FriendList and C_FriendList.SendWho) then error("C_FriendList.SendWho=nil") end
-                C_FriendList.SendWho(query)
-            end)
-        end
-        if ok then
-            lastWhoSent = time()
-            return true, path
-        end
-        errs[#errs + 1] = path .. "(" .. tostring(err):sub(1, 50) .. ")"
-    end
-    return false, table.concat(errs, "; ")
 end
 
 local function HideWhoFrame()
@@ -1058,7 +950,7 @@ local function RaceFilterNames(db, faction)
     return names
 end
 
--- Full layered zone scan: a queue of level ranges with a WHO_GAP pause.
+-- Full layered zone scan: a queue of level ranges advanced by the user's clicks.
 local whoPumpScheduled = false
 
 local function FinishZoneScan(reason)
@@ -1121,9 +1013,8 @@ end
 local function PumpWhoQueue()
     if whoPumpScheduled then return end
     whoPumpScheduled = true
-    -- suggest: next query right after the user's click (1.5s),
-    -- programmatic scan — anti-throttle pause of 45-75s
-    local delay = (whoScan and whoScan.suggest) and 1.5 or (WHO_GAP + math.random(0, 30))
+    -- next query right after the user's click (1.5s)
+    local delay = 1.5
     C_Timer.After(delay, function()
         whoPumpScheduled = false
         if not whoScan then return end
@@ -1157,30 +1048,6 @@ local function PumpWhoQueue()
                 end
             end)
             return
-        end
-        -- attempt 1 = first path (enter); watchdog retries shift the rotation
-        local ok, err = WhoSendRaw(query, (q.retries or 0) + 1)
-        if ok then
-            whoScan.sent = whoScan.sent + 1
-            GetDB().debug.whoSent = (GetDB().debug.whoSent or 0) + 1
-            D(("/who %s → waiting for reply… (%s)"):format(query, tostring(err)))
-            -- watchdog: no reply within 15 sec — the server silently drops some
-            -- queries (skips ~1-2 per minute). Don't lose the range: retry up to 3 times.
-            C_Timer.After(15, function()
-                if whoScan and whoScan.current == q and not q.answered then
-                    q.retries = (q.retries or 0) + 1
-                    if q.retries <= 3 then
-                        table.insert(whoQueue, q)
-                        D(("/who %s: no reply, retrying later (%d/3)"):format(query, q.retries))
-                    else
-                        D(("/who %s: no reply after 3 attempts — skipping"):format(query))
-                    end
-                    PumpWhoQueue()
-                end
-            end)
-        else
-            GetDB().debug.whoErr = (GetDB().debug.whoErr or 0) + 1
-            FinishZoneScan("error: " .. tostring(err))
         end
     end)
 end
@@ -1490,12 +1357,12 @@ local HELP_COMMANDS = {
     "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy reset",
 }
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Start a wide /who scan", "Scan by class", "Scan by race", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "启动广域 /who 扫描", "按职业扫描", "按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий скан /who", "Скан по классам", "Скан по расам", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breiten /who-Scan starten", "Nach Klasse scannen", "Nach Volk scannen", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "Lancer un scan /who large", "Scanner par classe", "Scanner par race", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "전체 /who 스캔 시작", "직업별 스캔", "종족별 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Assisted class scan", "Assisted race scan", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "辅助按职业扫描", "辅助按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Скан по классам (жми лупу)", "Скан по расам (жми лупу)", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "Nach Klasse (assistiert)", "Nach Volk (assistiert)", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Par classe (assisté)", "Par race (assisté)", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "직업별 보조 스캔", "종족별 보조 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제"},
 }
 local helpWin
 local function ShowHelpWindow()
@@ -1958,28 +1825,6 @@ local function ShowWindow()
     end
 end
 
--- The real search button in the Who window: from the 08.10 tree — an anonymous
--- (unnamed) direct child button of LFGWhoListFrame with OnClick and empty text,
--- next to the WhoFrameEditBox (the only such one; "Filter" is excluded by its
--- text, the clear-cross is a child of the box, not the window).
-function WhoSearchButton()
-    local f = LFGWhoListFrame
-    if not f or not f.GetChildren then return nil end
-    local hidden = nil
-    for i = 1, select("#", f:GetChildren()) do
-        local c = select(i, f:GetChildren())
-        if c and c.IsObjectType and c:IsObjectType("Button") then
-            local onc = c.GetScript and c:GetScript("OnClick") ~= nil
-            local txt = (c.GetText and c:GetText()) or ""
-            if onc and txt == "" then
-                if c.IsShown and c:IsShown() then return c end
-                hidden = hidden or c
-            end
-        end
-    end
-    return hidden
-end
-
 SLASH_NEARBYSPY1 = "/nearbyspy"
 SLASH_NEARBYSPY2 = "/nspy"
 SlashCmdList["NEARBYSPY"] = function(msg)
@@ -1990,36 +1835,28 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     elseif msg == "help" then
         local ok, err = pcall(ShowHelpWindow)
         if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
-    elseif msg == "who" or msg == "whoclass" or msg == "whorace" then
-        local mode = ({ who = "level", whoclass = "class", whorace = "race" })[msg]
-        local modeL = ({ level = L("MODE_LEVEL"), class = L("MODE_CLASS"), race = L("MODE_RACE") })[mode]
-        local ok, info = StartZoneScan(PlayerZone() or "?", true, mode)
-        if ok then
-            P(L("SCAN_STARTED"):format(modeL, info))
-        else
-            P(L("SCAN_FAILED") .. info)
-        end
     elseif msg == "whostop" then
         if whoScan then
             FinishZoneScan("stopped manually")
         else
             P(L("SCAN_NOT_RUNNING"))
         end
-    elseif msg == "suggest" then
-        -- assisted mode (70291): the scan queue is typed into the who box one
-        -- query at a time, the user clicks the magnifier; the reply advances the queue
-        if whoScan and whoScan.suggest then
-            FinishZoneScan("suggest off")
-        elseif whoScan then
-            P(L("SUGGEST_PROG_BLOCK"))
+    elseif msg == "suggest" or msg == "who" or msg == "whoclass" or msg == "whorace" then
+        -- assisted /who (70291): programmatic sends are hardware-gated by the
+        -- server — only the user's click on the magnifier gets a reply. All
+        -- scan commands are assisted; repeating a command stops the scan.
+        if whoScan then
+            FinishZoneScan("stopped manually")
         else
-            -- straight to class slices: a wide 1-60 is pointless — on this server
-            -- even 1-1 is overfull, the first click always hits the 50 cap
-            local okS, infoS = StartZoneScan(PlayerZone() or "?", true, "class", true)
-            if okS then
+            -- suggest/whoclass go straight to class slices: a wide 1-60 is
+            -- pointless — on this server even 1-1 is overfull, the first click
+            -- always hits the 50 cap
+            local mode = ({ suggest = "class", who = "level", whoclass = "class", whorace = "race" })[msg]
+            local ok, info = StartZoneScan(PlayerZone() or "?", true, mode, true)
+            if ok then
                 P(L("SUGGEST_STARTED"))
             else
-                P(L("SUGGEST_FAILED") .. tostring(infoS))
+                P(L("SUGGEST_FAILED") .. tostring(info))
             end
         end
     elseif msg == "count" then
