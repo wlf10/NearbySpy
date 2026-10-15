@@ -1,0 +1,9 @@
+package-as: NearbySpy
+
+# dev/marketing files stay out of the release zip; the runtime set is
+# NearbySpy.lua, NearbySpy.toc, NearbySpySans.ttf, NearbySpyIcon.tga,
+# README.md, LICENSE
+ignore:
+  - CURSEFORGE.md
+  - CHANGELOG-dev.md
+  - NearbySpy-icon.png
