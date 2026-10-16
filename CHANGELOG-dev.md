@@ -2,8 +2,6 @@
 
 Cut from the NearbySpy.lua header when the version was publicly reset to 1.0.0 (2026-10-11): the first public version starts from a clean slate, the history of internal development lives here.
 
-**Version numbering note:** the internal versions below (1.2.0–1.6.1) ran ahead of the public line — they are PRE-reset legacy numbers from before 2026-10-11, not releases ahead of the current public 1.2.2. Public releases (1.0.0 and up) are listed first.
-
 ## Public releases
 
     1.2.2 (2026-10-15):
@@ -43,9 +41,7 @@ Cut from the NearbySpy.lua header when the version was publicly reset to 1.0.0 (
         subtitle widths, removed dead keys WIN_TOTAL/WIN_FRESH/WIN_DEMO.
       - "New" = firstSeen >= addon load time (reset on /reload).
 
-## Internal pre-reset versions (legacy numbering, cut at the 1.0.0 public reset, 2026-10-11)
-
-These are older than every public release above, their numbers just ran ahead.
+## Internal versions before the 1.0.0 public reset (2026-10-11)
 
     1.6.1:
       - debug mode /nspy debug (db.debugMode): on → logs (digests, scan progress,
@@ -176,7 +172,7 @@ These are older than every public release above, their numbers just ran ahead.
       - coordinates = player position at record time (approximation);
       - nameplate channel kept: with nameplates enabled (V) it adds class/faction.
 
-    1.2.0 (legacy internal — NOT the public 1.2.0 above):
+    1.2.0:
       - window on the standard BasicFrameTemplateWithInset (Blizzard style);
       - player list as colored strings (class color), summary on top;
       - "Copy" button → separate window with raw text for Ctrl+A/Ctrl+C;
