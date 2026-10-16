@@ -1,167 +1,186 @@
-# NearbySpy: внутренняя история версий
+# NearbySpy: internal version history
 
-Вырезана из шапки NearbySpy.lua при публичном ресете версии в 1.0.0 (11.10.2026): первая публичная версия начинается с чистого листа, история внутренних разработок хранится здесь.
+Cut from the NearbySpy.lua header when the version was publicly reset to 1.0.0 (2026-10-11): the first public version starts from a clean slate, the history of internal development lives here.
 
-    1.2.2 (15.10.2026):
-      - /nspy who|whoclass|whorace перенаправлены в assisted-режим (suggest):
-        программная отправка who мертва на 70291 (hardware gate), теперь все
-        скан-команды вписывают запрос и ждут клика по лупе; повтор команды —
-        стоп скана. Удалены мёртвые WhoSendRaw/WhoPress/WhoSearchButton/
-        WHO_PATHS/WHO_GAP (−190 строк) и ключи SCAN_*/MODE_*/SUGGEST_PROG_BLOCK.
-        Help-тексты обновлены во всех 6 локалях.
-      (промежуточно тегировано как 1.2.3, перенумеровано обратно по просьбе)
-      - УДАЛЁН внутриигровой экспорт (/nspy export, окно копирования, кнопка
-        Copy, BuildExportText, ключи EXPORT_*/BTN_COPY во всех локалях, пункт
-        в help-окне): EditBox с ~9k строк крашил клиент; данные на RealmPulse
-        теперь только загрузкой файла SavedVariables (сайт принимает сырой
-        NearbySpy.lua, до 10 МБ, с валидацией). README/CURSEFORGE.md обновлены.
+**Version numbering note:** the internal versions below (1.2.0–1.6.1) ran ahead of the public line — they are PRE-reset legacy numbers from before 2026-10-11, not releases ahead of the current public 1.2.2. Public releases (1.0.0 and up) are listed first.
 
-    1.2.1 (15.10.2026):
-      - окно перекрашено из teal в «ламповый» Blizzard Classic: каркас — шаблон
-        BasicFrameTemplateWithInset (есть в билде Forever, проверено по
-        исходникам FrameXML), fallback — ручная золотая рамка; палитра
-        золото/коричневый, заголовок NORMAL_FONT gold, пик гистограммы золотой.
-    1.2.0 (15.10.2026):
-      - полный редизайн главного окна (вариант Scout/Tactical по макету):
-        карточки метрик (всего/активны ≤5м/фракции), гистограмма уровней с
-        тонировкой, топ-3 класса в классовых цветах с иконками
-        (CLASS_ICON_TCOORDS + UI-Classes-Circles), фильтры Все/Свежие/Новые,
-        строки с иконкой класса, zebra, hover и GameTooltip (первая встреча,
-        источник, встреч), колонка «контакт» с цветом по свежести.
-      - review-субагент нашёл blocker до деплоя: TimeAgo уехала вместе со
-        старым блоком; также фиксы: ветка fallback кнопки Copy (по okBtn, не по
-        SetText), возврат подписи/прочих ключей в строке источников, возврат
-        WIN_HINT, выравнивание заголовков таблицы под колонки, ширина лейблов
-        фильтров и субтитра, удалены мёртвые ключи WIN_TOTAL/WIN_FRESH/WIN_DEMO.
-      - «Новые» = firstSeen >= загрузки аддона (обнуляется на /reload).
+## Public releases
+
+    1.2.2 (2026-10-15):
+      - /nspy who|whoclass|whorace routed to assisted (suggest) mode: programmatic
+        who sending is dead as of build 70291 (hardware gate), so every scan
+        command now types the query and waits for a click on the magnifier;
+        repeating the command stops the scan. Removed dead code:
+        WhoSendRaw/WhoPress/WhoSearchButton/WHO_PATHS/WHO_GAP (−190 lines) and
+        the SCAN_*/MODE_*/SUGGEST_PROG_BLOCK keys. Help texts updated in all 6
+        locales.
+      (intermediately tagged as 1.2.3, renumbered back on request)
+      - In-game export REMOVED (/nspy export, copy window, Copy button,
+        BuildExportText, EXPORT_*/BTN_COPY keys in all locales, help-window
+        entry): an EditBox with ~9k lines crashed the client; data now reaches
+        RealmPulse only via a SavedVariables file upload (the site accepts a raw
+        NearbySpy.lua, up to 10 MB, with validation). README/CURSEFORGE.md
+        updated.
+
+    1.2.1 (2026-10-15):
+      - the window was repainted from teal to the "lamp-lit" Blizzard Classic
+        style: the frame uses the BasicFrameTemplateWithInset template (present
+        in the Forever build, verified against FrameXML sources), with a
+        hand-rolled gold frame as fallback; gold/brown palette, NORMAL_FONT gold
+        title, gold histogram peak.
+
+    1.2.0 (2026-10-15):
+      - full redesign of the main window (Scout/Tactical variant per the mockup):
+        metric cards (total / active ≤5 min / factions), level histogram with
+        tinting, top-3 classes in class colors with icons (CLASS_ICON_TCOORDS +
+        UI-Classes-Circles), All/Fresh/New filters, rows with a class icon,
+        zebra striping, hover and GameTooltip (first encounter, source,
+        encounters), a "contact" column colored by freshness.
+      - the review subagent found a blocker before deploy: TimeAgo left together
+        with the old block; also fixes: Copy button fallback branch (via okBtn,
+        not SetText), restored the source-line subtitle/other keys, restored
+        WIN_HINT, aligned table headers with the columns, filter label and
+        subtitle widths, removed dead keys WIN_TOTAL/WIN_FRESH/WIN_DEMO.
+      - "New" = firstSeen >= addon load time (reset on /reload).
+
+## Internal pre-reset versions (legacy numbering, cut at the 1.0.0 public reset, 2026-10-11)
+
+These are older than every public release above, their numbers just ran ahead.
 
     1.6.1:
-      - режим дебага /nspy debug (db.debugMode): вкл → логи (дайджесты, прогресс
-        скана, кто-ответы, блокировки гейта) печатаются в чат; выкл → скрытный
-        режим: в чате только ответы на команды, анонсы и ошибки, логи — в
-        SV-кольцо (читаются после логаута). Печать перенесена на функцию D().
-      - графики окна: гистограмма уровней 1–60 (столбики из текстур, макс-столбик
-        ярче) + топ-3 класса горизонтальными барами — всё из db.players, без
-        нового хранения; окно подросло до 680×540 (список начался с -220).
-      - шрифт: свой NearbySpySans.ttf (Liberation Sans, полная кириллица) —
-        клиентские шрифты беты без русского («квадратики» в окне).
-      - окно: строки свежести (5м/15м/1ч), демо-срез (ур. min–max, ср. + топ-3
-        класса), «Кто кормит» (unit/guild/chat/who из db.debug.src), правая
-        колонка — относительное время («3 мин назад», старое — датой);
-        список ниже сводки (-102). Заполнение вынесено в UpdateWindowUI и
-        вызывается из ShowWindow: OnShow в кастомной бете 1.60 не стреляет при
-        win:Show() — окно было пустым при видимом тайтле.
-      - чат-обработчик: varargs передаются в pcall-лямбду явно (ванильная ошибка
-        компиляции «... вне vararg» — клиент отвергал файл целиком).
-      - who-пробник (разовый SendWho без окна) УДАЛЁН: клиент 70291 блокирует
-        C_FriendList.SendWho() гейтом ADDON_ACTION_BLOCKED (проверено по SV:
-        blocked[SendWho()]=6) — программный who мёртв на уровне клиента,
-        жив только ручной клик по кнопке лупы.
-      - чистка дайджеста (дубль-аргумент после удаления cl-счётчиков).
+      - debug mode /nspy debug (db.debugMode): on → logs (digests, scan progress,
+        who replies, gate blocks) print to chat; off → stealth mode: chat shows
+        only command replies, announcements and errors, logs go to the SV ring
+        buffer (read after logout). Printing moved to the D() function.
+      - window charts: level histogram 1–60 (bars built from textures, brightest
+        bar = peak) + top-3 classes as horizontal bars — all from db.players, no
+        new storage; window grew to 680×540 (list starts at -220).
+      - font: own NearbySpySans.ttf (Liberation Sans, full Cyrillic) — beta
+        client fonts lack Russian (window showed "boxes").
+      - window: freshness rows (5m/15m/1h), demo slice (lvl min–max, avg + top-3
+        classes), "Who feeds it" (unit/guild/chat/who from db.debug.src), right
+        column shows relative time ("3 min ago", previously a date); list moved
+        below the summary (-102). Filling moved to UpdateWindowUI, called from
+        ShowWindow: OnShow does not fire on win:Show() in the custom 1.60 beta —
+        the window was empty while the title was visible.
+      - chat handler: varargs passed explicitly into the pcall lambda (vanilla
+        compile error "outside of vararg" — the client rejected the whole file).
+      - who probe (one-shot SendWho without a window) REMOVED: client 70291
+        blocks C_FriendList.SendWho() with the ADDON_ACTION_BLOCKED gate
+        (verified by SV: blocked[SendWho()]=6) — programmatic who is dead at the
+        client level, only a manual click on the magnifier works.
+      - digest cleanup (duplicate argument after cl-counter removal).
 
     1.6.0:
-      - чат как источник имён: CHAT_MSG_SAY/YELL/CHANNEL → UpsertPlayer(source='chat')
-        без класса/уровня/зоны (nil, не "" — чтобы не затирать известное у
-        уже встреченных игроков). Спикер = 2-й аргумент события (сигнатура
-        wowpedia/warcraft.wiki); первые 15 событий пишутся целиком в
-        db.debug.chatSample — сверка позиций аргументов — читается из SV после логаута.
-      - вырезана отработавшая диагностика и мёртвый груз (−632 строки): команды
-        /nspy whotest|whox|lfgtree|whoprime, авто-/who (SendWhoZone + тик),
-        разовые API-пробы (apiProbeV1-V3, layerApi, unitSample, whoAreas),
-        мёртвый комбат-путь (в бете CombatLogGetCurrentEventInfo = nil) и
-        спекулятивные датчики аукциона/кастов. Разбор чат-спикера обёрнут
-        в pcall (secret-строки не роняют обработчик, падения видны в DbgErr).
-
-    1.5.6:
-      - MaxLevel() больше не верит GetMaxPlayerLevel (движковый 60 при
-        серверном капе 30): потолок = макс. уровень в базе, округлённый вверх
-        до полосы 10. Сейчас даёт 30 → suggest: к-"X" 1-30, полосы
-        1-10/11-20/21-30. Растёт сам по мере прокачки сервера.
+      - chat as a name source: CHAT_MSG_SAY/YELL/CHANNEL → UpsertPlayer(source='chat')
+        without class/level/zone (nil, not "" — so already-known fields of
+        previously seen players are not wiped). The speaker is the 2nd event
+        argument (signature per wowpedia/warcraft.wiki); the first 15 events are
+        written verbatim to db.debug.chatSample — to verify argument positions —
+        readable from SV after logout.
+      - removed worked-out diagnostics and dead cargo (−632 lines): commands
+        /nspy whotest|whox|lfgtree|whoprime, auto-/who (SendWhoZone + tick),
+        one-off API probes (apiProbeV1-V3, layerApi, unitSample, whoAreas), the
+        dead combat-log path (CombatLogGetCurrentEventInfo = nil in the beta)
+        and speculative auction/cast sensors. Chat speaker parsing wrapped in
+        pcall (secret strings don't kill the handler, failures visible in DbgErr).
 
     1.5.9:
-      - проба V3: функции аукциона (QueryAuctionItems/GetAuctionItemInfo/
-        C_AuctionHouse...) и миникарты + событийные датчики
-        AUCTION_HOUSE_SHOW / AUCTION_ITEM_LIST_UPDATE / UNIT_SPELLCAST_SUCCEEDED
-        (счётчики debug.probeEv, последний spellID) — под фичи Auctionator/
-        GatherMate/Spy. Регистрация через pcall, флаг проводки не в SV.
+      - probe V3: auction functions (QueryAuctionItems/GetAuctionItemInfo/
+        C_AuctionHouse...) and minimap + event sensors AUCTION_HOUSE_SHOW /
+        AUCTION_ITEM_LIST_UPDATE / UNIT_SPELLCAST_SUCCEEDED (debug.probeEv
+        counters, last spellID) — for future Auctionator/GatherMate/Spy
+        features. Registration via pcall, probe flag not stored in SV.
 
     1.5.8:
-      - ВАЖНО: сервер игнорирует диапазон уровней в /who (доказано 10.10.2026:
-        к-"Друид" 51-60 → 50 результатов при капе 30 и нуле игроков >30).
-        Дробление по уровням убрано полностью: suggest = 9 классовых срезов,
-        переполненный класс принимается как есть (лимит 50).
-      - фикс MaxLevel(): ссылался на глобальный db (nil) вместо GetDB() →
-        молча возвращал движковый 60 («опять с 60 начинаешь»).
+      - IMPORTANT: the server ignores level ranges in /who (proven 2026-10-10:
+        k-"Druid" 51-60 → 50 results with a cap of 30 and zero players above
+        30). Level splitting removed entirely: suggest = 9 class slices, an
+        overflowing class is taken as is (limit 50).
+      - fix MaxLevel(): referenced the global db (nil) instead of GetDB() →
+        silently returned the engine's 60 ("starting from 60 again").
 
     1.5.7:
-      - переполненный класс дробится НЕ полосами, а по одному уровню,
-        сверху вниз от максимума (решение пользователя 09.10.2026:
-        «без диапазонов 1-10, начинай с 30 и уменьшай на один»);
-        переполненный одиночный уровень принимается как есть.
+      - an overflowing class slice is split NOT by bands but by single levels,
+        top-down from the maximum (user decision 2026-10-09: "no 1-10 bands,
+        start at 30 and decrement by one"); an overflowing single level is taken
+        as is.
+
+    1.5.6:
+      - MaxLevel() no longer trusts GetMaxPlayerLevel (engine 60 with a server
+        cap of 30): the ceiling = the highest level in the database, rounded up
+        to a band of 10. Currently gives 30 → suggest: k-"X" 1-30, bands
+        1-10/11-20/21-30. Grows by itself as the server levels up.
 
     1.5.5:
-      - переполненный классовый срез (лимит 50) дробится по уровням полосами
-        по 10: 1-10 / 11-20 / 21-30 (решение пользователя 09.10.2026);
-        переполненная полоса принимается как есть (глубже не режем).
+      - an overflowing class slice (limit 50) is split by level bands of 10:
+        1-10 / 11-20 / 21-30 (user decision 2026-10-09); an overflowing band is
+        taken as is (no deeper splitting).
 
     1.5.4:
-      - /nspy suggest стартует сразу с классовых срезов (к-"класс" 1-60):
-        широкий 1-60 на этом сервере всегда переполнен (даже 1-1 > 50),
-        первый клик уходил в молоко.
+      - /nspy suggest starts straight with class slices (k-"class" 1-60): the
+        broad 1-60 on this server always overflows (even 1-1 > 50), the first
+        click was wasted.
 
     1.5.3:
-      - комбат-лог вырезан из клиента целиком (CombatLogGetCurrentEventInfo=nil,
-        потому и Spy3 его не использует) — событие регистрируется только если
-        функция есть (не держим мёртвый путь);
-      - повторная проба каналов через 30с после логина (на логине список пуст) +
-        подсчёт участников кастомных каналов через C_ChatInfo.GetChannelRosterInfo.
+      - combat log cut from the client entirely (CombatLogGetCurrentEventInfo=nil,
+        which is why Spy3 doesn't use it) — the event is registered only if the
+        function exists (no dead path kept);
+      - channel re-probe 30s after login (the list is empty at login) + counting
+        members of custom channels via C_ChatInfo.GetChannelRosterInfo.
 
     1.5.2:
-      - перехват защитного гейта клиента: ADDON_ACTION_BLOCKED/FORBIDDEN,
-        MACRO_ACTION_*, LUA_WARNING → функция и виновник пишутся в кольцо и
-        debug.blocked (ловим «только Blizzard расширения могут это использовать»).
+      - intercept the client protection gate: ADDON_ACTION_BLOCKED/FORBIDDEN,
+        MACRO_ACTION_*, LUA_WARNING → function and culprit written to the ring
+        buffer and debug.blocked (catching "only Blizzard extensions may use
+        this").
 
     1.5.1:
-      - полный дебаг: счётчики по источникам (db.debug.src), захват первых ошибок
-        (db.debug.err — pcall больше не глотает молча), детектор секретных значений
-        комбат-лога (canaccessvalue, по образцу Spy3), дайджест в SV-кольцо раз в
-        5 минут, разовая API-проба клиента (каналы/скорборд/CL API).
+      - full debug: per-source counters (db.debug.src), capturing first errors
+        (db.debug.err — pcall no longer swallows silently), secret combat-log
+        value detector (canaccessvalue, modeled on Spy3), digest to the SV ring
+        buffer every 5 minutes, one-off client API probe (channels/scoreboard/
+        CL API).
 
     1.5.0:
-      - основной режим — пассивный сбор мира: mouseover, группа/рейд, ростер
-        гильдии, комбат-лог (раньше только таргет/фокус/nameplate);
-      - авто-/who выключен разовой миграцией, автозапуск полного скана по
-        переполненному ответу заменён подсказкой про /nspy suggest;
-      - /nspy suggest: очередь запросов скана (переполнение режется по классам)
-        вписывается в поле who по одному — остаётся только кликать лупу.
+      - main mode = passive world collection: mouseover, party/raid, guild
+        roster, combat log (previously only target/focus/nameplate);
+      - auto-/who disabled by a one-shot migration, auto-start of a full scan on
+        an overflowing answer replaced with a hint about /nspy suggest;
+      - /nspy suggest: a queue of scan requests (overflow split by classes) typed
+        into the who box one at a time — all that's left is clicking the
+        magnifier.
 
     1.4.0:
-      - обход лимита 50 строк /who: полный скан зоны диапазонами уровней
-        (1-10, 11-20, ...), переполненный диапазон дробится пополам вплоть до
-        одного уровня; /nspy who теперь запускает полный скан;
-      - одиночный /who, упершийся в лимит 50, сам запускает полный скан
-        (не чаще раза в 10 мин);
-      - итог скана печатается всегда (раньше при 0 новых аддон молчал).
+      - bypass of the 50-row /who limit: full zone scan by level ranges (1-10,
+        11-20, ...), an overflowing range is halved down to a single level;
+        /nspy who now starts a full scan;
+      - a single /who that hits the 50 limit starts a full scan itself (no more
+        often than once per 10 min);
+      - the scan summary is always printed (previously the addon stayed silent
+        at 0 new).
 
     1.3.1:
-      - UI без GameFont-объектов: шрифт ставится явно (Fonts\FRIZQT__.TTF с fallback'ами) —
-        в кастомной бете GameFont*-объекты отсутствуют/пустые, текст не рендерился (окно пустое);
-      - создание окон обёрнуто в pcall, ошибка печатается в чат;
-      - CVar'ы, которых нет в клиенте (GetCVar=nil), больше не "чиним" каждые 15 тиков.
+      - UI without GameFont* objects: font set explicitly (Fonts\FRIZQT__.TTF
+        with fallbacks) — in the custom beta GameFont* objects are missing/empty,
+        text didn't render (empty window);
+      - window creation wrapped in pcall, the error is printed to chat;
+      - CVars missing from the client (GetCVar=nil) are no longer "fixed" every
+        15 ticks.
 
     1.3.0:
-      - /who-скан зоны (подход CensusPlus): серверный список всех игроков зоны,
-        не зависит от nameplate'ов;
-      - зона берётся из GetZoneText() (UnitPosition у чужих юнитов в бете
-        возвращает mapID=0 без имени);
-      - координаты — позиция игрока на момент записи (приближение);
-      - nameplate-канал оставлен: при включённых плашках (V) дописывает класс/фракцию.
+      - /who zone scan (CensusPlus approach): server-side list of all players in
+        the zone, independent of nameplates;
+      - zone taken from GetZoneText() (UnitPosition on foreign units in the beta
+        returns mapID=0 with no name);
+      - coordinates = player position at record time (approximation);
+      - nameplate channel kept: with nameplates enabled (V) it adds class/faction.
 
-    1.2.0:
-      - окно на стандартном BasicFrameTemplateWithInset (стиль Blizzard);
-      - список игроков цветными строками (класс-цвет), сводка сверху;
-      - кнопка "Копировать" -> отдельное окно с сырьём для Ctrl+A/Ctrl+C;
-      - EditBox без автоФокуса (1.1.0: автозахват фокуса ронял клиент —
-        assert CSimpleEditBox code 11);
-      - Esc/× закрывают окно независимо от фокуса;
-      - debug-счётчики тиков и nameplate'ов в /nspy count.
+    1.2.0 (legacy internal — NOT the public 1.2.0 above):
+      - window on the standard BasicFrameTemplateWithInset (Blizzard style);
+      - player list as colored strings (class color), summary on top;
+      - "Copy" button → separate window with raw text for Ctrl+A/Ctrl+C;
+      - EditBox without autofocus (1.1.0: autofocus grabbed focus and crashed the
+        client — assert CSimpleEditBox code 11);
+      - Esc/× close the window regardless of focus;
+      - debug counters for ticks and nameplates in /nspy count.
