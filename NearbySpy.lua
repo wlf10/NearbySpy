@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.2.2
+    NearbySpy 1.2.3
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -54,11 +54,11 @@ local LOCALE = {
         ERR_WINDOW = "window ERROR: ",
         TIME_NOW = "just now", TIME_MIN = "%d min ago", TIME_HOUR = "%d h ago",
         SRC_LINE = "Sources: ",
-        CHART_LABEL = "Levels 1–60: %d with a level · peak %d players at lvl %d · avg %.1f",
-        CHART_EMPTY = "Levels 1–60: no data",
-        WIN_HINT = "Esc - close · /nspy count - stats · /nspy who - zone scan",
+        CHART_LABEL = "Levels 1-60: %d with a level; peak %d players at lvl %d; avg %.1f",
+        CHART_EMPTY = "Levels 1-60: no data",
+        WIN_HINT = "Esc - close; /nspy count - stats; /nspy who - zone scan",
         UI_SUBTITLE = "LIVE SERVER INTELLIGENCE",
-        UI_DETECTED = "DETECTED", UI_ACTIVE5 = "ACTIVE ≤ 5 MIN", UI_FACTIONS = "FACTIONS",
+        UI_DETECTED = "DETECTED", UI_ACTIVE5 = "ACTIVE < 5 MIN", UI_FACTIONS = "FACTIONS",
         UI_CLASSES = "CLASSES", UI_ALL = "All", UI_FRESH = "Fresh", UI_NEW = "New", UI_NEW_SHORT = "new",
         UI_PLAYER = "PLAYER", UI_PROFILE = "PROFILE", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
         UI_FIRST = "First seen", UI_SOURCE = "Source", UI_ENCOUNTERS = "Encounters", UI_LIVE = "COLLECTING",
@@ -89,9 +89,9 @@ local LOCALE = {
         ERR_WINDOW = "窗口错误: ",
         TIME_NOW = "刚刚", TIME_MIN = "%d分钟前", TIME_HOUR = "%d小时前",
         SRC_LINE = "数据来源: ",
-        CHART_LABEL = "等级 1–60: 有等级的%d名 · %d级最多%d名玩家 · 平均%.1f",
-        CHART_EMPTY = "等级 1–60: 暂无数据",
-        WIN_HINT = "Esc - 关闭 · /nspy count - 统计 · /nspy who - 区域扫描",
+        CHART_LABEL = "等级 1-60: 有等级的%d名; %d级最多%d名玩家; 平均%.1f",
+        CHART_EMPTY = "等级 1-60: 暂无数据",
+        WIN_HINT = "Esc - 关闭; /nspy count - 统计; /nspy who - 区域扫描",
         UI_SUBTITLE = "实时服务器情报",
         UI_DETECTED = "已发现", UI_ACTIVE5 = "5分钟内活跃", UI_FACTIONS = "阵营",
         UI_CLASSES = "职业", UI_ALL = "全部", UI_FRESH = "最近", UI_NEW = "新增", UI_NEW_SHORT = "新增",
@@ -124,11 +124,11 @@ local LOCALE = {
         ERR_WINDOW = "ОШИБКА окна: ",
         TIME_NOW = "только что", TIME_MIN = "%d мин назад", TIME_HOUR = "%d ч назад",
         SRC_LINE = "Кто кормит: ",
-        CHART_LABEL = "Уровни 1–60: всего с уровнем %d · макс %d игроков ур. %d · ср. %.1f",
-        CHART_EMPTY = "Уровни 1–60: данных нет",
-        WIN_HINT = "Esc - закрыть · /nspy count - статистика · /nspy who - скан зоны",
+        CHART_LABEL = "Уровни 1-60: всего с уровнем %d; макс %d игроков ур. %d; ср. %.1f",
+        CHART_EMPTY = "Уровни 1-60: данных нет",
+        WIN_HINT = "Esc - закрыть; /nspy count - статистика; /nspy who - скан зоны",
         UI_SUBTITLE = "РАЗВЕДКА СЕРВЕРА В РЕАЛЬНОМ ВРЕМЕНИ",
-        UI_DETECTED = "ОБНАРУЖЕНО", UI_ACTIVE5 = "АКТИВНЫ ≤ 5 МИН", UI_FACTIONS = "ФРАКЦИИ",
+        UI_DETECTED = "ОБНАРУЖЕНО", UI_ACTIVE5 = "АКТИВНЫ < 5 МИН", UI_FACTIONS = "ФРАКЦИИ",
         UI_CLASSES = "КЛАССЫ", UI_ALL = "Все", UI_FRESH = "Свежие", UI_NEW = "Новые", UI_NEW_SHORT = "новых",
         UI_PLAYER = "ИГРОК", UI_PROFILE = "ПРОФИЛЬ", UI_ZONE = "ЗОНА", UI_CONTACT = "КОНТАКТ",
         UI_FIRST = "Первая встреча", UI_SOURCE = "Источник", UI_ENCOUNTERS = "Встреч", UI_LIVE = "СБОР АКТИВЕН",
@@ -159,11 +159,11 @@ local LOCALE = {
         ERR_WINDOW = "Fenster-FEHLER: ",
         TIME_NOW = "gerade eben", TIME_MIN = "vor %d Min", TIME_HOUR = "vor %d Std",
         SRC_LINE = "Quellen: ",
-        CHART_LABEL = "Stufen 1–60: %d mit Stufe · max %d Spieler auf Stufe %d · Ø %.1f",
-        CHART_EMPTY = "Stufen 1–60: keine Daten",
-        WIN_HINT = "Esc - schließen · /nspy count - Statistik · /nspy who - Zonenscan",
+        CHART_LABEL = "Stufen 1-60: %d mit Stufe; max %d Spieler auf Stufe %d; avg %.1f",
+        CHART_EMPTY = "Stufen 1-60: keine Daten",
+        WIN_HINT = "Esc - schließen; /nspy count - Statistik; /nspy who - Zonenscan",
         UI_SUBTITLE = "LIVE-SERVER-AUFKLÄRUNG",
-        UI_DETECTED = "ENTDECKT", UI_ACTIVE5 = "AKTIV ≤ 5 MIN", UI_FACTIONS = "FRAKTIONEN",
+        UI_DETECTED = "ENTDECKT", UI_ACTIVE5 = "AKTIV < 5 MIN", UI_FACTIONS = "FRAKTIONEN",
         UI_CLASSES = "KLASSEN", UI_ALL = "Alle", UI_FRESH = "Aktuell", UI_NEW = "Neu", UI_NEW_SHORT = "neu",
         UI_PLAYER = "SPIELER", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "KONTAKT",
         UI_FIRST = "Zuerst gesehen", UI_SOURCE = "Quelle", UI_ENCOUNTERS = "Begegnungen", UI_LIVE = "SAMMLUNG AKTIV",
@@ -194,11 +194,11 @@ local LOCALE = {
         ERR_WINDOW = "ERREUR fenêtre : ",
         TIME_NOW = "à l'instant", TIME_MIN = "il y a %d min", TIME_HOUR = "il y a %d h",
         SRC_LINE = "Sources : ",
-        CHART_LABEL = "Niveaux 1–60 : %d avec niveau · max %d joueurs niv. %d · moy. %.1f",
-        CHART_EMPTY = "Niveaux 1–60 : aucune donnée",
-        WIN_HINT = "Échap - fermer · /nspy count - stats · /nspy who - scan de zone",
+        CHART_LABEL = "Niveaux 1-60 : %d avec niveau; max %d joueurs niv. %d; moy. %.1f",
+        CHART_EMPTY = "Niveaux 1-60 : aucune donnée",
+        WIN_HINT = "Échap - fermer; /nspy count - stats; /nspy who - scan de zone",
         UI_SUBTITLE = "RENSEIGNEMENT SERVEUR EN DIRECT",
-        UI_DETECTED = "DÉTECTÉS", UI_ACTIVE5 = "ACTIFS ≤ 5 MIN", UI_FACTIONS = "FACTIONS",
+        UI_DETECTED = "DÉTECTÉS", UI_ACTIVE5 = "ACTIFS < 5 MIN", UI_FACTIONS = "FACTIONS",
         UI_CLASSES = "CLASSES", UI_ALL = "Tous", UI_FRESH = "Récents", UI_NEW = "Nouveaux", UI_NEW_SHORT = "nouveaux",
         UI_PLAYER = "JOUEUR", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
         UI_FIRST = "Première vue", UI_SOURCE = "Source", UI_ENCOUNTERS = "Rencontres", UI_LIVE = "COLLECTE ACTIVE",
@@ -229,9 +229,9 @@ local LOCALE = {
         ERR_WINDOW = "창 오류: ",
         TIME_NOW = "방금", TIME_MIN = "%d분 전", TIME_HOUR = "%d시간 전",
         SRC_LINE = "데이터 출처: ",
-        CHART_LABEL = "레벨 1–60: 레벨 있는 %d명 · 최다 %d명 %d레벨 · 평균 %.1f",
-        CHART_EMPTY = "레벨 1–60: 데이터 없음",
-        WIN_HINT = "Esc - 닫기 · /nspy count - 통계 · /nspy who - 지역 스캔",
+        CHART_LABEL = "레벨 1-60: 레벨 있는 %d명; 최다 %d명 %d레벨; 평균 %.1f",
+        CHART_EMPTY = "레벨 1-60: 데이터 없음",
+        WIN_HINT = "Esc - 닫기; /nspy count - 통계; /nspy who - 지역 스캔",
         UI_SUBTITLE = "실시간 서버 정보",
         UI_DETECTED = "발견", UI_ACTIVE5 = "5분 내 활동", UI_FACTIONS = "진영",
         UI_CLASSES = "직업", UI_ALL = "전체", UI_FRESH = "최근", UI_NEW = "신규", UI_NEW_SHORT = "신규",
@@ -1299,39 +1299,16 @@ local function SortedPlayers(db)
 end
 
 -- ============ UI ============
--- No GameFont objects: in the custom beta they may be missing/empty
--- (the window renders, the text doesn't). Set the font explicitly by file
--- with fallbacks.
-
-local FONT_FILES = {
-    -- bundled font with full Cyrillic (11.10.2026): the beta's client TTFs are
-    -- packed into .slug resources and contain NO Cyrillic (Forever's EN fonts) —
-    -- all Russian window text showed as "boxes". Path is relative to the
-    -- Interface/ folder (the addon-font standard). Liberation Sans (OFL).
-    "Interface\\AddOns\\NearbySpy\\NearbySpySans.ttf",
-    "Fonts\\FRIZQT__.TTF",
-    "Fonts\\ARIALN.TTF",
-    "Fonts\\MORPHEUS.TTF",
-    "Fonts\\SKURRI.TTF",
-}
-
--- zhCN/koKR: Liberation Sans has no CJK glyphs — on these clients try the
--- client's native CJK/Korean fonts first, otherwise text renders as "boxes".
-if GetLocale() == "zhCN" then
-    table.insert(FONT_FILES, 1, "Fonts\\ARHei.TTF")
-    table.insert(FONT_FILES, 2, "Fonts\\ARKai_T.TTF")
-elseif GetLocale() == "koKR" then
-    table.insert(FONT_FILES, 1, "Fonts\\2002.TTF")
-end
-
+-- Fonts (16.10.2026): use the client's own font object, period. Measured on
+-- the ruRU beta: explicit SetFont() on ANY file path renders nothing during
+-- the first ~10-20s after a cold login (and FRIZQT__.TTF never renders at
+-- all), while GameFontNormal renders Cyrillic from second zero. No bundled
+-- TTF, no polling, no repaint hacks. GameFontNormal also matches the client's
+-- locale (native CJK/Korean fonts on zhCN/koKR clients).
 local function ApplyFont(fs, size, flags)
-    for _, path in ipairs(FONT_FILES) do
-        local ok, res = pcall(fs.SetFont, fs, path, size, flags or "")
-        if ok and res then
-            return true
-        end
+    if GameFontNormal and fs.SetFontObject then
+        pcall(fs.SetFontObject, fs, GameFontNormal)
     end
-    return false
 end
 
 local function NewText(parent, size, r, g, b)
@@ -1356,6 +1333,7 @@ local HELP_COMMANDS = {
     "/nspy count", "/nspy announce", "/nspy debug",
     "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy reset",
 }
+
 local HELP_TEXT = {
     enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Assisted class scan", "Assisted race scan", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database"},
     zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "辅助按职业扫描", "辅助按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库"},
@@ -1521,7 +1499,7 @@ local function TacticalRow(parent, index)
         local r, g, b = ClassColorRGB(p.class)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(p.name or "?", r, g, b)
-        GameTooltip:AddLine((p.classLoc or p.class or "?") .. " · " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
+        GameTooltip:AddLine((p.classLoc or p.class or "?") .. "; " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
         GameTooltip:AddLine(L("UI_ZONE") .. ": " .. tostring(p.zone or "?"), 0.65, 0.72, 0.72)
         GameTooltip:AddLine(L("UI_FIRST") .. ": " .. (p.firstSeen and date("%d.%m.%Y %H:%M", p.firstSeen) or "?"), 0.58, 0.65, 0.65)
         GameTooltip:AddLine(L("UI_CONTACT") .. ": " .. (p.lastSeen and date("%d.%m.%Y %H:%M", p.lastSeen) or "?"), 0.58, 0.65, 0.65)
@@ -1551,7 +1529,7 @@ local function TacticalRows()
             TacticalClassIcon(row.icon, p.class)
             row.name:SetText(p.name or "?")
             row.name:SetTextColor(ClassColorRGB(p.class))
-            row.profile:SetText(("%s · %s%s"):format(p.classLoc or p.class or "?", L("LVL_PREFIX"), tostring(p.level or "?")))
+            row.profile:SetText(("%s; %s%s"):format(p.classLoc or p.class or "?", L("LVL_PREFIX"), tostring(p.level or "?")))
             row.zone:SetText(p.zone or "?")
             local age = now - (p.lastSeen or 0)
             row.seen:SetText(TimeAgo(p.lastSeen))
@@ -1610,7 +1588,7 @@ local function TacticalSources()
             parts[#parts + 1] = tostring(key) .. " " .. value
         end
     end
-    return L("SRC_LINE") .. table.concat(parts, " · ")
+    return L("SRC_LINE") .. table.concat(parts, "; ")
 end
 
 local function TacticalFilterState(button, active)
@@ -1655,8 +1633,8 @@ TacticalUpdate = function()
         tactical.total.value:SetText(tostring(st.total))
         tactical.total.detail:SetText("+" .. tostring(st.newN) .. " " .. L("UI_NEW_SHORT"))
         tactical.fresh.value:SetText(tostring(st.f5))
-        tactical.fresh.detail:SetText(("15m %d · 1h %d"):format(st.f15, st.f60))
-        tactical.factions.value:SetText(("|cffff6666%s %d|r  ·  |cff6699ff%s %d|r"):format(L("HORDE"), st.horde, L("ALLIANCE"), st.alliance))
+        tactical.fresh.detail:SetText(("15m %d; 1h %d"):format(st.f15, st.f60))
+        tactical.factions.value:SetText(("|cffff6666%s %d|r ; |cff6699ff%s %d|r"):format(L("HORDE"), st.horde, L("ALLIANCE"), st.alliance))
         tactical.factions.detail:SetText(st.unknown > 0 and ("? " .. st.unknown) or "")
 
         local maxCount, peakLevel = 0, 0
@@ -1680,10 +1658,18 @@ TacticalUpdate = function()
                 row:Show()
                 TacticalClassIcon(row.icon, item.file)
                 row.label:SetText(item.label)
-                row.value:SetText(item.count)
-                row.fill:SetWidth(math.max(1, math.floor(126 * item.count / st.top[1].count + 0.5)))
+                -- count + share of all players: the top classes are nearly
+                -- equal (3026/2992/2894), a pure max-relative bar looks flat
+                row.value:SetText(("%d (%.0f%%)"):format(item.count, 100 * item.count / math.max(1, st.total)))
                 local r, g, b = ClassColorRGB(item.file)
-                row.fill:SetColorTexture(r, g, b, 0.9)
+                if row.bar then
+                    row.bar:SetMinMaxValues(0, st.top[1].count)
+                    row.bar:SetValue(item.count)
+                    row.bar:SetStatusBarColor(r, g, b, 0.9)
+                else
+                    row.fill:SetWidth(math.max(1, math.floor(100 * item.count / st.top[1].count + 0.5)))
+                    row.fill:SetColorTexture(r, g, b, 0.9)
+                end
             else row:Hide() end
         end
 
@@ -1692,7 +1678,7 @@ TacticalUpdate = function()
         tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. st.newN)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
-        tactical.status:SetText("|cff45dc9b●|r " .. L("UI_LIVE") .. "  ·  " .. TacticalSources())
+        tactical.status:SetText("|cff45dc9b+|r " .. L("UI_LIVE") .. " ; " .. TacticalSources())
     end)
     if not ok then P(L("ERR_LIST") .. tostring(err)) end
 end
@@ -1728,7 +1714,7 @@ local function BuildWindow()
         win.TitleText:SetPoint("TOPLEFT", 15, -14)
         win.CloseButton = CreateFrame("Button", nil, win)
         win.CloseButton:SetSize(26, 26); win.CloseButton:SetPoint("TOPRIGHT", -8, -8)
-        local text = NewText(win.CloseButton, 15, 0.85, 0.65, 0.25); text:SetPoint("CENTER"); text:SetText("×")
+        local text = NewText(win.CloseButton, 15, 0.85, 0.65, 0.25); text:SetPoint("CENTER"); text:SetText("x")
     end
     win:SetSize(700, 640)
     win:SetPoint("CENTER")
@@ -1781,9 +1767,30 @@ local function BuildWindow()
         row:SetSize(230, 20); row:SetPoint("TOPLEFT", 9, -23 - (i - 1) * 23)
         row.icon = row:CreateTexture(nil, "ARTWORK"); row.icon:SetSize(18, 18); row.icon:SetPoint("LEFT")
         row.label = NewText(row, 9, 0.85, 0.82, 0.75); row.label:SetPoint("LEFT", 23, 0); row.label:SetWidth(68); row.label:SetJustifyH("LEFT")
-        local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 92, 0); track:SetSize(126, 8); track:SetColorTexture(0.1, 0.08, 0.05, 1)
-        row.fill = row:CreateTexture(nil, "ARTWORK"); row.fill:SetPoint("LEFT", 92, 0); row.fill:SetHeight(8); row.fill:SetWidth(1)
-        row.value = NewText(row, 9); row.value:SetPoint("RIGHT", -1, 0)
+        -- StatusBar is the native bar widget (min/max/value, it fills itself);
+        -- texture fallback if the custom beta lacks the widget
+        local okBar, bar = pcall(CreateFrame, "StatusBar", nil, row)
+        if okBar and bar and bar.SetMinMaxValues then
+            bar:SetPoint("LEFT", 92, 0); bar:SetSize(100, 13)
+            bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+            bar:SetMinMaxValues(0, 1); bar:SetValue(0)
+            local bg = bar:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints(); bg:SetColorTexture(0.1, 0.08, 0.05, 1)
+            row.bar = bar
+            -- value rides INSIDE the bar (XP-bar style): with the client's
+            -- default font a separate right-side label overlapped the fill;
+            -- light text + dark shadow stays readable on both the fill and
+            -- the dark track
+            row.value = NewText(bar, 9, 0.95, 0.93, 0.88)
+            row.value:SetPoint("RIGHT", -4, 0)
+            row.value:SetShadowOffset(1, -1)
+            row.value:SetShadowColor(0, 0, 0, 0.9)
+        else
+            if bar and bar.Hide then bar:Hide() end
+            local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 92, 0); track:SetSize(100, 8); track:SetColorTexture(0.1, 0.08, 0.05, 1)
+            row.fill = row:CreateTexture(nil, "ARTWORK"); row.fill:SetPoint("LEFT", 92, 0); row.fill:SetHeight(8); row.fill:SetWidth(1)
+            row.value = NewText(row, 9); row.value:SetPoint("RIGHT", -1, 0)
+        end
         tactical.classes[i] = row
     end
 

@@ -91,8 +91,8 @@ File: `WTF/Account/<ACCOUNT>/SavedVariables/NearbySpy.lua`
 ## Localization
 
 English (default), Simplified Chinese, Russian, German, French, Korean.
-The bundled font includes Cyrillic; zhCN/koKR clients use the client's native fonts.
+The window uses the client's own font, so every client locale renders natively.
 
 ## License
 
-MIT. Bundled font: Liberation Sans (SIL OFL 1.1).
+MIT.
