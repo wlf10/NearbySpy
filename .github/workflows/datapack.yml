@@ -1,0 +1,52 @@
+name: datapack
+
+# Еженедельный снапшот ценза для модуля NearbySpy_Data (16.10.2026):
+# сайт сам рендерит lua из БД (/api/datapack.lua), Action забирает файл,
+# коммитит в репо (если изменился) и обновляет катящийся релиз
+# datapack-latest с zip — игроки качают data-пак отдельно от аддона.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # понедельник 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch snapshot
+        run: curl -fsSL --retry 3 https://wow.bitwolff.com/api/datapack.lua -o NearbySpy_Data/NearbySpyData.lua
+
+      - name: Sanity check (valid lua module shape)
+        run: grep -q '^NearbySpyData = {' NearbySpy_Data/NearbySpyData.lua && grep -q 'generated = ' NearbySpy_Data/NearbySpyData.lua
+
+      - name: Commit if changed
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NearbySpy_Data/NearbySpyData.lua
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "data: weekly census snapshot"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Zip data addon
+        run: cd NearbySpy_Data && zip -q -r ../NearbySpy_Data.zip . && cd ..
+
+      - name: Refresh rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete datapack-latest -y --cleanup-tag 2>/dev/null || true
+          gh release create datapack-latest NearbySpy_Data.zip \
+            --title "NearbySpy_Data (weekly snapshot)" \
+            --notes "Aggregated census snapshot from https://wow.bitwolff.com — unzip into Interface/AddOns next to NearbySpy."

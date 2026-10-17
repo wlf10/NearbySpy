@@ -1,0 +1,8 @@
+## Interface: 16001, 16000, 11509, 120001, 110207
+## Title: NearbySpy_Data
+## Notes: Weekly aggregated census snapshot from RealmPulse for NearbySpy
+## Version: 1.0.0
+## Dependencies: NearbySpy
+## X-Website: https://wow.bitwolff.com
+
+NearbySpyData.lua
