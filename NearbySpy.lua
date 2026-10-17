@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.2.3
+    NearbySpy 1.3.0
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -72,6 +72,12 @@ local LOCALE = {
         DB_CLEARED = "encounter database cleared",
         QUERIES_FMT = "%d queries",
         STARTUP = "started, %d players in db. Commands: /nspy (suggest — assisted /who)",
+        SVR_TITLE = "Server census", SVR_SNAPSHOT = "RealmPulse snapshot: %s", SVR_TOTAL = "PLAYERS",
+        SVR_PRIME = "PRIME TIME (28 DAYS)", SVR_CLASSES = "CLASSES", SVR_ZONES = "TOP ZONES",
+        SVR_PEAK = "Peak: %s %02d:00 - %d players",
+        SVR_NODATA = "No data module found. Install NearbySpy_Data (datapack-latest release) next to NearbySpy.",
+        SVR_STALE = "snapshot %d days old - update NearbySpy_Data",
+        SVR_D1 = "Mon", SVR_D2 = "Tue", SVR_D3 = "Wed", SVR_D4 = "Thu", SVR_D5 = "Fri", SVR_D6 = "Sat", SVR_D7 = "Sun",
     },
     zhCN = {
         ON = "开启", OFF = "关闭",
@@ -107,6 +113,12 @@ local LOCALE = {
         DB_CLEARED = "遭遇数据库已清空",
         QUERIES_FMT = "%d 个查询",
         STARTUP = "已启动，数据库中有%d名玩家。命令: /nspy（suggest —— 辅助 /who）",
+        SVR_TITLE = "服务器普查", SVR_SNAPSHOT = "RealmPulse 快照: %s", SVR_TOTAL = "玩家总数",
+        SVR_PRIME = "高峰时段 (28天)", SVR_CLASSES = "职业", SVR_ZONES = "热门区域",
+        SVR_PEAK = "峰值: %s %02d:00 - %d 玩家",
+        SVR_NODATA = "未找到数据模块。请在 NearbySpy 旁安装 NearbySpy_Data (datapack-latest)。",
+        SVR_STALE = "快照已过期 %d 天 - 请更新 NearbySpy_Data",
+        SVR_D1 = "一", SVR_D2 = "二", SVR_D3 = "三", SVR_D4 = "四", SVR_D5 = "五", SVR_D6 = "六", SVR_D7 = "日",
     },
     ruRU = {
         ON = "вкл", OFF = "выкл",
@@ -142,6 +154,12 @@ local LOCALE = {
         DB_CLEARED = "база встреч очищена",
         QUERIES_FMT = "%d запросов",
         STARTUP = "запущен, в базе %d игроков. Команды: /nspy (suggest — расширенный /who)",
+        SVR_TITLE = "Ценз сервера", SVR_SNAPSHOT = "Снимок RealmPulse: %s", SVR_TOTAL = "ИГРОКОВ",
+        SVR_PRIME = "ПРАЙМ-ТАЙМ (28 ДНЕЙ)", SVR_CLASSES = "КЛАССЫ", SVR_ZONES = "ТОП ЗОН",
+        SVR_PEAK = "Пик: %s %02d:00 - %d игроков",
+        SVR_NODATA = "Нет data-модуля. Поставь NearbySpy_Data (релиз datapack-latest) рядом с NearbySpy.",
+        SVR_STALE = "снимку %d дн. - обнови NearbySpy_Data",
+        SVR_D1 = "Пн", SVR_D2 = "Вт", SVR_D3 = "Ср", SVR_D4 = "Чт", SVR_D5 = "Пт", SVR_D6 = "Сб", SVR_D7 = "Вс",
     },
     deDE = {
         ON = "an", OFF = "aus",
@@ -177,6 +195,12 @@ local LOCALE = {
         DB_CLEARED = "Begegnungs-Datenbank geleert",
         QUERIES_FMT = "%d Anfragen",
         STARTUP = "gestartet, %d Spieler in der DB. Befehle: /nspy (suggest — assistiertes /who)",
+        SVR_TITLE = "Server-Zensus", SVR_SNAPSHOT = "RealmPulse-Snapshot: %s", SVR_TOTAL = "SPIELER",
+        SVR_PRIME = "PRIME TIME (28 TAGE)", SVR_CLASSES = "KLASSEN", SVR_ZONES = "TOP-ZONEN",
+        SVR_PEAK = "Spitze: %s %02d:00 - %d Spieler",
+        SVR_NODATA = "Kein Datenmodul gefunden. Installiere NearbySpy_Data (Release datapack-latest) neben NearbySpy.",
+        SVR_STALE = "Snapshot ist %d Tage alt - NearbySpy_Data aktualisieren",
+        SVR_D1 = "Mo", SVR_D2 = "Di", SVR_D3 = "Mi", SVR_D4 = "Do", SVR_D5 = "Fr", SVR_D6 = "Sa", SVR_D7 = "So",
     },
     frFR = {
         ON = "activé", OFF = "désactivé",
@@ -212,6 +236,12 @@ local LOCALE = {
         DB_CLEARED = "base des rencontres vidée",
         QUERIES_FMT = "%d requêtes",
         STARTUP = "démarré, %d joueurs en base. Commandes : /nspy (suggest — /who assisté)",
+        SVR_TITLE = "Recensement du royaume", SVR_SNAPSHOT = "Snapshot RealmPulse : %s", SVR_TOTAL = "JOUEURS",
+        SVR_PRIME = "HEURES DE POINTE (28 JOURS)", SVR_CLASSES = "CLASSES", SVR_ZONES = "ZONES PRINCIPALES",
+        SVR_PEAK = "Pic : %s %02d:00 - %d joueurs",
+        SVR_NODATA = "Module de données absent. Installez NearbySpy_Data (release datapack-latest) à côté de NearbySpy.",
+        SVR_STALE = "snapshot vieux de %d jours - mettez à jour NearbySpy_Data",
+        SVR_D1 = "Lun", SVR_D2 = "Mar", SVR_D3 = "Mer", SVR_D4 = "Jeu", SVR_D5 = "Ven", SVR_D6 = "Sam", SVR_D7 = "Dim",
     },
     koKR = {
         ON = "켜짐", OFF = "꺼짐",
@@ -247,6 +277,12 @@ local LOCALE = {
         DB_CLEARED = "조우 데이터베이스 삭제됨",
         QUERIES_FMT = "%d개 쿼리",
         STARTUP = "시작됨, DB에 플레이어 %d명. 명령어: /nspy (suggest — 보조 /who)",
+        SVR_TITLE = "서버 센서스", SVR_SNAPSHOT = "RealmPulse 스냅샷: %s", SVR_TOTAL = "플레이어",
+        SVR_PRIME = "프라임 타임 (28일)", SVR_CLASSES = "직업", SVR_ZONES = "인기 지역",
+        SVR_PEAK = "피크: %s %02d:00 - %d 플레이어",
+        SVR_NODATA = "데이터 모듈이 없습니다. NearbySpy 옆에 NearbySpy_Data(datapack-latest)를 설치하세요.",
+        SVR_STALE = "스냅샷이 %d일 지남 - NearbySpy_Data 업데이트",
+        SVR_D1 = "월", SVR_D2 = "화", SVR_D3 = "수", SVR_D4 = "목", SVR_D5 = "금", SVR_D6 = "토", SVR_D7 = "일",
     },
 }
 local function L(key)
@@ -1332,15 +1368,16 @@ local HELP_COMMANDS = {
     "/nspy who", "/nspy whoclass", "/nspy whorace", "/nspy whostop",
     "/nspy count", "/nspy announce", "/nspy debug",
     "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy reset",
+    "/nspy server",
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Assisted class scan", "Assisted race scan", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "辅助按职业扫描", "辅助按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Скан по классам (жми лупу)", "Скан по расам (жми лупу)", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "Nach Klasse (assistiert)", "Nach Volk (assistiert)", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Par classe (assisté)", "Par race (assisté)", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "직업별 보조 스캔", "종족별 보조 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Assisted class scan", "Assisted race scan", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database", "Server census window (needs NearbySpy_Data)"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "辅助按职业扫描", "辅助按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Скан по классам (жми лупу)", "Скан по расам (жми лупу)", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "Nach Klasse (assistiert)", "Nach Volk (assistiert)", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Par classe (assisté)", "Par race (assisté)", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "직업별 보조 스캔", "종족별 보조 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)"},
 }
 local helpWin
 local function ShowHelpWindow()
@@ -1832,6 +1869,235 @@ local function ShowWindow()
     end
 end
 
+-- ============ server census window (NearbySpy_Data companion) ============
+-- The data module ships a weekly aggregated snapshot as the global
+-- NearbySpyData (rendered by the site /api/datapack.lua — the addon itself
+-- has no HTTP). Separate window by design (Spy Classic convention: the
+-- tactical window stays lean, statistics get their own). Widgets are built
+-- once; every Show re-reads the global, so a data-module update between
+-- sessions is picked up without a rebuild.
+local serverWin
+local svr = {}
+
+local function BuildServerWindow()
+    local okTpl, tplWin = pcall(CreateFrame, "Frame", "NearbySpyServerWindow", UIParent, "BasicFrameTemplateWithInset")
+    if okTpl and tplWin and tplWin.TitleText and tplWin.Bg and tplWin.CloseButton then
+        serverWin = tplWin
+    else
+        if tplWin and tplWin.Hide then tplWin:Hide() end
+        serverWin = CreateFrame("Frame", "NearbySpyServerWindow", UIParent)
+        local bg = serverWin:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(0.03, 0.025, 0.02, 0.97)
+        serverWin.TitleText = NewText(serverWin, 14, 1, 0.82, 0)
+        serverWin.TitleText:SetPoint("TOPLEFT", 15, -14)
+        local btn = CreateFrame("Button", nil, serverWin)
+        btn:SetSize(26, 26); btn:SetPoint("TOPRIGHT", -8, -8)
+        local label = NewText(btn, 15, 0.85, 0.65, 0.25); label:SetPoint("CENTER"); label:SetText("x")
+        serverWin.CloseButton = btn
+    end
+    serverWin:SetSize(460, 620)
+    serverWin:SetPoint("CENTER")
+    serverWin:SetFrameStrata("DIALOG")
+    serverWin:SetMovable(true)
+    serverWin:EnableMouse(true)
+    serverWin:RegisterForDrag("LeftButton")
+    serverWin:SetScript("OnDragStart", serverWin.StartMoving)
+    serverWin:SetScript("OnDragStop", serverWin.StopMovingOrSizing)
+    serverWin:EnableKeyboard(true)
+    serverWin:SetScript("OnKeyDown", function(_, key)
+        if key == "ESCAPE" then serverWin:SetPropagateKeyboardInput(false); serverWin:Hide()
+        else serverWin:SetPropagateKeyboardInput(true) end
+    end)
+    ApplyFont(serverWin.TitleText, 14, "OUTLINE")
+    serverWin.TitleText:SetText(L("SVR_TITLE"))
+    serverWin.TitleText:SetTextColor(1, 0.82, 0, 1)
+    serverWin.CloseButton:SetScript("OnClick", function() serverWin:Hide() end)
+
+    svr.date = NewText(serverWin, 9, 0.62, 0.55, 0.42); svr.date:SetPoint("TOPLEFT", 16, -44)
+    svr.stale = NewText(serverWin, 9, 0.9, 0.6, 0.2); svr.stale:SetPoint("TOPRIGHT", -16, -44); svr.stale:SetJustifyH("RIGHT")
+    svr.total = NewText(serverWin, 16, 0.93, 0.91, 0.87); svr.total:SetPoint("TOPLEFT", 16, -62)
+    svr.totalLbl = NewText(serverWin, 9, 0.62, 0.55, 0.42)
+    svr.totalLbl:SetPoint("LEFT", svr.total, "RIGHT", 6, -3); svr.totalLbl:SetText(L("SVR_TOTAL"))
+    svr.factions = NewText(serverWin, 10, 0.8, 0.78, 0.7); svr.factions:SetPoint("TOPLEFT", 16, -86)
+
+    local function Panel(y, h)
+        local panel = CreateFrame("Frame", nil, serverWin)
+        panel:SetPoint("TOPLEFT", 16, y); panel:SetSize(428, h)
+        local bg = panel:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(0.07, 0.055, 0.035, 1)
+        return panel
+    end
+
+    -- heat grid: 7 days x 24 hours, amber on a log scale (same curve as the site)
+    local heatPanel = Panel(-108, 170)
+    local ht = NewText(heatPanel, 9, 0.62, 0.55, 0.42); ht:SetPoint("TOPLEFT", 8, -7); ht:SetText(L("SVR_PRIME"))
+    svr.heatCells = {}
+    for d = 1, 7 do
+        local dl = NewText(heatPanel, 8, 0.55, 0.47, 0.32)
+        dl:SetPoint("TOPLEFT", 8, -27 - (d - 1) * 15); dl:SetWidth(20)
+        dl:SetText(L("SVR_D" .. d))
+        svr.heatCells[d] = {}
+        for h = 0, 23 do
+            local cell = heatPanel:CreateTexture(nil, "ARTWORK")
+            cell:SetPoint("TOPLEFT", 32 + h * 15, -24 - (d - 1) * 15)
+            cell:SetSize(13, 13)
+            cell:SetColorTexture(0.94, 0.73, 0.04, 0.04)
+            svr.heatCells[d][h] = cell
+        end
+    end
+    for h = 0, 23 do
+        local hl = NewText(heatPanel, 7, 0.4, 0.36, 0.26)
+        hl:SetPoint("TOPLEFT", 32 + h * 15 - 2, -133); hl:SetWidth(17); hl:SetJustifyH("CENTER")
+        hl:SetText(tostring(h))
+    end
+    svr.peak = NewText(heatPanel, 8, 0.55, 0.47, 0.32); svr.peak:SetPoint("BOTTOMLEFT", 8, 6)
+
+    -- class bars: StatusBar with texture fallback (same pattern as the tactical window)
+    local classPanel = Panel(-286, 207)
+    local ct = NewText(classPanel, 9, 0.62, 0.55, 0.42); ct:SetPoint("TOPLEFT", 8, -7); ct:SetText(L("SVR_CLASSES"))
+    svr.classRows = {}
+    for i = 1, 9 do
+        local row = CreateFrame("Frame", nil, classPanel)
+        row:SetSize(412, 19); row:SetPoint("TOPLEFT", 8, -22 - (i - 1) * 20)
+        row.label = NewText(row, 10, 0.9, 0.88, 0.8); row.label:SetPoint("LEFT"); row.label:SetWidth(90); row.label:SetJustifyH("LEFT")
+        local okBar, bar = pcall(CreateFrame, "StatusBar", nil, row)
+        if okBar and bar and bar.SetMinMaxValues then
+            bar:SetPoint("LEFT", 96, 0); bar:SetSize(240, 13)
+            bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+            bar:SetMinMaxValues(0, 1); bar:SetValue(0)
+            local barBg = bar:CreateTexture(nil, "BACKGROUND"); barBg:SetAllPoints(); barBg:SetColorTexture(0.1, 0.08, 0.05, 1)
+            row.bar = bar
+            row.value = NewText(bar, 9, 0.95, 0.93, 0.88); row.value:SetPoint("RIGHT", -4, 0)
+            row.value:SetShadowOffset(1, -1); row.value:SetShadowColor(0, 0, 0, 0.9)
+        else
+            if bar and bar.Hide then bar:Hide() end
+            local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 96, 0); track:SetSize(240, 8); track:SetColorTexture(0.1, 0.08, 0.05, 1)
+            row.fill = row:CreateTexture(nil, "ARTWORK"); row.fill:SetPoint("LEFT", 96, 0); row.fill:SetHeight(8); row.fill:SetWidth(1)
+            row.value = NewText(row, 9); row.value:SetPoint("LEFT", 340, 0)
+        end
+        svr.classRows[i] = row
+    end
+
+    local zonePanel = Panel(-501, 48)
+    local zt = NewText(zonePanel, 9, 0.62, 0.55, 0.42); zt:SetPoint("TOPLEFT", 8, -7); zt:SetText(L("SVR_ZONES"))
+    svr.zones = NewText(zonePanel, 9, 0.85, 0.82, 0.75); svr.zones:SetPoint("TOPLEFT", 8, -21); svr.zones:SetWidth(412); svr.zones:SetJustifyH("LEFT")
+
+    svr.nodata = NewText(serverWin, 11, 0.9, 0.85, 0.7)
+    svr.nodata:SetPoint("CENTER"); svr.nodata:SetWidth(400); svr.nodata:SetJustifyH("CENTER")
+end
+
+local function FillServerWindow()
+    local fmt = BreakUpLargeNumbers or tostring
+    local data = NearbySpyData
+    local db = GetDB()
+    local g = nil
+    if type(data) == "table" and type(data.games) == "table" then
+        g = data.games[db.game] or data.games.forever
+    end
+    if not g then
+        svr.nodata:SetText(L("SVR_NODATA")); svr.nodata:Show()
+        svr.date:SetText(""); svr.stale:SetText(""); svr.total:SetText(""); svr.factions:SetText("")
+        svr.peak:SetText(""); svr.zones:SetText("")
+        for d = 1, 7 do for h = 0, 23 do svr.heatCells[d][h]:SetColorTexture(0.94, 0.73, 0.04, 0.04) end end
+        for i = 1, 9 do
+            local row = svr.classRows[i]
+            row.label:SetText(""); row.value:SetText("")
+            if row.bar then row.bar:SetValue(0) elseif row.fill then row.fill:SetWidth(1) end
+        end
+        return
+    end
+    svr.nodata:Hide()
+
+    local gen = tonumber(data.generated) or 0
+    svr.date:SetText(L("SVR_SNAPSHOT"):format(gen > 0 and date("%d.%m.%Y", gen) or "?"))
+    local ageDays = gen > 0 and math.floor((time() - gen) / 86400) or 0
+    if ageDays > 10 then svr.stale:SetText(L("SVR_STALE"):format(ageDays)) else svr.stale:SetText("") end
+
+    svr.total:SetText(fmt(tonumber(g.total) or 0))
+    local f = g.factions or {}
+    local fparts = {}
+    if tonumber(f.Alliance) then fparts[#fparts + 1] = "|cff6699ff" .. L("ALLIANCE") .. " " .. fmt(tonumber(f.Alliance)) .. "|r" end
+    if tonumber(f.Horde) then fparts[#fparts + 1] = "|cffff6666" .. L("HORDE") .. " " .. fmt(tonumber(f.Horde)) .. "|r" end
+    svr.factions:SetText(table.concat(fparts, " ; "))
+
+    local max, peakD, peakH = 0, nil, nil
+    local heat = g.heat
+    if type(heat) == "table" then
+        for d = 1, 7 do
+            local row = heat[d]
+            if type(row) == "table" then
+                for h = 0, 23 do
+                    local v = tonumber(row[h + 1]) or 0
+                    if v > max then max, peakD, peakH = v, d, h end
+                end
+            end
+        end
+    end
+    for d = 1, 7 do
+        local row = type(heat) == "table" and heat[d] or nil
+        for h = 0, 23 do
+            local v = (type(row) == "table" and tonumber(row[h + 1])) or 0
+            local a = 0.04
+            if max > 0 and v > 0 then
+                a = 0.04 + (math.log(1 + 9 * v / max) / math.log(10)) * 0.91
+            end
+            svr.heatCells[d][h]:SetColorTexture(0.94, 0.73, 0.04, math.min(a, 1))
+        end
+    end
+    if peakD then
+        svr.peak:SetText(L("SVR_PEAK"):format(L("SVR_D" .. peakD), peakH, max))
+    else
+        svr.peak:SetText("")
+    end
+
+    local cls = {}
+    for file, n in pairs(g.classes or {}) do
+        cls[#cls + 1] = { file = file, n = tonumber(n) or 0 }
+    end
+    table.sort(cls, function(a, b) return a.n > b.n end)
+    local top = cls[1] and cls[1].n or 0
+    local totalN = tonumber(g.total) or 0
+    for i = 1, 9 do
+        local row = svr.classRows[i]
+        local c = cls[i]
+        if c and top > 0 then
+            local r, cg, b = ClassColorRGB(c.file)
+            local name = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[c.file] or c.file
+            row.label:SetText(name); row.label:SetTextColor(r, cg, b)
+            row.value:SetText(("%s (%d%%)"):format(fmt(c.n), totalN > 0 and math.floor(c.n / totalN * 100 + 0.5) or 0))
+            if row.bar then
+                row.bar:SetMinMaxValues(0, top); row.bar:SetValue(c.n); row.bar:SetStatusBarColor(r, cg, b)
+            else
+                row.fill:SetWidth(math.max(1, 240 * c.n / top)); row.fill:SetColorTexture(r, cg, b, 1)
+            end
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+
+    local zp = {}
+    for i, z in ipairs(g.zones or {}) do
+        if i > 5 then break end
+        if type(z) == "table" then
+            zp[#zp + 1] = tostring(z[1]) .. " " .. fmt(tonumber(z[2]) or 0)
+        end
+    end
+    svr.zones:SetText(table.concat(zp, " ; "))
+end
+
+local function ShowServerWindow()
+    local ok, err = pcall(function()
+        if not serverWin then
+            BuildServerWindow()
+        end
+        FillServerWindow()
+        serverWin:Show()
+    end)
+    if not ok then
+        P(L("ERR_WINDOW") .. tostring(err))
+    end
+end
+
 SLASH_NEARBYSPY1 = "/nearbyspy"
 SLASH_NEARBYSPY2 = "/nspy"
 SlashCmdList["NEARBYSPY"] = function(msg)
@@ -1842,6 +2108,8 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     elseif msg == "help" then
         local ok, err = pcall(ShowHelpWindow)
         if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
+    elseif msg == "server" then
+        ShowServerWindow()
     elseif msg == "whostop" then
         if whoScan then
             FinishZoneScan("stopped manually")
