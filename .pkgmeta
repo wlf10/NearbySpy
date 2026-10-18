@@ -6,4 +6,10 @@ ignore:
   - CURSEFORGE.md
   - CHANGELOG-dev.md
   - NearbySpy-icon.png
-  - NearbySpy_Data
+
+# ship the census snapshot as a second top-level addon folder in the same
+# zip (18.10.2026): /nspy server works out of the box — unzip once and both
+# addons land in Interface/AddOns. The weekly datapack-latest rolling release
+# on GitHub still provides fresh data between addon releases.
+move-folders:
+  NearbySpy/NearbySpy_Data: NearbySpy_Data
