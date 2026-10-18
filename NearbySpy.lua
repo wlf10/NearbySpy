@@ -2417,7 +2417,9 @@ local function OptCheck(parent, x, y, labelKey, descKey, getter, setter)
         end
         cb.GetChecked = function(self) return self.__checked end
     end
-    cb:SetPoint("TOPLEFT", x, y)
+    -- layout like Blizzard options panels: label on the left, the checkbox
+    -- docked to the right edge of the row
+    cb:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -16, y)
     cb:SetChecked(getter())
     cb:SetScript("OnClick", function(self)
         -- template CheckButtons auto-toggle before OnClick; manual one doesn't.
@@ -2426,7 +2428,7 @@ local function OptCheck(parent, x, y, labelKey, descKey, getter, setter)
         setter(self:GetChecked() and true or false)
     end)
     local label = NewText(parent, 11, 0.93, 0.91, 0.87)
-    label:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+    label:SetPoint("TOPLEFT", x, y - 4)
     label:SetText(L(labelKey))
     local desc = NewText(parent, 8, 0.55, 0.47, 0.32)
     desc:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -3)
