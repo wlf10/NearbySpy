@@ -323,6 +323,11 @@ GetDB = function()
     if type(NearbySpy.debug) ~= "table" then
         NearbySpy.debug = {}
     end
+    -- peer sharing is ON by default for new/untouched installs (18.10.2026);
+    -- an explicit "/nspy peer off" (false) is respected, nil means "never set"
+    if NearbySpy.peerEnabled == nil then
+        NearbySpy.peerEnabled = true
+    end
     local db = NearbySpy
     -- game tag for the site (14.10.2026): retail / classic_era / forever.
     -- GetBuildInfo: 1.60.x — Forever beta; other 1.x — classic live;

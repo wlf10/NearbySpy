@@ -4,7 +4,7 @@ A WoW addon that passively records **players you encounter** into SavedVariables
 Install and play — nothing to click. To feed the statistics site (RealmPulse,
 wow.bitwolff.com) upload your `SavedVariables/NearbySpy.lua` file there after
 logging out; the addon never uploads anything to a web server. Optional in-game
-peer sharing is off by default.
+peer sharing is on by default (`/nspy peer off` to disable).
 
 ## What it does
 
@@ -58,13 +58,14 @@ Your only job is clicking the search button — no typing required.
 | `/nspy count` | counters + debug summary |
 | `/nspy announce` | toggle "first seen nearby" chat messages |
 | `/nspy debug` | debug mode: on → logs (digests, scan progress, gate blocks) in chat; off → stealth mode, logs only to the SV ring |
-| `/nspy peer on` / `off` | opt in/out of same-realm in-game channel sharing; off by default |
+| `/nspy peer on` / `off` | opt in/out of same-realm in-game channel sharing; on by default |
 | `/nspy peer` | channel and queue status |
 | `/nspy reset` | clear the database |
 
-## In-game peer sharing (optional)
+## In-game peer sharing (on by default)
 
-`/nspy peer on` joins `nearbyspydata` on the current realm. Only the first
+The channel is joined automatically on login (`/nspy peer off` opts out).
+`/nspy peer on` re-joins `nearbyspydata` on the current realm. Only the first
 locally discovered record with a known class and level is queued; subsequent
 updates and records received from peers are not sent. Each message contains
 game, realm, name, class, level, race and faction — not coordinates or chat text.
