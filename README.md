@@ -64,7 +64,7 @@ Your only job is clicking the search button — no typing required.
 | `/nspy server` | server census window (ships with the NearbySpy_Data module) |
 | `/nspy menu` | hub menu window (also: left-click the minimap button) |
 | `/nspy minimap` | show/hide the minimap button |
-| `/nspy settings` | settings window (peer sharing checkbox) |
+| `/nspy settings` | settings window (peer sharing, interface language, heatmap timezone) |
 
 ## In-game peer sharing (on by default)
 
