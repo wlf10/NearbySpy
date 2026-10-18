@@ -1409,6 +1409,17 @@ local function ClassColorRGB(classFile)
     return 1, 1, 1
 end
 
+-- Opaque underlay for every addon window (18.10.2026): on the beta the
+-- template's Bg can render transparent, so an overlapping window shows
+-- whatever window is behind it ("окна смешиваются"). Sublayer -7 keeps the
+-- template's own bg (where it renders) on top; where it doesn't, this solid
+-- color shows instead.
+local function SolidUnderlay(frame)
+    local t = frame:CreateTexture(nil, "BACKGROUND", -7)
+    t:SetAllPoints()
+    t:SetColorTexture(0.03, 0.025, 0.02, 1)
+end
+
 -- Command help is a separate, read-only window; never put help into an EditBox.
 local HELP_COMMANDS = {
     "/nspy [show]", "/nspy help", "/nspy suggest",
@@ -1455,6 +1466,7 @@ local function ShowHelpWindow()
         local bg = helpWin:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(0.05, 0.05, 0.08, 0.96)
+        SolidUnderlay(helpWin)
         local title = NewText(helpWin, 16, 0.4, 1, 0.6)
         title:SetPoint("TOPLEFT", 16, -14)
         title:SetText("NearbySpy — /nspy help  (/nearbyspy)")
@@ -1807,6 +1819,7 @@ local function BuildWindow()
     end
     win:SetSize(700, 640)
     win:SetPoint("CENTER")
+    SolidUnderlay(win)
     win:SetFrameStrata("DIALOG")
     win:SetToplevel(true)
     win:SetFrameLevel(100)
@@ -1951,6 +1964,7 @@ local function BuildServerWindow()
     end
     serverWin:SetSize(460, 620)
     serverWin:SetPoint("CENTER")
+    SolidUnderlay(serverWin)
     serverWin:SetFrameStrata("DIALOG")
     serverWin:SetToplevel(true)
     serverWin:SetFrameLevel(300)
@@ -2261,6 +2275,7 @@ local function BuildHubWindow()
     end
     hubWin:SetSize(228, 252)
     hubWin:SetPoint("CENTER")
+    SolidUnderlay(hubWin)
     hubWin:SetFrameStrata("DIALOG")
     hubWin:SetToplevel(true)
     hubWin:SetFrameLevel(400)
