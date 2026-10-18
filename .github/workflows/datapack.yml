@@ -40,7 +40,7 @@ jobs:
           fi
 
       - name: Zip data addon
-        run: cd NearbySpy_Data && zip -q -r ../NearbySpy_Data.zip . && cd ..
+        run: zip -q -r NearbySpy_Data.zip NearbySpy_Data
 
       - name: Refresh rolling release
         env:
