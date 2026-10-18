@@ -2462,9 +2462,13 @@ end
 
 local RefreshSettingsText -- forward: the language selector relabels the window live
 
--- value selector: real UIDropDownMenu (Blizzard look) when the template and
--- its helpers work on this client; "< value >" stepper fallback when they
--- don't. entriesFn() returns { { value=..., text=... }, ... } fresh each call
+-- value selector, three tiers:
+--   1) modern WowStyle2 DropdownButton + Steppers arrow buttons (the default
+--      Settings look: dropdown in the middle, < > arrows cycling the options)
+--   2) classic UIDropDownMenu template
+--   3) ASCII "< value >" stepper built from raw widgets
+-- Each tier pcall-falls through to the next when a template/mixin is gutted.
+-- entriesFn() returns { { value=..., text=... }, ... } fresh each call
 -- (the Auto row carries the current locale/system values in its text).
 local function OptSelect(parent, y, ddName, labelKey, descKey, width, entriesFn, getCurrent, onPick)
     local label = NewText(parent, 11, 0.93, 0.91, 0.87)
@@ -2483,6 +2487,60 @@ local function OptSelect(parent, y, ddName, labelKey, descKey, width, entriesFn,
         end
         return ""
     end
+
+    local function menuGen(dropdown, rootDescription)
+        local entries = entriesFn()
+        for i = 1, #entries do
+            local e = entries[i]
+            rootDescription:CreateRadio(e.text,
+                function() return getCurrent() == e.value end,
+                function() onPick(e.value) end,
+                e.value)
+        end
+    end
+
+    -- tier 1: modern dropdown + arrow steppers
+    local mdd, mdec, minc
+    local okModern = pcall(function()
+        mdd = CreateFrame("DropdownButton", ddName, parent, "WowStyle2DropdownTemplate")
+        if not (mdd.SetupMenu and mdd.CollectSelectionData and mdd.Increment and mdd.Decrement) then
+            error("WowStyle2 dropdown mixin missing")
+        end
+        if mdd.SetWidth then pcall(mdd.SetWidth, mdd, width) end
+        mdd:SetPoint("TOPLEFT", 56, y - 14)
+        mdec = CreateFrame("Button", nil, parent, "SteppersDecrementButtonTemplate")
+        minc = CreateFrame("Button", nil, parent, "SteppersIncrementButtonTemplate")
+        if not (mdec and minc) then error("stepper button templates missing") end
+        mdec:SetPoint("TOPLEFT", 16, y - 16)
+        minc:SetPoint("LEFT", mdd, "RIGHT", 4, 0)
+        mdd:SetupMenu(menuGen)
+        local function UpdateSteppers()
+            local ok, prev, nxt = pcall(function() return mdd:CollectSelectionData() end)
+            if ok then
+                mdec:SetEnabled(prev ~= nil)
+                minc:SetEnabled(nxt ~= nil)
+            end
+        end
+        mdec:SetScript("OnClick", function() mdd:Decrement() end)
+        minc:SetScript("OnClick", function() mdd:Increment() end)
+        if DropdownButtonMixin and DropdownButtonMixin.Event and mdd.RegisterCallback then
+            pcall(function()
+                mdd:RegisterCallback(DropdownButtonMixin.Event.OnUpdate, UpdateSteppers)
+            end)
+        end
+        UpdateSteppers()
+    end)
+    if okModern and mdd then
+        return {
+            Refresh = function() pcall(mdd.SetupMenu, mdd, menuGen) end,
+            label = label, desc = desc, dd = mdd,
+        }
+    end
+    if mdd and mdd.Hide then mdd:Hide() end
+    if mdec and mdec.Hide then mdec:Hide() end
+    if minc and minc.Hide then minc:Hide() end
+
+    -- tier 2: classic UIDropDownMenu
     local dd
     local okDD = pcall(function()
         dd = CreateFrame("Frame", ddName, parent, "UIDropDownMenuTemplate")
@@ -2511,8 +2569,9 @@ local function OptSelect(parent, y, ddName, labelKey, descKey, width, entriesFn,
             label = label, desc = desc, dd = dd,
         }
     end
-    -- fallback: "< value >" stepper (template gutted on this client)
     if dd and dd.Hide then dd:Hide() end
+
+    -- tier 3: "< value >" stepper (all templates gutted)
     local function mkBtn(txt, xOff)
         local b = CreateFrame("Button", nil, parent)
         b:SetSize(22, 18)
