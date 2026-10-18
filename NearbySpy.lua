@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.3.0
+    NearbySpy 1.3.1
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -1433,6 +1433,11 @@ local function ShowHelpWindow()
         helpWin:SetSize(670, 445)
         helpWin:SetPoint("CENTER")
         helpWin:SetFrameStrata("DIALOG")
+        -- window stacking (18.10.2026): all windows shared one strata+level and
+        -- their children interleaved when overlapping; toplevel raises a window
+        -- on click, distinct levels keep a static separation band
+        helpWin:SetToplevel(true)
+        helpWin:SetFrameLevel(200)
         helpWin:SetMovable(true)
         helpWin:EnableMouse(true)
         helpWin:RegisterForDrag("LeftButton")
@@ -1803,6 +1808,8 @@ local function BuildWindow()
     win:SetSize(700, 640)
     win:SetPoint("CENTER")
     win:SetFrameStrata("DIALOG")
+    win:SetToplevel(true)
+    win:SetFrameLevel(100)
     win:SetMovable(true)
     win:EnableMouse(true)
     win:RegisterForDrag("LeftButton")
@@ -1945,6 +1952,8 @@ local function BuildServerWindow()
     serverWin:SetSize(460, 620)
     serverWin:SetPoint("CENTER")
     serverWin:SetFrameStrata("DIALOG")
+    serverWin:SetToplevel(true)
+    serverWin:SetFrameLevel(300)
     serverWin:SetMovable(true)
     serverWin:EnableMouse(true)
     serverWin:RegisterForDrag("LeftButton")
@@ -2253,6 +2262,8 @@ local function BuildHubWindow()
     hubWin:SetSize(228, 252)
     hubWin:SetPoint("CENTER")
     hubWin:SetFrameStrata("DIALOG")
+    hubWin:SetToplevel(true)
+    hubWin:SetFrameLevel(400)
     hubWin:SetMovable(true)
     hubWin:EnableMouse(true)
     hubWin:RegisterForDrag("LeftButton")
