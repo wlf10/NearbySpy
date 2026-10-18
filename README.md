@@ -61,6 +61,9 @@ Your only job is clicking the search button — no typing required.
 | `/nspy peer on` / `off` | opt in/out of same-realm in-game channel sharing; on by default |
 | `/nspy peer` | channel and queue status |
 | `/nspy reset` | clear the database |
+| `/nspy server` | server census window (ships with the NearbySpy_Data module) |
+| `/nspy menu` | hub menu window (also: left-click the minimap button) |
+| `/nspy minimap` | show/hide the minimap button |
 
 ## In-game peer sharing (on by default)
 

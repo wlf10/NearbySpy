@@ -78,6 +78,13 @@ local LOCALE = {
         SVR_NODATA = "No data module found. Install NearbySpy_Data (datapack-latest release) next to NearbySpy.",
         SVR_STALE = "snapshot %d days old - update NearbySpy_Data",
         SVR_D1 = "Mon", SVR_D2 = "Tue", SVR_D3 = "Wed", SVR_D4 = "Thu", SVR_D5 = "Fri", SVR_D6 = "Sat", SVR_D7 = "Sun",
+        HUB_STATUS = "%d records - peer %s - v%s",
+        HUB_PLAYERS = "Players", HUB_PLAYERS_D = "encounter list",
+        HUB_SERVER = "Server", HUB_SERVER_D = "realm census",
+        HUB_HELP = "Help", HUB_HELP_D = "all commands",
+        HUB_PEER = "Sharing", HUB_PEER_D = "peer channel",
+        MINIMAP_TIP_L = "Left-click: menu", MINIMAP_TIP_R = "Right-click: player list",
+        MM_ON = "minimap button shown", MM_OFF = "minimap button hidden",
     },
     zhCN = {
         ON = "开启", OFF = "关闭",
@@ -119,6 +126,13 @@ local LOCALE = {
         SVR_NODATA = "未找到数据模块。请在 NearbySpy 旁安装 NearbySpy_Data (datapack-latest)。",
         SVR_STALE = "快照已过期 %d 天 - 请更新 NearbySpy_Data",
         SVR_D1 = "一", SVR_D2 = "二", SVR_D3 = "三", SVR_D4 = "四", SVR_D5 = "五", SVR_D6 = "六", SVR_D7 = "日",
+        HUB_STATUS = "%d 条记录 - 共享 %s - v%s",
+        HUB_PLAYERS = "玩家", HUB_PLAYERS_D = "遇到的玩家列表",
+        HUB_SERVER = "服务器", HUB_SERVER_D = "服务器普查",
+        HUB_HELP = "帮助", HUB_HELP_D = "所有命令",
+        HUB_PEER = "共享", HUB_PEER_D = "peer 频道",
+        MINIMAP_TIP_L = "左键: 菜单", MINIMAP_TIP_R = "右键: 玩家列表",
+        MM_ON = "小地图按钮已显示", MM_OFF = "小地图按钮已隐藏",
     },
     ruRU = {
         ON = "вкл", OFF = "выкл",
@@ -160,6 +174,13 @@ local LOCALE = {
         SVR_NODATA = "Нет data-модуля. Поставь NearbySpy_Data (релиз datapack-latest) рядом с NearbySpy.",
         SVR_STALE = "снимку %d дн. - обнови NearbySpy_Data",
         SVR_D1 = "Пн", SVR_D2 = "Вт", SVR_D3 = "Ср", SVR_D4 = "Чт", SVR_D5 = "Пт", SVR_D6 = "Сб", SVR_D7 = "Вс",
+        HUB_STATUS = "%d записей - обмен %s - v%s",
+        HUB_PLAYERS = "Игроки", HUB_PLAYERS_D = "список встреченных",
+        HUB_SERVER = "Сервер", HUB_SERVER_D = "ценз сервера",
+        HUB_HELP = "Помощь", HUB_HELP_D = "все команды",
+        HUB_PEER = "Обмен", HUB_PEER_D = "канал обмена",
+        MINIMAP_TIP_L = "ЛКМ: меню", MINIMAP_TIP_R = "ПКМ: список игроков",
+        MM_ON = "кнопка миникарты показана", MM_OFF = "кнопка миникарты скрыта",
     },
     deDE = {
         ON = "an", OFF = "aus",
@@ -201,6 +222,13 @@ local LOCALE = {
         SVR_NODATA = "Kein Datenmodul gefunden. Installiere NearbySpy_Data (Release datapack-latest) neben NearbySpy.",
         SVR_STALE = "Snapshot ist %d Tage alt - NearbySpy_Data aktualisieren",
         SVR_D1 = "Mo", SVR_D2 = "Di", SVR_D3 = "Mi", SVR_D4 = "Do", SVR_D5 = "Fr", SVR_D6 = "Sa", SVR_D7 = "So",
+        HUB_STATUS = "%d Einträge - Austausch %s - v%s",
+        HUB_PLAYERS = "Spieler", HUB_PLAYERS_D = "Begegnungsliste",
+        HUB_SERVER = "Server", HUB_SERVER_D = "Server-Zensus",
+        HUB_HELP = "Hilfe", HUB_HELP_D = "alle Befehle",
+        HUB_PEER = "Austausch", HUB_PEER_D = "Peer-Kanal",
+        MINIMAP_TIP_L = "Linksklick: Menü", MINIMAP_TIP_R = "Rechtsklick: Spielerliste",
+        MM_ON = "Minimap-Button eingeblendet", MM_OFF = "Minimap-Button ausgeblendet",
     },
     frFR = {
         ON = "activé", OFF = "désactivé",
@@ -242,6 +270,13 @@ local LOCALE = {
         SVR_NODATA = "Module de données absent. Installez NearbySpy_Data (release datapack-latest) à côté de NearbySpy.",
         SVR_STALE = "snapshot vieux de %d jours - mettez à jour NearbySpy_Data",
         SVR_D1 = "Lun", SVR_D2 = "Mar", SVR_D3 = "Mer", SVR_D4 = "Jeu", SVR_D5 = "Ven", SVR_D6 = "Sam", SVR_D7 = "Dim",
+        HUB_STATUS = "%d entrées - partage %s - v%s",
+        HUB_PLAYERS = "Joueurs", HUB_PLAYERS_D = "liste des rencontres",
+        HUB_SERVER = "Serveur", HUB_SERVER_D = "recensement",
+        HUB_HELP = "Aide", HUB_HELP_D = "toutes les commandes",
+        HUB_PEER = "Partage", HUB_PEER_D = "canal peer",
+        MINIMAP_TIP_L = "Clic gauche : menu", MINIMAP_TIP_R = "Clic droit : liste des joueurs",
+        MM_ON = "bouton minicarte affiché", MM_OFF = "bouton minicarte masqué",
     },
     koKR = {
         ON = "켜짐", OFF = "꺼짐",
@@ -283,6 +318,13 @@ local LOCALE = {
         SVR_NODATA = "데이터 모듈이 없습니다. NearbySpy 옆에 NearbySpy_Data(datapack-latest)를 설치하세요.",
         SVR_STALE = "스냅샷이 %d일 지남 - NearbySpy_Data 업데이트",
         SVR_D1 = "월", SVR_D2 = "화", SVR_D3 = "수", SVR_D4 = "목", SVR_D5 = "금", SVR_D6 = "토", SVR_D7 = "일",
+        HUB_STATUS = "%d개 기록 - 공유 %s - v%s",
+        HUB_PLAYERS = "플레이어", HUB_PLAYERS_D = "만난 플레이어 목록",
+        HUB_SERVER = "서버", HUB_SERVER_D = "서버 센서스",
+        HUB_HELP = "도움말", HUB_HELP_D = "모든 명령어",
+        HUB_PEER = "공유", HUB_PEER_D = "피어 채널",
+        MINIMAP_TIP_L = "좌클릭: 메뉴", MINIMAP_TIP_R = "우클릭: 플레이어 목록",
+        MM_ON = "미니맵 버튼 표시", MM_OFF = "미니맵 버튼 숨김",
     },
 }
 local function L(key)
@@ -1373,16 +1415,16 @@ local HELP_COMMANDS = {
     "/nspy who", "/nspy whoclass", "/nspy whorace", "/nspy whostop",
     "/nspy count", "/nspy announce", "/nspy debug",
     "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy reset",
-    "/nspy server",
+    "/nspy server", "/nspy menu", "/nspy minimap",
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Assisted class scan", "Assisted race scan", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database", "Server census window (needs NearbySpy_Data)"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "辅助按职业扫描", "辅助按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Скан по классам (жми лупу)", "Скан по расам (жми лупу)", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "Nach Klasse (assistiert)", "Nach Volk (assistiert)", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Par classe (assisté)", "Par race (assisté)", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "직업별 보조 스캔", "종족별 보조 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Assisted class scan", "Assisted race scan", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "辅助按职业扫描", "辅助按种族扫描", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Скан по классам (жми лупу)", "Скан по расам (жми лупу)", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "Nach Klasse (assistiert)", "Nach Volk (assistiert)", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Par classe (assisté)", "Par race (assisté)", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "직업별 보조 스캔", "종족별 보조 스캔", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기"},
 }
 local helpWin
 local function ShowHelpWindow()
@@ -2122,6 +2164,229 @@ local function ShowServerWindow()
     end
 end
 
+-- ============ hub window + minimap button (18.10.2026) ============
+-- One menu window (grid of sections) opened from the minimap button or
+-- /nspy menu. The minimap button is a standalone frame (no LibDBIcon
+-- dependency): drag along the minimap ring, angle persisted in SV;
+-- /nspy minimap hides it. Cell "icons" are letter tiles (first character of
+-- the localized label): the client font has no emoji, and guessing Blizzard
+-- icon paths on a custom client is fragile.
+local hubWin
+local hub = {}
+local miniBtn
+local Atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+
+local function Utf8First(s)
+    return (type(s) == "string" and s:match("^.[\128-\191]*")) or "?"
+end
+
+local function AddonVersion()
+    local v
+    if GetAddOnMetadata then
+        local ok, r = pcall(GetAddOnMetadata, "NearbySpy", "Version")
+        if ok then v = r end
+    end
+    if not v and C_AddOns and C_AddOns.GetAddOnMetadata then
+        local ok, r = pcall(C_AddOns.GetAddOnMetadata, "NearbySpy", "Version")
+        if ok then v = r end
+    end
+    return v or "?"
+end
+
+local function HubRefreshStatus()
+    if not hubWin then return end
+    local db = GetDB()
+    hub.status:SetText(L("HUB_STATUS"):format(CountPlayers(),
+        db.peerEnabled and L("ON") or L("OFF"), AddonVersion()))
+    if hub.peerSub then
+        hub.peerSub:SetText(db.peerEnabled and L("ON") or L("OFF"))
+    end
+end
+
+local function HubCell(parent, col, row, labelKey, descKey, lr, lg, lb, onClick)
+    local cell = CreateFrame("Button", nil, parent)
+    cell:SetSize(96, 78)
+    cell:SetPoint("TOPLEFT", 14 + col * 104, -56 - row * 86)
+    local bg = cell:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.11, 0.085, 0.045, 1)
+    cell:SetHighlightTexture("Interface\\Buttons\\WHITE8x8", "ADD")
+    local hl = cell.GetHighlightTexture and cell:GetHighlightTexture() or nil
+    if hl and hl.SetVertexColor then hl:SetVertexColor(0.94, 0.73, 0.04, 0.35) end
+    local tile = cell:CreateTexture(nil, "ARTWORK")
+    tile:SetSize(32, 32)
+    tile:SetPoint("TOP", 0, -10)
+    tile:SetColorTexture(0.18, 0.14, 0.07, 1)
+    local letter = NewText(cell, 15, lr, lg, lb)
+    letter:SetPoint("CENTER", tile, "CENTER")
+    letter:SetText(Utf8First(L(labelKey)))
+    local label = NewText(cell, 10, 0.9, 0.88, 0.8)
+    label:SetPoint("TOP", tile, "BOTTOM", 0, -3)
+    label:SetText(L(labelKey))
+    local desc = NewText(cell, 8, 0.55, 0.47, 0.32)
+    desc:SetPoint("TOP", label, "BOTTOM", 0, -1)
+    desc:SetText(L(descKey))
+    cell:SetScript("OnClick", onClick)
+    return cell, desc
+end
+
+local function BuildHubWindow()
+    local okTpl, tplWin = pcall(CreateFrame, "Frame", "NearbySpyHubWindow", UIParent, "BasicFrameTemplateWithInset")
+    if okTpl and tplWin and tplWin.TitleText and tplWin.Bg and tplWin.CloseButton then
+        hubWin = tplWin
+    else
+        if tplWin and tplWin.Hide then tplWin:Hide() end
+        hubWin = CreateFrame("Frame", "NearbySpyHubWindow", UIParent)
+        local bg = hubWin:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.03, 0.025, 0.02, 0.97)
+        hubWin.TitleText = NewText(hubWin, 14, 1, 0.82, 0)
+        hubWin.TitleText:SetPoint("TOPLEFT", 15, -14)
+        local btn = CreateFrame("Button", nil, hubWin)
+        btn:SetSize(26, 26)
+        btn:SetPoint("TOPRIGHT", -8, -8)
+        local x = NewText(btn, 15, 0.85, 0.65, 0.25)
+        x:SetPoint("CENTER")
+        x:SetText("x")
+        hubWin.CloseButton = btn
+    end
+    hubWin:SetSize(228, 252)
+    hubWin:SetPoint("CENTER")
+    hubWin:SetFrameStrata("DIALOG")
+    hubWin:SetMovable(true)
+    hubWin:EnableMouse(true)
+    hubWin:RegisterForDrag("LeftButton")
+    hubWin:SetScript("OnDragStart", hubWin.StartMoving)
+    hubWin:SetScript("OnDragStop", hubWin.StopMovingOrSizing)
+    hubWin:EnableKeyboard(true)
+    hubWin:SetScript("OnKeyDown", function(_, key)
+        if key == "ESCAPE" then
+            hubWin:SetPropagateKeyboardInput(false)
+            hubWin:Hide()
+        else
+            hubWin:SetPropagateKeyboardInput(true)
+        end
+    end)
+    ApplyFont(hubWin.TitleText, 14, "OUTLINE")
+    hubWin.TitleText:SetText("NEARBYSPY")
+    hubWin.TitleText:SetTextColor(1, 0.82, 0, 1)
+    hubWin.CloseButton:SetScript("OnClick", function() hubWin:Hide() end)
+
+    hub.status = NewText(hubWin, 8, 0.62, 0.55, 0.42)
+    hub.status:SetPoint("TOPLEFT", 15, -36)
+
+    HubCell(hubWin, 0, 0, "HUB_PLAYERS", "HUB_PLAYERS_D", 0.55, 0.75, 1.0,
+        function() ShowWindow() end)
+    HubCell(hubWin, 1, 0, "HUB_SERVER", "HUB_SERVER_D", 1.0, 0.82, 0.0,
+        function() ShowServerWindow() end)
+    HubCell(hubWin, 0, 1, "HUB_HELP", "HUB_HELP_D", 1.0, 0.5, 0.5,
+        function()
+            local ok, err = pcall(ShowHelpWindow)
+            if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
+        end)
+    local _, peerSub = HubCell(hubWin, 1, 1, "HUB_PEER", "HUB_PEER_D", 0.7, 0.9, 0.6,
+        function()
+            local db = GetDB()
+            db.peerEnabled = not db.peerEnabled
+            if db.peerEnabled then
+                local ok, err = pcall(JoinPeerChannel)
+                if not ok then DbgErr("peerJoin", err) end
+            else
+                peerQueue, peerQueued = {}, {}
+                if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
+            end
+            HubRefreshStatus()
+        end)
+    hub.peerSub = peerSub
+    HubRefreshStatus()
+end
+
+local function ShowHubWindow()
+    local ok, err = pcall(function()
+        if not hubWin then BuildHubWindow() end
+        HubRefreshStatus()
+        hubWin:Show()
+    end)
+    if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
+end
+
+local function ToggleHubWindow()
+    if hubWin and hubWin.IsShown and hubWin:IsShown() then
+        hubWin:Hide()
+    else
+        ShowHubWindow()
+    end
+end
+
+local function MinimapButton_Update()
+    if not miniBtn or not Minimap then return end
+    local db = GetDB()
+    if db.minimapHide then
+        miniBtn:Hide()
+        return
+    end
+    local okW, w = pcall(function() return Minimap:GetWidth() end)
+    local r = ((okW and tonumber(w)) or 140) / 2 + 6
+    local angle = math.rad(db.minimapAngle or -30)
+    miniBtn:ClearAllPoints()
+    miniBtn:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * r, math.sin(angle) * r)
+    miniBtn:Show()
+end
+
+local function BuildMinimapButton()
+    if miniBtn or not Minimap then return end
+    miniBtn = CreateFrame("Button", "NearbySpyMinimapButton", Minimap)
+    miniBtn:SetSize(28, 28)
+    miniBtn:SetFrameStrata("MEDIUM")
+    miniBtn:SetMovable(true)
+    miniBtn:RegisterForDrag("LeftButton")
+    miniBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    local disc = miniBtn:CreateTexture(nil, "BACKGROUND")
+    disc:SetSize(26, 26)
+    disc:SetPoint("CENTER")
+    disc:SetColorTexture(0.06, 0.05, 0.03, 0.9)
+    local icon = miniBtn:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(22, 22)
+    icon:SetPoint("CENTER")
+    icon:SetTexture("Interface\\AddOns\\NearbySpy\\NearbySpyIcon")
+    local function onDragUpdate()
+        local okC, mx, my = pcall(Minimap.GetCenter, Minimap)
+        if not okC or not mx then return end
+        local px, py = GetCursorPosition()
+        local okS, scale = pcall(Minimap.GetEffectiveScale, Minimap)
+        scale = (okS and tonumber(scale)) or 1
+        px, py = px / scale, py / scale
+        GetDB().minimapAngle = math.deg(Atan2(py - my, px - mx))
+        MinimapButton_Update()
+    end
+    miniBtn:SetScript("OnDragStart", function(self) self:SetScript("OnUpdate", onDragUpdate) end)
+    miniBtn:SetScript("OnDragStop", function(self)
+        self:SetScript("OnUpdate", nil)
+        self.dragged = true
+    end)
+    miniBtn:SetScript("OnClick", function(self, button)
+        if self.dragged then
+            self.dragged = false
+            return
+        end
+        if button == "RightButton" then
+            if win and win.IsShown and win:IsShown() then win:Hide() else ShowWindow() end
+        else
+            ToggleHubWindow()
+        end
+    end)
+    miniBtn:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("NearbySpy", 1, 0.82, 0)
+        GameTooltip:AddLine(L("MINIMAP_TIP_L"), 0.8, 0.78, 0.7)
+        GameTooltip:AddLine(L("MINIMAP_TIP_R"), 0.8, 0.78, 0.7)
+        GameTooltip:Show()
+    end)
+    miniBtn:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    MinimapButton_Update()
+end
+
 SLASH_NEARBYSPY1 = "/nearbyspy"
 SLASH_NEARBYSPY2 = "/nspy"
 SlashCmdList["NEARBYSPY"] = function(msg)
@@ -2134,6 +2399,12 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
     elseif msg == "server" then
         ShowServerWindow()
+    elseif msg == "menu" or msg == "hub" then
+        ToggleHubWindow()
+    elseif msg == "minimap" then
+        db.minimapHide = not db.minimapHide
+        MinimapButton_Update()
+        P(db.minimapHide and L("MM_OFF") or L("MM_ON"))
     elseif msg == "whostop" then
         if whoScan then
             FinishZoneScan("stopped manually")
@@ -2320,6 +2591,10 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         if db.peerEnabled then
             local ok, err = pcall(JoinPeerChannel)
             if not ok then DbgErr("peerJoin", err) end
+        end
+        do
+            local ok, err = pcall(BuildMinimapButton)
+            if not ok then DbgErr("minimap", err) end
         end
         D(L("STARTUP"):format(CountPlayers()))
         RequestGuildRoster()
