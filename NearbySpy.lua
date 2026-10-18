@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.3.0
+    NearbySpy 1.3.1
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -2019,26 +2019,45 @@ local function FillServerWindow()
     if tonumber(f.Horde) then fparts[#fparts + 1] = "|cffff6666" .. L("HORDE") .. " " .. fmt(tonumber(f.Horde)) .. "|r" end
     svr.factions:SetText(table.concat(fparts, " ; "))
 
-    local max, peakD, peakH = 0, nil, nil
+    -- datapack heat is UTC; rotate into the player's local hours so the map
+    -- matches the site (standard os.date/os.time offset trick, guarded —
+    -- falls back to UTC if the client lacks the os table functions)
+    local offset = 0
+    local okOff, off = pcall(function()
+        local diff = os.difftime and os.difftime(os.time(os.date("*t")), os.time(os.date("!*t")))
+            or (os.time(os.date("*t")) - os.time(os.date("!*t")))
+        return math.floor(diff / 3600 + 0.5)
+    end)
+    if okOff and type(off) == "number" and math.abs(off) <= 14 then offset = off end
     local heat = g.heat
+    local flat = nil
     if type(heat) == "table" then
+        flat = {}
         for d = 1, 7 do
             local row = heat[d]
-            if type(row) == "table" then
-                for h = 0, 23 do
-                    local v = tonumber(row[h + 1]) or 0
-                    if v > max then max, peakD, peakH = v, d, h end
-                end
+            for h = 0, 23 do
+                flat[(d - 1) * 24 + h] = (type(row) == "table" and tonumber(row[h + 1])) or 0
             end
         end
     end
+    local max, peakD, peakH = 0, nil, nil
+    if flat then
+        for i = 0, 167 do
+            if (flat[i] or 0) > max then max = flat[i] end
+        end
+    end
     for d = 1, 7 do
-        local row = type(heat) == "table" and heat[d] or nil
         for h = 0, 23 do
-            local v = (type(row) == "table" and tonumber(row[h + 1])) or 0
+            local v = 0
+            if flat then
+                v = flat[((d - 1) * 24 + h - offset) % 168] or 0
+            end
+            -- visibility floor: the snapshot is sparse and the log scale against
+            -- the upload-hour spike made ordinary cells nearly invisible at 13px
             local a = 0.04
             if max > 0 and v > 0 then
-                a = 0.04 + (math.log(1 + 9 * v / max) / math.log(10)) * 0.91
+                a = 0.2 + (math.log(1 + 9 * v / max) / math.log(10)) * 0.75
+                if v == max then peakD, peakH = d, h end
             end
             svr.heatCells[d][h]:SetColorTexture(0.94, 0.73, 0.04, math.min(a, 1))
         end
