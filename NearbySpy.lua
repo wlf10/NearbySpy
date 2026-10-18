@@ -2460,18 +2460,63 @@ local function EffectiveLocale()
     return "enUS"
 end
 
-local RefreshSettingsText -- forward: the language stepper relabels the window live
+local RefreshSettingsText -- forward: the language selector relabels the window live
 
--- value stepper: "< value >" between two buttons; onStep(dir) mutates state,
--- Refresh() re-renders the value text. Returns handles for live relabeling.
-local function OptStepper(parent, y, labelKey, descKey, getText, onStep)
+-- value selector: real UIDropDownMenu (Blizzard look) when the template and
+-- its helpers work on this client; "< value >" stepper fallback when they
+-- don't. entriesFn() returns { { value=..., text=... }, ... } fresh each call
+-- (the Auto row carries the current locale/system values in its text).
+local function OptSelect(parent, y, ddName, labelKey, descKey, width, entriesFn, getCurrent, onPick)
     local label = NewText(parent, 11, 0.93, 0.91, 0.87)
     label:SetPoint("TOPLEFT", 16, y)
     label:SetText(L(labelKey))
+    local desc = NewText(parent, 8, 0.55, 0.47, 0.32)
+    desc:SetPoint("TOPLEFT", 16, y - 46)
+    desc:SetWidth(330)
+    desc:SetJustifyH("LEFT")
+    desc:SetText(L(descKey))
+    local function currentText()
+        local cur = getCurrent()
+        local entries = entriesFn()
+        for i = 1, #entries do
+            if entries[i].value == cur then return entries[i].text end
+        end
+        return ""
+    end
+    local dd
+    local okDD = pcall(function()
+        dd = CreateFrame("Frame", ddName, parent, "UIDropDownMenuTemplate")
+        dd:SetPoint("TOPLEFT", -12, y - 14)
+        UIDropDownMenu_SetWidth(dd, width)
+        UIDropDownMenu_Initialize(dd, function()
+            local entries = entriesFn()
+            local cur = getCurrent()
+            for i = 1, #entries do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = entries[i].text
+                info.value = entries[i].value
+                info.checked = (entries[i].value == cur)
+                info.func = function(btn)
+                    onPick(btn.value)
+                    UIDropDownMenu_SetText(dd, currentText())
+                end
+                UIDropDownMenu_AddButton(info)
+            end
+        end)
+        UIDropDownMenu_SetText(dd, currentText())
+    end)
+    if okDD and dd then
+        return {
+            Refresh = function() UIDropDownMenu_SetText(dd, currentText()) end,
+            label = label, desc = desc, dd = dd,
+        }
+    end
+    -- fallback: "< value >" stepper (template gutted on this client)
+    if dd and dd.Hide then dd:Hide() end
     local function mkBtn(txt, xOff)
         local b = CreateFrame("Button", nil, parent)
         b:SetSize(22, 18)
-        b:SetPoint("TOPLEFT", xOff, y - 20)
+        b:SetPoint("TOPLEFT", xOff, y - 16)
         local bg = b:CreateTexture(nil, "ARTWORK")
         bg:SetAllPoints()
         bg:SetColorTexture(0.16, 0.13, 0.07, 1)
@@ -2480,23 +2525,48 @@ local function OptStepper(parent, y, labelKey, descKey, getText, onStep)
         t:SetText(txt)
         local hl = b:GetHighlightTexture()
         if hl and hl.SetColorTexture then hl:SetColorTexture(1, 0.82, 0, 0.15) end
-        b:SetScript("OnClick", function() onStep(txt == "<" and -1 or 1) end)
         return b
     end
     local prev = mkBtn("<", 16)
     local nxt = mkBtn(">", 246)
     local val = NewText(parent, 10, 1, 0.82, 0)
-    val:SetPoint("TOPLEFT", 44, y - 24)
+    val:SetPoint("TOPLEFT", 44, y - 20)
     val:SetWidth(196)
     val:SetJustifyH("CENTER")
-    local desc = NewText(parent, 8, 0.55, 0.47, 0.32)
-    desc:SetPoint("TOPLEFT", 16, y - 42)
-    desc:SetWidth(330)
-    desc:SetJustifyH("LEFT")
-    desc:SetText(L(descKey))
-    local function Refresh() val:SetText(getText()) end
+    local function Refresh() val:SetText(currentText()) end
+    local function step(dir)
+        local entries = entriesFn()
+        local cur = getCurrent()
+        local idx = 1
+        for i = 1, #entries do
+            if entries[i].value == cur then idx = i end
+        end
+        idx = idx + dir
+        if idx > #entries then idx = 1 elseif idx < 1 then idx = #entries end
+        onPick(entries[idx].value)
+        Refresh()
+    end
+    prev:SetScript("OnClick", function() step(-1) end)
+    nxt:SetScript("OnClick", function() step(1) end)
     Refresh()
     return { Refresh = Refresh, label = label, desc = desc, prev = prev, nxt = nxt }
+end
+
+-- Auto (client) first, then the fixed public order en -> zh -> ru -> de -> fr -> ko.
+local function LangEntries()
+    local t = { { value = "AUTO", text = L("SET_AUTO"):format(SET_LANG_NAME[EffectiveLocale()]) } }
+    for i = 1, #SET_LANG_ORDER do
+        local code = SET_LANG_ORDER[i]
+        t[#t + 1] = { value = code, text = SET_LANG_NAME[code] }
+    end
+    return t
+end
+local function TzEntries()
+    local t = { { value = "AUTO", text = L("SET_AUTO"):format(("UTC%+d"):format(HeatOffsetHours())) } }
+    for h = -12, 14 do
+        t[#t + 1] = { value = h, text = ("UTC%+d"):format(h) }
+    end
+    return t
 end
 
 local function BuildSettingsWindow()
@@ -2557,41 +2627,24 @@ local function BuildSettingsWindow()
             HubRefreshStatus()
         end)
 
-    opt.lang = OptStepper(win, -108, "SET_LANG", "SET_LANG_D",
-        function()
+    opt.lang = OptSelect(win, -104, "NearbySpyLangDD", "SET_LANG", "SET_LANG_D", 190,
+        LangEntries,
+        function() return GetDB().locale or "AUTO" end,
+        function(v)
             local db = GetDB()
-            if db.locale then return SET_LANG_NAME[db.locale] or db.locale end
-            return L("SET_AUTO"):format(SET_LANG_NAME[EffectiveLocale()])
-        end,
-        function(dir)
-            local db = GetDB()
-            local idx = 0 -- 0 = Auto (follow the client)
-            if db.locale then
-                for i = 1, #SET_LANG_ORDER do
-                    if SET_LANG_ORDER[i] == db.locale then idx = i end
-                end
-            end
-            idx = idx + dir
-            if idx > #SET_LANG_ORDER then idx = 0 elseif idx < 0 then idx = #SET_LANG_ORDER end
-            db.locale = (idx == 0) and nil or SET_LANG_ORDER[idx]
+            db.locale = (v ~= "AUTO") and v or nil
             RefreshSettingsText()
             P(L("SET_RELOAD"))
         end)
 
-    opt.tz = OptStepper(win, -192, "SET_TZ", "SET_TZ_D",
+    opt.tz = OptSelect(win, -186, "NearbySpyTzDD", "SET_TZ", "SET_TZ_D", 190,
+        TzEntries,
         function()
-            local db = GetDB()
-            local off = db.tzOffset
-            if type(off) == "number" then return ("UTC%+d"):format(off) end
-            return L("SET_AUTO"):format(("UTC%+d"):format(HeatOffsetHours()))
+            local off = GetDB().tzOffset
+            return (type(off) == "number") and off or "AUTO"
         end,
-        function(dir)
-            local db = GetDB()
-            local cur = db.tzOffset
-            if type(cur) ~= "number" then cur = HeatOffsetHours() end
-            local nxt = cur + dir
-            if nxt > 14 or nxt < -12 then nxt = nil end -- wrap to Auto
-            db.tzOffset = nxt
+        function(v)
+            GetDB().tzOffset = (v ~= "AUTO") and v or nil
         end)
 
     win:Hide()
