@@ -84,6 +84,10 @@ local LOCALE = {
         HUB_HELP = "Help", HUB_HELP_D = "all commands",
         HUB_SETTINGS = "Settings", HUB_SETTINGS_D = "options and sharing",
         SET_PEER = "Peer sharing", SET_PEER_D = "Send new encounters to the nearbyspydata channel and receive from others",
+        SET_AUTO = "Auto (%s)",
+        SET_LANG = "Language", SET_LANG_D = "Addon interface language. Other windows update after /reload.",
+        SET_TZ = "Heatmap timezone", SET_TZ_D = "The prime-time map in the server window is shown in this timezone; Auto = system clock.",
+        SET_RELOAD = "Language changed; type /reload to rebuild all windows.",
         MINIMAP_TIP_L = "Left-click: menu", MINIMAP_TIP_R = "Right-click: player list",
         MM_ON = "minimap button shown", MM_OFF = "minimap button hidden",
     },
@@ -133,6 +137,10 @@ local LOCALE = {
         HUB_HELP = "帮助", HUB_HELP_D = "所有命令",
         HUB_SETTINGS = "设置", HUB_SETTINGS_D = "选项与共享",
         SET_PEER = "共享数据 (peer)", SET_PEER_D = "发送新遇到的玩家到 nearbyspydata 频道并接收他人的数据",
+        SET_AUTO = "自动 (%s)",
+        SET_LANG = "语言", SET_LANG_D = "插件界面语言。其他窗口将在 /reload 后更新。",
+        SET_TZ = "热力图时区", SET_TZ_D = "服务器窗口的高峰时段图按此时区显示；自动 = 系统时钟。",
+        SET_RELOAD = "语言已更改；输入 /reload 重建所有窗口。",
         MINIMAP_TIP_L = "左键: 菜单", MINIMAP_TIP_R = "右键: 玩家列表",
         MM_ON = "小地图按钮已显示", MM_OFF = "小地图按钮已隐藏",
     },
@@ -182,6 +190,10 @@ local LOCALE = {
         HUB_HELP = "Помощь", HUB_HELP_D = "все команды",
         HUB_SETTINGS = "Настройки", HUB_SETTINGS_D = "опции и обмен",
         SET_PEER = "Обмен данными (peer)", SET_PEER_D = "Отправлять новые встречи в канал nearbyspydata и принимать от других",
+        SET_AUTO = "Авто (%s)",
+        SET_LANG = "Язык", SET_LANG_D = "Язык интерфейса аддона. Остальные окна обновятся после /reload.",
+        SET_TZ = "Часовой пояс теплокарты", SET_TZ_D = "Карта прайм-тайма в окне сервера показывается в этом поясе; Авто = системные часы.",
+        SET_RELOAD = "Язык изменён; набери /reload, чтобы пересоздать все окна.",
         MINIMAP_TIP_L = "ЛКМ: меню", MINIMAP_TIP_R = "ПКМ: список игроков",
         MM_ON = "кнопка миникарты показана", MM_OFF = "кнопка миникарты скрыта",
     },
@@ -231,6 +243,10 @@ local LOCALE = {
         HUB_HELP = "Hilfe", HUB_HELP_D = "alle Befehle",
         HUB_SETTINGS = "Einstellungen", HUB_SETTINGS_D = "Optionen und Austausch",
         SET_PEER = "Peer-Austausch", SET_PEER_D = "Neue Begegnungen an den Kanal nearbyspydata senden und von anderen empfangen",
+        SET_AUTO = "Auto (%s)",
+        SET_LANG = "Sprache", SET_LANG_D = "Sprache der Addon-Oberfläche. Andere Fenster aktualisieren sich nach /reload.",
+        SET_TZ = "Heatmap-Zeitzone", SET_TZ_D = "Die Prime-Time-Karte im Serverfenster wird in dieser Zeitzone gezeigt; Auto = Systemuhr.",
+        SET_RELOAD = "Sprache geändert; /reload baut alle Fenster neu.",
         MINIMAP_TIP_L = "Linksklick: Menü", MINIMAP_TIP_R = "Rechtsklick: Spielerliste",
         MM_ON = "Minimap-Button eingeblendet", MM_OFF = "Minimap-Button ausgeblendet",
     },
@@ -280,6 +296,10 @@ local LOCALE = {
         HUB_HELP = "Aide", HUB_HELP_D = "toutes les commandes",
         HUB_SETTINGS = "Réglages", HUB_SETTINGS_D = "options et partage",
         SET_PEER = "Partage peer", SET_PEER_D = "Envoyer les nouvelles rencontres au canal nearbyspydata et recevoir celles des autres",
+        SET_AUTO = "Auto (%s)",
+        SET_LANG = "Langue", SET_LANG_D = "Langue de l'interface de l'addon. Les autres fenêtres se mettent à jour après /reload.",
+        SET_TZ = "Fuseau de la carte", SET_TZ_D = "La carte des heures de pointe (fenêtre serveur) s'affiche dans ce fuseau ; Auto = horloge système.",
+        SET_RELOAD = "Langue modifiée ; tapez /reload pour reconstruire toutes les fenêtres.",
         MINIMAP_TIP_L = "Clic gauche : menu", MINIMAP_TIP_R = "Clic droit : liste des joueurs",
         MM_ON = "bouton minicarte affiché", MM_OFF = "bouton minicarte masqué",
     },
@@ -329,12 +349,19 @@ local LOCALE = {
         HUB_HELP = "도움말", HUB_HELP_D = "모든 명령어",
         HUB_SETTINGS = "설정", HUB_SETTINGS_D = "옵션 및 공유",
         SET_PEER = "피어 공유", SET_PEER_D = "새로 만난 플레이어를 nearbyspydata 채널로 보내고 다른 플레이어의 정보를 받기",
+        SET_AUTO = "자동 (%s)",
+        SET_LANG = "언어", SET_LANG_D = "애드온 인터페이스 언어. 다른 창은 /reload 후에 적용됩니다.",
+        SET_TZ = "히트맵 시간대", SET_TZ_D = "서버 창의 프라임타임 지도가 이 시간대로 표시됩니다; 자동 = 시스템 시계.",
+        SET_RELOAD = "언어가 변경되었습니다. /reload 로 모든 창을 다시 만드세요.",
         MINIMAP_TIP_L = "좌클릭: 메뉴", MINIMAP_TIP_R = "우클릭: 플레이어 목록",
         MM_ON = "미니맵 버튼 표시", MM_OFF = "미니맵 버튼 숨김",
     },
 }
 local function L(key)
-    local t = LOCALE[GetLocale()] or LOCALE.enUS
+    -- settings override (db.locale) beats the client locale; NearbySpy is the
+    -- SV global, nil until ADDON_LOADED — early L() calls just use the client
+    local ov = (type(NearbySpy) == "table") and NearbySpy.locale or nil
+    local t = (ov and LOCALE[ov]) or LOCALE[GetLocale()] or LOCALE.enUS
     return t[key] or LOCALE.enUS[key] or key
 end
 
@@ -1971,6 +1998,24 @@ end
 local serverWin
 local svr = {}
 
+-- Display offset for the UTC heatmap, in hours: explicit user choice
+-- (settings, db.tzOffset) beats the system clock; falls back to UTC if the
+-- client lacks the os table functions.
+local function HeatOffsetHours()
+    local okDb, db = pcall(GetDB)
+    if okDb and type(db) == "table"
+        and type(db.tzOffset) == "number" and db.tzOffset >= -12 and db.tzOffset <= 14 then
+        return db.tzOffset
+    end
+    local okOff, off = pcall(function()
+        local diff = os.difftime and os.difftime(os.time(os.date("*t")), os.time(os.date("!*t")))
+            or (os.time(os.date("*t")) - os.time(os.date("!*t")))
+        return math.floor(diff / 3600 + 0.5)
+    end)
+    if okOff and type(off) == "number" and math.abs(off) <= 14 then return off end
+    return 0
+end
+
 local function BuildServerWindow()
     local okTpl, tplWin = pcall(CreateFrame, "Frame", "NearbySpyServerWindow", UIParent, "BasicFrameTemplateWithInset")
     if okTpl and tplWin and tplWin.TitleText and tplWin.Bg and tplWin.CloseButton then
@@ -2113,16 +2158,9 @@ local function FillServerWindow()
     if tonumber(f.Horde) then fparts[#fparts + 1] = "|cffff6666" .. L("HORDE") .. " " .. fmt(tonumber(f.Horde)) .. "|r" end
     svr.factions:SetText(table.concat(fparts, " ; "))
 
-    -- datapack heat is UTC; rotate into the player's local hours so the map
-    -- matches the site (standard os.date/os.time offset trick, guarded —
-    -- falls back to UTC if the client lacks the os table functions)
-    local offset = 0
-    local okOff, off = pcall(function()
-        local diff = os.difftime and os.difftime(os.time(os.date("*t")), os.time(os.date("!*t")))
-            or (os.time(os.date("*t")) - os.time(os.date("!*t")))
-        return math.floor(diff / 3600 + 0.5)
-    end)
-    if okOff and type(off) == "number" and math.abs(off) <= 14 then offset = off end
+    -- datapack heat is UTC; rotate into the display timezone (settings
+    -- override, else system clock) so the map matches the site
+    local offset = HeatOffsetHours()
     local heat = g.heat
     local flat = nil
     if type(heat) == "table" then
@@ -2395,7 +2433,68 @@ local function OptCheck(parent, x, y, labelKey, descKey, getter, setter)
     desc:SetWidth(290)
     desc:SetJustifyH("LEFT")
     desc:SetText(L(descKey))
-    return cb
+    return cb, label, desc
+end
+
+-- Language selector data: Auto (client) first in the UI, then the fixed
+-- public order en -> zh -> ru -> de -> fr -> ko.
+local SET_LANG_ORDER = { "enUS", "zhCN", "ruRU", "deDE", "frFR", "koKR" }
+local SET_LANG_NAME = {
+    enUS = "English", zhCN = "中文", ruRU = "Русский",
+    deDE = "Deutsch", frFR = "Français", koKR = "한국어",
+}
+local function EffectiveLocale()
+    local db = GetDB()
+    local ov = db and db.locale
+    if ov then
+        for i = 1, #SET_LANG_ORDER do
+            if SET_LANG_ORDER[i] == ov then return ov end
+        end
+    end
+    local cl = GetLocale and GetLocale() or "enUS"
+    for i = 1, #SET_LANG_ORDER do
+        if SET_LANG_ORDER[i] == cl then return cl end
+    end
+    return "enUS"
+end
+
+local RefreshSettingsText -- forward: the language stepper relabels the window live
+
+-- value stepper: "< value >" between two buttons; onStep(dir) mutates state,
+-- Refresh() re-renders the value text. Returns handles for live relabeling.
+local function OptStepper(parent, y, labelKey, descKey, getText, onStep)
+    local label = NewText(parent, 11, 0.93, 0.91, 0.87)
+    label:SetPoint("TOPLEFT", 16, y)
+    label:SetText(L(labelKey))
+    local function mkBtn(txt, xOff)
+        local b = CreateFrame("Button", nil, parent)
+        b:SetSize(22, 18)
+        b:SetPoint("TOPLEFT", xOff, y - 20)
+        local bg = b:CreateTexture(nil, "ARTWORK")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.16, 0.13, 0.07, 1)
+        local t = NewText(b, 11, 1, 0.82, 0)
+        t:SetPoint("CENTER")
+        t:SetText(txt)
+        local hl = b:GetHighlightTexture()
+        if hl and hl.SetColorTexture then hl:SetColorTexture(1, 0.82, 0, 0.15) end
+        b:SetScript("OnClick", function() onStep(txt == "<" and -1 or 1) end)
+        return b
+    end
+    local prev = mkBtn("<", 16)
+    local nxt = mkBtn(">", 246)
+    local val = NewText(parent, 10, 1, 0.82, 0)
+    val:SetPoint("TOPLEFT", 44, y - 24)
+    val:SetWidth(196)
+    val:SetJustifyH("CENTER")
+    local desc = NewText(parent, 8, 0.55, 0.47, 0.32)
+    desc:SetPoint("TOPLEFT", 16, y - 42)
+    desc:SetWidth(330)
+    desc:SetJustifyH("LEFT")
+    desc:SetText(L(descKey))
+    local function Refresh() val:SetText(getText()) end
+    Refresh()
+    return { Refresh = Refresh, label = label, desc = desc, prev = prev, nxt = nxt }
 end
 
 local function BuildSettingsWindow()
@@ -2420,10 +2519,11 @@ local function BuildSettingsWindow()
         local title = NewText(win, 13, 1, 0.82, 0)
         title:SetPoint("TOP", 0, -12)
         title:SetText(L("HUB_SETTINGS"))
+        opt.title = title
         local closeBtn = CreateFrame("Button", nil, win, "UIPanelCloseButton")
         closeBtn:SetPoint("TOPRIGHT", -4, -4)
     end
-    win:SetSize(380, 200)
+    win:SetSize(380, 300)
     win:SetPoint("CENTER")
     SolidUnderlay(win)
     win:SetFrameStrata("DIALOG")
@@ -2440,7 +2540,7 @@ local function BuildSettingsWindow()
     end)
     optWin = win
 
-    opt.peer = OptCheck(win, 16, -52, "SET_PEER", "SET_PEER_D",
+    opt.peer, opt.peerLabel, opt.peerDesc = OptCheck(win, 16, -52, "SET_PEER", "SET_PEER_D",
         function() return GetDB().peerEnabled and true or false end,
         function(v)
             local db = GetDB()
@@ -2455,13 +2555,72 @@ local function BuildSettingsWindow()
             HubRefreshStatus()
         end)
 
+    opt.lang = OptStepper(win, -108, "SET_LANG", "SET_LANG_D",
+        function()
+            local db = GetDB()
+            if db.locale then return SET_LANG_NAME[db.locale] or db.locale end
+            return L("SET_AUTO"):format(SET_LANG_NAME[EffectiveLocale()])
+        end,
+        function(dir)
+            local db = GetDB()
+            local idx = 0 -- 0 = Auto (follow the client)
+            if db.locale then
+                for i = 1, #SET_LANG_ORDER do
+                    if SET_LANG_ORDER[i] == db.locale then idx = i end
+                end
+            end
+            idx = idx + dir
+            if idx > #SET_LANG_ORDER then idx = 0 elseif idx < 0 then idx = #SET_LANG_ORDER end
+            db.locale = (idx == 0) and nil or SET_LANG_ORDER[idx]
+            RefreshSettingsText()
+            P(L("SET_RELOAD"))
+        end)
+
+    opt.tz = OptStepper(win, -192, "SET_TZ", "SET_TZ_D",
+        function()
+            local db = GetDB()
+            local off = db.tzOffset
+            if type(off) == "number" then return ("UTC%+d"):format(off) end
+            return L("SET_AUTO"):format(("UTC%+d"):format(HeatOffsetHours()))
+        end,
+        function(dir)
+            local db = GetDB()
+            local cur = db.tzOffset
+            if type(cur) ~= "number" then cur = HeatOffsetHours() end
+            local nxt = cur + dir
+            if nxt > 14 or nxt < -12 then nxt = nil end -- wrap to Auto
+            db.tzOffset = nxt
+        end)
+
     win:Hide()
+end
+
+-- Live relabel after a language switch: only the settings window rebuilds its
+-- text; windows built earlier keep their labels until /reload (hint is shown).
+RefreshSettingsText = function()
+    if not optWin then return end
+    local tt = optWin.TitleText or opt.title
+    if tt and tt.SetText then tt:SetText(L("HUB_SETTINGS")) end
+    if opt.peerLabel then opt.peerLabel:SetText(L("SET_PEER")) end
+    if opt.peerDesc then opt.peerDesc:SetText(L("SET_PEER_D")) end
+    if opt.lang then
+        opt.lang.label:SetText(L("SET_LANG"))
+        opt.lang.desc:SetText(L("SET_LANG_D"))
+        opt.lang.Refresh()
+    end
+    if opt.tz then
+        opt.tz.label:SetText(L("SET_TZ"))
+        opt.tz.desc:SetText(L("SET_TZ_D"))
+        opt.tz.Refresh()
+    end
 end
 
 ShowSettingsWindow = function()
     local ok, err = pcall(function()
         if not optWin then BuildSettingsWindow() end
         if opt.peer then opt.peer:SetChecked(GetDB().peerEnabled and true or false) end
+        if opt.lang then opt.lang.Refresh() end
+        if opt.tz then opt.tz.Refresh() end
         optWin:Show()
     end)
     if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
