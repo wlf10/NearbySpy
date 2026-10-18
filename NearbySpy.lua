@@ -1413,11 +1413,34 @@ end
 -- template's Bg can render transparent, so an overlapping window shows
 -- whatever window is behind it ("окна смешиваются"). Sublayer -7 keeps the
 -- template's own bg (where it renders) on top; where it doesn't, this solid
--- color shows instead.
+-- color shows instead. pcall: cosmetic only, must never abort a window build.
 local function SolidUnderlay(frame)
-    local t = frame:CreateTexture(nil, "BACKGROUND", -7)
-    t:SetAllPoints()
-    t:SetColorTexture(0.03, 0.025, 0.02, 1)
+    local ok = pcall(function()
+        local t = frame:CreateTexture(nil, "BACKGROUND", -7)
+        t:SetAllPoints()
+        t:SetColorTexture(0.03, 0.025, 0.02, 1)
+    end)
+    if not ok then
+        pcall(function()
+            local t = frame:CreateTexture(nil, "BACKGROUND")
+            t:SetAllPoints()
+            t:SetColorTexture(0.03, 0.025, 0.02, 1)
+        end)
+    end
+end
+
+-- Stacking helpers, method-existence guarded: this client cuts APIs before
+-- (debug lib, combat log), and a cosmetic call aborting BuildWindow leaves a
+-- window with chrome but no content.
+local function StackWindow(frame, level)
+    if frame.SetToplevel then
+        local ok, err = pcall(frame.SetToplevel, frame, true)
+        if not ok then DbgErr("toplevel", err) end
+    end
+    if frame.SetFrameLevel then
+        local ok, err = pcall(frame.SetFrameLevel, frame, level)
+        if not ok then DbgErr("framelevel", err) end
+    end
 end
 
 -- Command help is a separate, read-only window; never put help into an EditBox.
@@ -1444,11 +1467,8 @@ local function ShowHelpWindow()
         helpWin:SetSize(670, 445)
         helpWin:SetPoint("CENTER")
         helpWin:SetFrameStrata("DIALOG")
-        -- window stacking (18.10.2026): all windows shared one strata+level and
-        -- their children interleaved when overlapping; toplevel raises a window
-        -- on click, distinct levels keep a static separation band
-        helpWin:SetToplevel(true)
-        helpWin:SetFrameLevel(200)
+        -- window stacking (18.10.2026): guarded — cosmetic, must not abort build
+        StackWindow(helpWin, 200)
         helpWin:SetMovable(true)
         helpWin:EnableMouse(true)
         helpWin:RegisterForDrag("LeftButton")
@@ -1821,8 +1841,7 @@ local function BuildWindow()
     win:SetPoint("CENTER")
     SolidUnderlay(win)
     win:SetFrameStrata("DIALOG")
-    win:SetToplevel(true)
-    win:SetFrameLevel(100)
+    StackWindow(win, 100)
     win:SetMovable(true)
     win:EnableMouse(true)
     win:RegisterForDrag("LeftButton")
@@ -1966,8 +1985,7 @@ local function BuildServerWindow()
     serverWin:SetPoint("CENTER")
     SolidUnderlay(serverWin)
     serverWin:SetFrameStrata("DIALOG")
-    serverWin:SetToplevel(true)
-    serverWin:SetFrameLevel(300)
+    StackWindow(serverWin, 300)
     serverWin:SetMovable(true)
     serverWin:EnableMouse(true)
     serverWin:RegisterForDrag("LeftButton")
@@ -2277,8 +2295,7 @@ local function BuildHubWindow()
     hubWin:SetPoint("CENTER")
     SolidUnderlay(hubWin)
     hubWin:SetFrameStrata("DIALOG")
-    hubWin:SetToplevel(true)
-    hubWin:SetFrameLevel(400)
+    StackWindow(hubWin, 400)
     hubWin:SetMovable(true)
     hubWin:EnableMouse(true)
     hubWin:RegisterForDrag("LeftButton")
