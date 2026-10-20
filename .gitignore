@@ -7,3 +7,6 @@ tests/*
 !tests/test_sysmsg_gate.py
 !tests/test_peer_join.py
 !tests/test_help_locale.py
+!tests/test_server_window.py
+!tests/fixtures/
+!tests/fixtures/datapack.lua
