@@ -384,7 +384,6 @@ local function L(key)
 end
 
 local newThisSession = 0
-local lastWhoSent = 0
 local whoScan = nil           -- active layered scan {zone, sent, results, added, current, suggest}
 local whoQueue = {}           -- queue of ranges {lo, hi}
 
@@ -1027,7 +1026,6 @@ end
 -- The /who zone filter token depends on the client locale:
 -- enUS — z-"Zone", ruRU — з-"Зона" (Cyrillic!). With a Latin z on an RU client
 -- the server silently drops the query — that's exactly why zone scans failed.
-local IS_RU = (GetLocale() == "ruRU")
 -- /who filter tokens are LOCALIZED in every locale: RU — з-/к-/р-,
 -- EN — z-/c-/r-, zhCN — its own characters. The client keeps them in the
 -- WHO_TAG_ZONE / WHO_TAG_CLASS / WHO_TAG_RACE globals (GlobalStrings) — read
@@ -1132,7 +1130,6 @@ local function CheckWhoThrottle(msg)
         db.debug.whoThrottled = (db.debug.whoThrottled or 0) + 1
         db.debug.lastErrorMsg = msg:sub(1, 120)
         db.whoPauseUntil = time() + 300
-        lastWhoSent = time()
         if whoScan then FinishZoneScan("stopped: server throttles /who") end
         P(L("WHO_THROTTLED"))
         return true
@@ -1141,7 +1138,6 @@ local function CheckWhoThrottle(msg)
         -- soft command cooldown (a couple of seconds) — note it, don't stop the scan
         db.debug.whoSoft = (db.debug.whoSoft or 0) + 1
         db.debug.lastErrorMsg = msg:sub(1, 120)
-        lastWhoSent = time()
         return true
     end
     return false
@@ -1310,7 +1306,7 @@ local function HandleWhoList()
     -- in suggest mode we don't touch the window — the user clicks the magnifier on it
     if whoScan and whoScan.suggest then
         -- keep the window open
-    elseif whoScan or (time() - (lastWhoSent or 0) < 60) then
+    elseif whoScan then
         C_Timer.After(1.5 + math.random() * 3, HideWhoFrame)
     end
 
@@ -1343,7 +1339,8 @@ local function HandleWhoList()
     else
         -- reply to a standalone general query
         if added > 0 then
-            D(("/who %s: list %d, new %d"):format(db.debug.whoZone or "?", num, added))
+            D(("/who %s: list %d, new %d"):format(
+                (whoScan and whoScan.zone) or "?", num, added))
         end
         -- auto-start of the programmatic scan was REMOVED (1.5.0): since build
         -- 70291 programmatic /who is dead (hardware gate) — offer the assisted
@@ -1428,7 +1425,7 @@ local function DebugSummary(db)
     local age = d.lastTickAt and (time() - d.lastTickAt) or -1
     return ("ticks: %d (last %ds ago), plates/players in tick: %s/%s, " ..
            "PLATE_ADDED events: %d, CVar: friends=%s enemies=%s all=%s, " ..
-           "/who: sent %d, last list %d, new %d, who errors %d, scan/CVar errors %d/%d, " ..
+           "/who: last list %d, new %d, scan/CVar errors %d/%d, " ..
            "tokens: %s%s%s (%s, locale %s)"):format(
         d.ticks or 0, age < 0 and 9999 or age,
         tostring(d.lastPlates or "?"), tostring(d.lastPlayers or "?"),
@@ -1436,7 +1433,7 @@ local function DebugSummary(db)
         tostring(d.cv_nameplateShowFriends or "?"),
         tostring(d.cv_nameplateShowEnemies or "?"),
         tostring(d.cv_nameplateShowAll or "?"),
-        d.whoSent or 0, d.whoResults or 0, d.whoAdded or 0, d.whoErr or 0,
+        d.whoResults or 0, d.whoAdded or 0,
         d.scanErr or 0, d.cvarErr or 0,
         WHO_TOKEN_ZONE, WHO_TOKEN_CLASS, WHO_TOKEN_RACE, WHO_TOKEN_SRC, GetLocale())
 end
@@ -2958,13 +2955,9 @@ end
 -- downstream anyway (parser -> "", site: class<>'' and level>0).
 -- Signature (wowpedia + warcraft.wiki, retail and the classic relaunch match):
 --   text, playerName, languageName, channelName, playerName2, specialFlags, ...
--- i.e. the speaker is the event's 2nd argument (after the event name). The
--- order in the beta client is not guaranteed — write the first 15 events in
--- full to db.debug.chatSample, verify against the dump after the first session
--- and adjust select().
+-- i.e. the speaker is the event's 2nd argument (after the event name) —
+-- confirmed on the live beta via SV dumps (11.10.2026).
 local chatFrame = CreateFrame("Frame")
-local chatSampled = 0
-local CHAT_SAMPLE_MAX = 15
 local function IsPeerChannel(channelName)
     if type(channelName) ~= "string" or (canaccessvalue and not canaccessvalue(channelName)) then return false end
     channelName = channelName:lower()
@@ -3008,18 +3001,6 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
         if me and (speaker == me or (surname and surname ~= "" and speaker == me .. " " .. surname)
             or speaker == me .. "-" .. PlayerRealm()) then return end
         local db = GetDB()
-        -- debug dump of the first events: speaker position verified on the live client
-        if chatSampled < CHAT_SAMPLE_MAX then
-            chatSampled = chatSampled + 1
-            db.debug = db.debug or {}
-            db.debug.chatSample = db.debug.chatSample or {}
-            local parts = {}
-            for i = 1, 8 do
-                parts[i] = i .. "=" .. tostring(select(i, ...) or "-")
-            end
-            db.debug.chatSample[#db.debug.chatSample + 1] =
-                ev .. " | " .. table.concat(parts, " | ")
-        end
         -- speaker: "Name" (own realm) or "Name-Realm" (cross). In vanilla a player
         -- name contains no dashes — the first "-" is always the realm separator
         local name, realm = speaker, nil
