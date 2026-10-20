@@ -3,6 +3,6 @@
 ## Notes: Weekly aggregated census snapshot from RealmPulse for NearbySpy
 ## Version: 1.0.0
 ## Dependencies: NearbySpy
-## X-Website: https://wow.bitwolff.com
+## X-Website: https://foragerstats.com
 
 NearbySpyData.lua

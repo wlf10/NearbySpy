@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Fetch snapshot
-        run: curl -fsSL --retry 3 https://wow.bitwolff.com/api/datapack.lua -o NearbySpy_Data/NearbySpyData.lua
+        run: curl -fsSL --retry 3 https://foragerstats.com/api/datapack.lua -o NearbySpy_Data/NearbySpyData.lua
 
       - name: Sanity check (valid lua module shape)
         run: grep -q '^NearbySpyData = {' NearbySpy_Data/NearbySpyData.lua && grep -q 'generated = ' NearbySpy_Data/NearbySpyData.lua
@@ -49,4 +49,4 @@ jobs:
           gh release delete datapack-latest -y --cleanup-tag 2>/dev/null || true
           gh release create datapack-latest NearbySpy_Data.zip \
             --title "NearbySpy_Data (weekly snapshot)" \
-            --notes "Aggregated census snapshot from https://wow.bitwolff.com — unzip into Interface/AddOns next to NearbySpy."
+            --notes "Aggregated census snapshot from https://foragerstats.com — unzip into Interface/AddOns next to NearbySpy."

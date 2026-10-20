@@ -2,7 +2,7 @@
 
 A WoW addon that passively records **players you encounter** into SavedVariables.
 Install and play — nothing to click. To feed the statistics site (RealmPulse,
-wow.bitwolff.com) upload your `SavedVariables/NearbySpy.lua` file there after
+foragerstats.com) upload your `SavedVariables/NearbySpy.lua` file there after
 logging out; the addon never uploads anything to a web server. Optional in-game
 peer sharing is on by default (`/nspy peer off` to disable).
 
