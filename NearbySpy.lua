@@ -428,28 +428,41 @@ GetDB = function()
             db.migratedNames = true
             local merged = {}
             for _, p in pairs(db.players) do
-                if p.name and p.realm and p.realm ~= "" and p.realm ~= "?"
-                    and p.realm ~= realRealm and not p.name:find(" ") then
-                    -- surname got stuck in realm — move it back into the name
-                    p.name = p.name .. " " .. p.realm
-                end
-                p.realm = realRealm
-                local nk = p.name .. "-" .. realRealm
-                local ex = merged[nk]
-                if ex then
-                    ex.count = (ex.count or 1) + (p.count or 1)
-                    if (p.firstSeen or math.huge) < (ex.firstSeen or math.huge) then
-                        ex.firstSeen = p.firstSeen
+                if type(p) == "table" and p.name and p.name ~= "" then
+                    -- A surname landed in realm only via unit-ish sources
+                    -- (UnitName's second return). Chat records may carry a
+                    -- genuine foreign realm ("Name-Realm") — never merge or
+                    -- rewrite those.
+                    local foreignSource = (p.source == "chat" or p.source == "peer")
+                    if p.realm and p.realm ~= "" and p.realm ~= "?"
+                        and p.realm ~= realRealm and not foreignSource
+                        and not p.name:find(" ") then
+                        -- surname got stuck in realm — move it back into the name
+                        p.name = p.name .. " " .. p.realm
+                        p.realm = realRealm
+                    elseif not p.realm or p.realm == "" or p.realm == "?" then
+                        p.realm = realRealm
                     end
-                    ex.lastSeen = math.max(ex.lastSeen or 0, p.lastSeen or 0)
-                    for _, f in ipairs({"class", "classLoc", "race", "faction", "zone", "zoneId"}) do
-                        if (ex[f] == nil or ex[f] == "") and p[f] ~= nil and p[f] ~= "" then
-                            ex[f] = p[f]
+                    local nk = p.name .. "-" .. p.realm
+                    local ex = merged[nk]
+                    if ex then
+                        ex.count = (ex.count or 1) + (p.count or 1)
+                        if (p.firstSeen or math.huge) < (ex.firstSeen or math.huge) then
+                            ex.firstSeen = p.firstSeen
                         end
+                        ex.lastSeen = math.max(ex.lastSeen or 0, p.lastSeen or 0)
+                        for _, f in ipairs({"class", "classLoc", "race", "faction", "zone", "zoneId"}) do
+                            if (ex[f] == nil or ex[f] == "") and p[f] ~= nil and p[f] ~= "" then
+                                ex[f] = p[f]
+                            end
+                        end
+                    else
+                        p.key = nk
+                        merged[nk] = p
                     end
                 else
-                    p.key = nk
-                    merged[nk] = p
+                    -- unusable record (no name): drop it, keep a counter
+                    db.debug.migrationDropped = (db.debug.migrationDropped or 0) + 1
                 end
             end
             db.players = merged

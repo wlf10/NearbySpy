@@ -3,3 +3,4 @@ CHANGELOG-dev.md
 NearbySpy-icon.png
 tests/*
 !tests/test_peer_priority.py
+!tests/test_name_migration.py
