@@ -601,8 +601,9 @@ local function UpsertPlayer(db, data)
         entry.count = (entry.count or 1) + 1
     end
     entry.lastSeen = nowT
-    if data.level then entry.level = data.level end
-    if data.class then entry.class = data.class end
+    -- Peer data can fill gaps, but cannot overwrite values already observed.
+    if data.level and (data.source ~= "peer" or not entry.level) then entry.level = data.level end
+    if data.class and (data.source ~= "peer" or not entry.class) then entry.class = data.class end
     if data.classLoc then entry.classLoc = data.classLoc end
     if data.zone then entry.zone = data.zone end
     if data.zoneId then entry.zoneId = data.zoneId end
