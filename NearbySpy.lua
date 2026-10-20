@@ -733,7 +733,9 @@ end
 
 local function JoinPeerChannel()
     if not GetDB().peerEnabled then return end
-    if GetChannelName(PEER_CHANNEL) == 0 then
+    -- nil = channels not ready yet (early after login), 0 = not joined
+    local channel = GetChannelName(PEER_CHANNEL)
+    if not channel or channel == 0 then
         JoinChannelByName(PEER_CHANNEL, nil, nil, false)
     end
     if ChatFrame_RemoveChannel then
@@ -1103,6 +1105,9 @@ end
 -- The pause is stored in db (survives /reload).
 local function CheckWhoThrottle(msg)
     if type(msg) ~= "string" then return false end
+    -- the client may deliver the message as a secret string — bail out before
+    -- any string operation (same gate as the chat path)
+    if canaccessvalue and not canaccessvalue(msg) then return false end
     local db = GetDB()
     if msg:find("[Пп]ерац") or msg:find("[Мм]одификац") then
         -- hard anti-bot ("Интересная операция…"): 5-minute pause, stop the scan
@@ -1133,6 +1138,7 @@ end
 -- to catch the exact text and channel of the server anti-bot message
 local function LogSysMsg(chan, msg)
     if type(msg) ~= "string" or msg == "" then return end
+    if canaccessvalue and not canaccessvalue(msg) then return end
     local db = GetDB()
     db.debug.msgLog = db.debug.msgLog or {}
     local log = db.debug.msgLog
@@ -3029,6 +3035,18 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         if db.peerEnabled then
             local ok, err = pcall(JoinPeerChannel)
             if not ok then DbgErr("peerJoin", err) end
+            -- channels may not be ready at PLAYER_LOGIN (GetChannelName = nil):
+            -- one retry after 30s if the channel is still not up
+            if C_Timer and C_Timer.After then
+                C_Timer.After(30, function()
+                    if not GetDB().peerEnabled then return end
+                    local ch = GetChannelName(PEER_CHANNEL)
+                    if not ch or ch == 0 then
+                        local okR, errR = pcall(JoinPeerChannel)
+                        if not okR then DbgErr("peerJoinRetry", errR) end
+                    end
+                end)
+            end
         end
         do
             local ok, err = pcall(BuildMinimapButton)
@@ -3061,13 +3079,19 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         if not okE then DbgErr("who", errE) end
     elseif event == "UI_ERROR_MESSAGE" then
         -- server throttles /who — the event signature varies: (msg) or (errorType, msg)
-        local sm = type(arg2) == "string" and arg2 or arg1
-        LogSysMsg("err", sm)
-        if not CheckWhoThrottle(arg2) then CheckWhoThrottle(arg1) end
+        local okE, errE = pcall(function()
+            local sm = type(arg2) == "string" and arg2 or arg1
+            LogSysMsg("err", sm)
+            if not CheckWhoThrottle(arg2) then CheckWhoThrottle(arg1) end
+        end)
+        if not okE then DbgErr("sysmsg", errE) end
     elseif event == "UI_INFO_MESSAGE" then
-        local sm = type(arg2) == "string" and arg2 or arg1
-        LogSysMsg("info", sm)
-        if not CheckWhoThrottle(arg2) then CheckWhoThrottle(arg1) end
+        local okE, errE = pcall(function()
+            local sm = type(arg2) == "string" and arg2 or arg1
+            LogSysMsg("info", sm)
+            if not CheckWhoThrottle(arg2) then CheckWhoThrottle(arg1) end
+        end)
+        if not okE then DbgErr("sysmsg", errE) end
     elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN"
         or event == "MACRO_ACTION_BLOCKED" or event == "MACRO_ACTION_FORBIDDEN" then
         -- client guard gate (70291+): arg1 = addon, arg2 = function
@@ -3086,7 +3110,10 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         if not okE then DbgErr("hardcoreDeaths", errE) end
     elseif event == "CHAT_MSG_SYSTEM" then
         -- custom server messages ("Интересная операция…") arrive via system chat
-        LogSysMsg("sys", arg1)
-        CheckWhoThrottle(arg1)
+        local okE, errE = pcall(function()
+            LogSysMsg("sys", arg1)
+            CheckWhoThrottle(arg1)
+        end)
+        if not okE then DbgErr("sysmsg", errE) end
     end
 end)
