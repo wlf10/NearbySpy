@@ -6,3 +6,4 @@ tests/*
 !tests/test_name_migration.py
 !tests/test_sysmsg_gate.py
 !tests/test_peer_join.py
+!tests/test_help_locale.py

@@ -88,6 +88,9 @@ local LOCALE = {
         SET_LANG = "Language", SET_LANG_D = "Addon interface language. Other windows update after /reload.",
         SET_TZ = "Heatmap timezone", SET_TZ_D = "The prime-time map in the server window is shown in this timezone; Auto = system clock.",
         SET_RELOAD = "Language changed; type /reload to rebuild all windows.",
+        PEER_ON = "Peer sharing enabled (channel: %s). Sends only new, detailed encounters.",
+        PEER_OFF = "Peer sharing disabled.",
+        PEER_STATUS = "Peer %s: channel=%s, queued=%d, sent=%d, received=%d, dropped=%d%s",
         MINIMAP_TIP_L = "Left-click: menu", MINIMAP_TIP_R = "Right-click: player list",
         MM_ON = "minimap button shown", MM_OFF = "minimap button hidden",
     },
@@ -141,6 +144,9 @@ local LOCALE = {
         SET_LANG = "语言", SET_LANG_D = "插件界面语言。其他窗口将在 /reload 后更新。",
         SET_TZ = "热力图时区", SET_TZ_D = "服务器窗口的高峰时段图按此时区显示；自动 = 系统时钟。",
         SET_RELOAD = "语言已更改；输入 /reload 重建所有窗口。",
+        PEER_ON = "已开启共享数据（频道：%s）。只发送新的详细遭遇。",
+        PEER_OFF = "已关闭共享数据。",
+        PEER_STATUS = "共享 %s：频道=%s，队列=%d，已发=%d，已收=%d，丢弃=%d%s",
         MINIMAP_TIP_L = "左键: 菜单", MINIMAP_TIP_R = "右键: 玩家列表",
         MM_ON = "小地图按钮已显示", MM_OFF = "小地图按钮已隐藏",
     },
@@ -194,6 +200,9 @@ local LOCALE = {
         SET_LANG = "Язык", SET_LANG_D = "Язык интерфейса аддона. Остальные окна обновятся после /reload.",
         SET_TZ = "Часовой пояс теплокарты", SET_TZ_D = "Карта прайм-тайма в окне сервера показывается в этом поясе; Авто = системные часы.",
         SET_RELOAD = "Язык изменён; набери /reload, чтобы пересоздать все окна.",
+        PEER_ON = "Обмен включён (канал: %s). Отправляются только новые подробные встречи.",
+        PEER_OFF = "Обмен выключен.",
+        PEER_STATUS = "Обмен %s: канал=%s, в очереди=%d, отправлено=%d, получено=%d, потеряно=%d%s",
         MINIMAP_TIP_L = "ЛКМ: меню", MINIMAP_TIP_R = "ПКМ: список игроков",
         MM_ON = "кнопка миникарты показана", MM_OFF = "кнопка миникарты скрыта",
     },
@@ -247,6 +256,9 @@ local LOCALE = {
         SET_LANG = "Sprache", SET_LANG_D = "Sprache der Addon-Oberfläche. Andere Fenster aktualisieren sich nach /reload.",
         SET_TZ = "Heatmap-Zeitzone", SET_TZ_D = "Die Prime-Time-Karte im Serverfenster wird in dieser Zeitzone gezeigt; Auto = Systemuhr.",
         SET_RELOAD = "Sprache geändert; /reload baut alle Fenster neu.",
+        PEER_ON = "Peer-Austausch aktiviert (Kanal: %s). Sendet nur neue, detaillierte Begegnungen.",
+        PEER_OFF = "Peer-Austausch deaktiviert.",
+        PEER_STATUS = "Peer %s: Kanal=%s, Warteschlange=%d, gesendet=%d, empfangen=%d, verworfen=%d%s",
         MINIMAP_TIP_L = "Linksklick: Menü", MINIMAP_TIP_R = "Rechtsklick: Spielerliste",
         MM_ON = "Minimap-Button eingeblendet", MM_OFF = "Minimap-Button ausgeblendet",
     },
@@ -300,6 +312,9 @@ local LOCALE = {
         SET_LANG = "Langue", SET_LANG_D = "Langue de l'interface de l'addon. Les autres fenêtres se mettent à jour après /reload.",
         SET_TZ = "Fuseau de la carte", SET_TZ_D = "La carte des heures de pointe (fenêtre serveur) s'affiche dans ce fuseau ; Auto = horloge système.",
         SET_RELOAD = "Langue modifiée ; tapez /reload pour reconstruire toutes les fenêtres.",
+        PEER_ON = "Partage peer activé (canal : %s). Envoie uniquement les nouvelles rencontres détaillées.",
+        PEER_OFF = "Partage peer désactivé.",
+        PEER_STATUS = "Partage %s : canal=%s, file=%d, envoyés=%d, reçus=%d, perdus=%d%s",
         MINIMAP_TIP_L = "Clic gauche : menu", MINIMAP_TIP_R = "Clic droit : liste des joueurs",
         MM_ON = "bouton minicarte affiché", MM_OFF = "bouton minicarte masqué",
     },
@@ -353,6 +368,9 @@ local LOCALE = {
         SET_LANG = "언어", SET_LANG_D = "애드온 인터페이스 언어. 다른 창은 /reload 후에 적용됩니다.",
         SET_TZ = "히트맵 시간대", SET_TZ_D = "서버 창의 프라임타임 지도가 이 시간대로 표시됩니다; 자동 = 시스템 시계.",
         SET_RELOAD = "언어가 변경되었습니다. /reload 로 모든 창을 다시 만드세요.",
+        PEER_ON = "피어 공유 켜짐 (채널: %s). 새로운 상세 만남만 전송합니다.",
+        PEER_OFF = "피어 공유 꺼짐.",
+        PEER_STATUS = "피어 %s: 채널=%s, 대기=%d, 전송=%d, 수신=%d, 손실=%d%s",
         MINIMAP_TIP_L = "좌클릭: 메뉴", MINIMAP_TIP_R = "우클릭: 플레이어 목록",
         MM_ON = "미니맵 버튼 표시", MM_OFF = "미니맵 버튼 숨김",
     },
@@ -1514,6 +1532,7 @@ local HELP_TEXT = {
     koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
 }
 local helpWin
+local EffectiveLocale -- forward: defined with the settings selectors below
 local function ShowHelpWindow()
     if not helpWin then
         helpWin = CreateFrame("Frame", "NearbySpyHelpWindow", UIParent)
@@ -1556,7 +1575,8 @@ local function ShowHelpWindow()
             label:SetText("X")
             btn:SetScript("OnClick", function() helpWin:Hide() end)
         end
-        local descriptions = HELP_TEXT[GetLocale()] or HELP_TEXT.enUS
+        local descRows = {}
+        helpWin.__descRows = descRows
         for i, command in ipairs(HELP_COMMANDS) do
             local y = -49 - (i - 1) * 25
             local cmd = NewText(helpWin, 12, 0.5, 1, 0.6)
@@ -1568,8 +1588,14 @@ local function ShowHelpWindow()
             desc:SetPoint("TOPLEFT", 178, y)
             desc:SetWidth(475)
             desc:SetJustifyH("LEFT")
-            desc:SetText(descriptions[i])
+            descRows[i] = desc
         end
+    end
+    -- the settings language override may have changed since the window was
+    -- built — relabel on every show (EffectiveLocale: override > client > enUS)
+    local descriptions = HELP_TEXT[EffectiveLocale()] or HELP_TEXT.enUS
+    for i, desc in ipairs(helpWin.__descRows) do
+        desc:SetText(descriptions[i])
     end
     helpWin:Show()
 end
@@ -2465,7 +2491,8 @@ local SET_LANG_NAME = {
     enUS = "English", zhCN = "中文", ruRU = "Русский",
     deDE = "Deutsch", frFR = "Français", koKR = "한국어",
 }
-local function EffectiveLocale()
+-- forward-declared before the help window: assignment, not `local function`
+EffectiveLocale = function()
     local db = GetDB()
     local ov = db and db.locale
     if ov then
@@ -2666,8 +2693,19 @@ local function BuildSettingsWindow()
         title:SetPoint("TOP", 0, -12)
         title:SetText(L("HUB_SETTINGS"))
         opt.title = title
-        local closeBtn = CreateFrame("Button", nil, win, "UIPanelCloseButton")
-        closeBtn:SetPoint("TOPRIGHT", -4, -4)
+        -- the only template call without a guard: fall back to a manual X
+        local okClose, closeBtn = pcall(CreateFrame, "Button", nil, win, "UIPanelCloseButton")
+        if okClose and closeBtn then
+            closeBtn:SetPoint("TOPRIGHT", -4, -4)
+        else
+            closeBtn = CreateFrame("Button", nil, win)
+            closeBtn:SetSize(26, 26)
+            closeBtn:SetPoint("TOPRIGHT", -6, -6)
+            local x = NewText(closeBtn, 16, 1, 0.4, 0.4)
+            x:SetPoint("CENTER")
+            x:SetText("X")
+            closeBtn:SetScript("OnClick", function() win:Hide() end)
+        end
     end
     win:SetSize(380, 300)
     win:SetPoint("CENTER")
@@ -2890,15 +2928,15 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         db.peerEnabled = true
         local ok, err = pcall(JoinPeerChannel)
         if not ok then DbgErr("peerJoin", err) end
-        P("Peer sharing enabled (channel: " .. PEER_CHANNEL .. "). Sends only new, detailed encounters.")
+        P(L("PEER_ON"):format(PEER_CHANNEL))
     elseif msg == "peer off" then
         db.peerEnabled = false
         peerQueue, peerQueued = {}, {}
         if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
-        P("Peer sharing disabled.")
+        P(L("PEER_OFF"))
     elseif msg == "peer" then
-        P(("Peer %s: channel=%s, queued=%d, sent=%d, received=%d, dropped=%d%s"):format(
-            db.peerEnabled and "on" or "off", tostring(GetChannelName(PEER_CHANNEL)),
+        P(L("PEER_STATUS"):format(
+            db.peerEnabled and L("ON") or L("OFF"), tostring(GetChannelName(PEER_CHANNEL)),
             #peerQueue, peerStats.sent, peerStats.received, peerStats.dropped,
             db.debug.peerSendError and (", error=" .. db.debug.peerSendError) or ""))
     elseif msg == "reset" then
