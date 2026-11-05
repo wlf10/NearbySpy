@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.3.2
+    NearbySpy 1.4.0
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -77,6 +77,7 @@ local LOCALE = {
         SVR_PEAK = "Peak: %s %02d:00 - %d players",
         SVR_NODATA = "No data module found. Install NearbySpy_Data (datapack-latest release) next to NearbySpy.",
         SVR_STALE = "snapshot %d days old - update NearbySpy_Data",
+        SVR_SCOPE_ALL = "All realms",
         SVR_D1 = "Mon", SVR_D2 = "Tue", SVR_D3 = "Wed", SVR_D4 = "Thu", SVR_D5 = "Fri", SVR_D6 = "Sat", SVR_D7 = "Sun",
         HUB_STATUS = "%d records - peer %s - v%s",
         HUB_PLAYERS = "Players", HUB_PLAYERS_D = "encounter list",
@@ -133,6 +134,7 @@ local LOCALE = {
         SVR_PEAK = "峰值: %s %02d:00 - %d 玩家",
         SVR_NODATA = "未找到数据模块。请在 NearbySpy 旁安装 NearbySpy_Data (datapack-latest)。",
         SVR_STALE = "快照已过期 %d 天 - 请更新 NearbySpy_Data",
+        SVR_SCOPE_ALL = "所有服务器",
         SVR_D1 = "一", SVR_D2 = "二", SVR_D3 = "三", SVR_D4 = "四", SVR_D5 = "五", SVR_D6 = "六", SVR_D7 = "日",
         HUB_STATUS = "%d 条记录 - 共享 %s - v%s",
         HUB_PLAYERS = "玩家", HUB_PLAYERS_D = "遇到的玩家列表",
@@ -189,6 +191,7 @@ local LOCALE = {
         SVR_PEAK = "Пик: %s %02d:00 - %d игроков",
         SVR_NODATA = "Нет data-модуля. Поставь NearbySpy_Data (релиз datapack-latest) рядом с NearbySpy.",
         SVR_STALE = "снимку %d дн. - обнови NearbySpy_Data",
+        SVR_SCOPE_ALL = "Все миры",
         SVR_D1 = "Пн", SVR_D2 = "Вт", SVR_D3 = "Ср", SVR_D4 = "Чт", SVR_D5 = "Пт", SVR_D6 = "Сб", SVR_D7 = "Вс",
         HUB_STATUS = "%d записей - обмен %s - v%s",
         HUB_PLAYERS = "Игроки", HUB_PLAYERS_D = "список встреченных",
@@ -245,6 +248,7 @@ local LOCALE = {
         SVR_PEAK = "Spitze: %s %02d:00 - %d Spieler",
         SVR_NODATA = "Kein Datenmodul gefunden. Installiere NearbySpy_Data (Release datapack-latest) neben NearbySpy.",
         SVR_STALE = "Snapshot ist %d Tage alt - NearbySpy_Data aktualisieren",
+        SVR_SCOPE_ALL = "Alle Realms",
         SVR_D1 = "Mo", SVR_D2 = "Di", SVR_D3 = "Mi", SVR_D4 = "Do", SVR_D5 = "Fr", SVR_D6 = "Sa", SVR_D7 = "So",
         HUB_STATUS = "%d Einträge - Austausch %s - v%s",
         HUB_PLAYERS = "Spieler", HUB_PLAYERS_D = "Begegnungsliste",
@@ -301,6 +305,7 @@ local LOCALE = {
         SVR_PEAK = "Pic : %s %02d:00 - %d joueurs",
         SVR_NODATA = "Module de données absent. Installez NearbySpy_Data (release datapack-latest) à côté de NearbySpy.",
         SVR_STALE = "snapshot vieux de %d jours - mettez à jour NearbySpy_Data",
+        SVR_SCOPE_ALL = "Tous les royaumes",
         SVR_D1 = "Lun", SVR_D2 = "Mar", SVR_D3 = "Mer", SVR_D4 = "Jeu", SVR_D5 = "Ven", SVR_D6 = "Sam", SVR_D7 = "Dim",
         HUB_STATUS = "%d entrées - partage %s - v%s",
         HUB_PLAYERS = "Joueurs", HUB_PLAYERS_D = "liste des rencontres",
@@ -357,6 +362,7 @@ local LOCALE = {
         SVR_PEAK = "피크: %s %02d:00 - %d 플레이어",
         SVR_NODATA = "데이터 모듈이 없습니다. NearbySpy 옆에 NearbySpy_Data(datapack-latest)를 설치하세요.",
         SVR_STALE = "스냅샷이 %d일 지남 - NearbySpy_Data 업데이트",
+        SVR_SCOPE_ALL = "모든 서버",
         SVR_D1 = "월", SVR_D2 = "화", SVR_D3 = "수", SVR_D4 = "목", SVR_D5 = "금", SVR_D6 = "토", SVR_D7 = "일",
         HUB_STATUS = "%d개 기록 - 공유 %s - v%s",
         HUB_PLAYERS = "플레이어", HUB_PLAYERS_D = "만난 플레이어 목록",
@@ -587,11 +593,16 @@ local function ClassFileFromLocalized(classStr)
 end
 
 -- shared record/upsert
+-- data.observe == false marks a profile-only update: the source knows who the
+-- player is, but nobody actually saw them in the world. Such updates enrich
+-- class/level/guid and never touch lastSeen/count/zone — a guild roster row is
+-- not proof of presence (the roster lists offline guildmates too).
 local QueuePeerNew -- assigned below; only local discoveries may call it
 local function UpsertPlayer(db, data)
     local key = data.key
     if not key then return false end
     local nowT = time()
+    local observed = data.observe ~= false
     local entry = db.players[key]
     if not entry then
         db.players[key] = {
@@ -603,13 +614,13 @@ local function UpsertPlayer(db, data)
             faction = data.faction,
             race = data.race,
             guid = data.guid,
-            zone = data.zone,
-            zoneId = data.zoneId,
-            x = Round4(data.x),
-            y = Round4(data.y),
-            firstSeen = nowT,
-            lastSeen = nowT,
-            count = 1,
+            zone = observed and data.zone or nil,
+            zoneId = observed and data.zoneId or nil,
+            x = observed and Round4(data.x) or nil,
+            y = observed and Round4(data.y) or nil,
+            firstSeen = observed and nowT or 0,
+            lastSeen = observed and nowT or 0,
+            count = observed and 1 or 0,
             source = data.source,
         }
         newThisSession = newThisSession + 1
@@ -624,27 +635,32 @@ local function UpsertPlayer(db, data)
                 data.level and (L("LVL_PREFIX") .. data.level) or "?",
                 data.zone or "?"))
         end
-        if data.source ~= "peer" and QueuePeerNew then QueuePeerNew(db, data) end
+        if data.source ~= "peer" and observed and QueuePeerNew then QueuePeerNew(db, data) end
         return true
     end
-    if nowT - (entry.lastSeen or 0) > REAP_SECONDS then
-        entry.count = (entry.count or 1) + 1
+    if observed then
+        if nowT - (entry.lastSeen or 0) > REAP_SECONDS then
+            entry.count = (entry.count or 1) + 1
+        end
+        entry.lastSeen = nowT
+        if data.zone then entry.zone = data.zone end
+        if data.zoneId then entry.zoneId = data.zoneId end
+        if data.x then
+            entry.x = Round4(data.x)
+            entry.y = Round4(data.y)
+        end
     end
-    entry.lastSeen = nowT
-    -- Peer data can fill gaps, but cannot overwrite values already observed.
+    -- Identity fields: peer data can only fill gaps, a real observation may
+    -- correct it (a peer record is not proof of race/faction).
     if data.level and (data.source ~= "peer" or not entry.level) then entry.level = data.level end
     if data.class and (data.source ~= "peer" or not entry.class) then entry.class = data.class end
     if data.classLoc then entry.classLoc = data.classLoc end
-    if data.zone then entry.zone = data.zone end
-    if data.zoneId then entry.zoneId = data.zoneId end
-    if data.x then
-        entry.x = Round4(data.x)
-        entry.y = Round4(data.y)
-    end
-    if data.faction and (not entry.faction or entry.faction == "Unknown") then
+    if data.faction and data.faction ~= "Unknown"
+        and (data.source ~= "peer" or not entry.faction or entry.faction == "Unknown") then
         entry.faction = data.faction
     end
-    if data.race and not entry.race then
+    if data.race and data.race ~= "Unknown"
+        and (data.source ~= "peer" or not entry.race or entry.race == "Unknown") then
         entry.race = data.race
     end
     entry.guid = entry.guid or data.guid
@@ -657,7 +673,8 @@ local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
 local peerQueue, peerQueued, peerSent = {}, {}, {}
 local peerIncoming = {start = 0, count = 0}
 local lastPeerSend = 0
-local peerStats = {sent = 0, received = 0, dropped = 0}
+local peerStats = {sent = 0, received = 0, dropped = 0, seen = 0, valid = 0, rejected = 0}
+local peerChatVisible = false -- session-only diagnostic; never persist raw traffic
 local function PeerField(s, maxLen)
     return type(s) == "string" and #s > 0 and #s <= maxLen
         and not s:find("[%c|;]")
@@ -717,30 +734,43 @@ local function DrainPeerQueue()
 end
 
 local function ReceivePeerMessage(message, sender)
+    peerStats.seen = peerStats.seen + 1
+    local function Reject()
+        peerStats.rejected = peerStats.rejected + 1
+    end
     local db = GetDB()
-    if not db.peerEnabled or type(message) ~= "string" or #message > 220
-        or (canaccessvalue and not canaccessvalue(message)) then return end
-    if type(sender) ~= "string" or (canaccessvalue and not canaccessvalue(sender))
-        or not PeerField(sender, 120) then return end
+    if not db.peerEnabled or type(message) ~= "string"
+        or (canaccessvalue and not canaccessvalue(message)) then return Reject() end
+    if #message > 220 or type(sender) ~= "string"
+        or (canaccessvalue and not canaccessvalue(sender))
+        or not PeerField(sender, 120) then return Reject() end
+    peerStats.lastSender = sender
+    if peerChatVisible and DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        -- The beta has no ChatFrame_AddChannel: mirror only received peer events.
+        -- Escape pipes so untrusted chat text cannot inject texture/link markup.
+        pcall(DEFAULT_CHAT_FRAME.AddMessage, DEFAULT_CHAT_FRAME,
+            "[nearbyspydata] " .. sender:gsub("|", "?") .. ": " .. message:gsub("|", "?"))
+    end
     local nowT = time()
     if nowT - peerIncoming.start >= 60 then
         peerIncoming.start, peerIncoming.count = nowT, 0
     end
     peerIncoming.count = peerIncoming.count + 1
-    if peerIncoming.count > 120 then return end
+    if peerIncoming.count > 120 then return Reject() end
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
     if #fields ~= 8 or fields[1] ~= "N2" or fields[2] ~= db.game
-        or fields[3] ~= PlayerRealm() then return end
+        or fields[3] ~= PlayerRealm() then return Reject() end
     local realm, name, class = fields[3], fields[4], fields[5]
     if not PeerField(name, 60) or not PeerField(realm, 100)
-        or not class:match("^[A-Z]+$") or #class > 32 then return end
+        or not class:match("^[A-Z]+$") or #class > 32 then return Reject() end
     local level = tonumber(fields[6])
-    if not level or level < 1 or level > 80 or level % 1 ~= 0 then return end
+    if not level or level < 1 or level > 80 or level % 1 ~= 0 then return Reject() end
     local race = fields[7]
-    if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return end
+    if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return Reject() end
     local faction = fields[8]
-    if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return end
+    if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject() end
+    peerStats.valid = peerStats.valid + 1
     if UpsertPlayer(db, {key = name .. "-" .. realm, name = name, realm = realm,
         class = class, level = level, race = race ~= "?" and race or nil,
         faction = faction ~= "?" and faction or nil, source = "peer", silent = true}) then
@@ -755,12 +785,18 @@ local function JoinPeerChannel()
     if not channel or channel == 0 then
         JoinChannelByName(PEER_CHANNEL, nil, nil, false)
     end
-    if ChatFrame_RemoveChannel then
+    if not peerChatVisible and ChatFrame_RemoveChannel then
         for i = 1, 10 do
             local chat = _G["ChatFrame" .. i]
             if chat then ChatFrame_RemoveChannel(chat, PEER_CHANNEL) end
         end
     end
+end
+
+local function SetPeerChatVisible(visible)
+    if visible and (not DEFAULT_CHAT_FRAME or not DEFAULT_CHAT_FRAME.AddMessage) then return false end
+    peerChatVisible = visible
+    return true
 end
 
 -- Race -> faction (file keys from UnitRace: Human, Orc, ...)
@@ -888,14 +924,19 @@ local function RecordGuild()
     local db = GetDB()
     local realm = PlayerRealm()
     local faction = GetFaction("player")  -- own guild = own faction
-    local added = 0
+    local added, onlineN = 0, 0
     for i = 1, n do
         -- signature: name, rank, rankIdx, level, classLoc, zone, note, onote,
         -- online, status, classFile, achPts, achRank, mobile, soR, rep, guid
-        local ok, name, _, _, level, classLoc, zone, _, _, _, _, classFile, _, _, _, _, _, guid =
+        local ok, name, _, _, level, classLoc, zone, _, _, online, _, classFile, _, _, _, _, _, guid =
             pcall(GetGuildRosterInfo, i)
         if ok and name and name ~= "" then
             name = name:match("^([^%-]+)%-") or name  -- strip "Name-Realm"
+            -- online (9th return) separates a real sighting from a roster row:
+            -- offline guildmates must not refresh lastSeen/count. A client that
+            -- doesn't return the flag (nil) keeps the old behaviour.
+            local present = online ~= false
+            if present then onlineN = onlineN + 1 end
             if UpsertPlayer(db, {
                 key = name .. "-" .. realm,
                 name = name,
@@ -905,13 +946,16 @@ local function RecordGuild()
                 level = level,
                 faction = faction,
                 guid = guid,
-                zone = zone,  -- roster zone — where the player is now (may be a different zone)
+                -- roster zone is the player's current zone only while online
+                zone = (present and zone ~= "") and zone or nil,
                 source = "guild",
                 silent = true,  -- the roster comes in hundreds — don't spam chat
+                observe = present,  -- offline: enrich the profile, don't claim a meeting
             }) then added = added + 1 end
         end
     end
     db.debug.guildSeen = n
+    db.debug.guildOnline = onlineN
     db.debug.guildAdded = (db.debug.guildAdded or 0) + added
 end
 
@@ -1717,8 +1761,10 @@ local function TacticalRows()
     local now, shown = time(), 0
     for _, p in ipairs(SortedPlayers(GetDB())) do
         if TacticalVisible(p, now) then
+            -- check the limit BEFORE counting: incrementing first returned 501
+            -- and sized the scroll list for 501 rows while only 500 were drawn
+            if shown >= MAX_ROWS then break end
             shown = shown + 1
-            if shown > MAX_ROWS then break end
             local row = tactical.rows[shown] or TacticalRow(winList, shown)
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
@@ -2174,6 +2220,17 @@ local function FillServerWindow()
     local g = nil
     if type(data) == "table" and type(data.games) == "table" then
         g = data.games[db.game] or data.games.forever
+    end
+    -- datapack format 2: предпочитаем срез текущего мира (мегасерверы
+    -- Forever разделены по realm), иначе — общий агрегат игры
+    local scope = nil
+    local realm = PlayerRealm()
+    if g and type(g.realms) == "table" and realm and realm ~= "?" and type(g.realms[realm]) == "table" then
+        g = g.realms[realm]
+        scope = realm
+    end
+    if serverWin and serverWin.TitleText then
+        serverWin.TitleText:SetText(L("SVR_TITLE") .. " — " .. (scope or L("SVR_SCOPE_ALL")))
     end
     if not g then
         svr.nodata:SetText(L("SVR_NODATA")); svr.nodata:Show()
@@ -2929,13 +2986,26 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     elseif msg == "peer off" then
         db.peerEnabled = false
         peerQueue, peerQueued = {}, {}
+        if peerChatVisible then pcall(SetPeerChatVisible, false) end
         if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
         P(L("PEER_OFF"))
+    elseif msg == "peer chat on" or msg == "peer chat off" then
+        local visible = msg == "peer chat on"
+        local ok, result = pcall(SetPeerChatVisible, visible)
+        if ok and result then
+            P("Peer channel visibility: " .. (visible and "ON" or "OFF") .. " (session only)")
+        else
+            P("Peer channel visibility unavailable: " .. tostring(result))
+        end
     elseif msg == "peer" then
         P(L("PEER_STATUS"):format(
             db.peerEnabled and L("ON") or L("OFF"), tostring(GetChannelName(PEER_CHANNEL)),
             #peerQueue, peerStats.sent, peerStats.received, peerStats.dropped,
             db.debug.peerSendError and (", error=" .. db.debug.peerSendError) or ""))
+        P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, chat=%s, lastSender=%s")
+            :format(peerStats.seen, peerStats.valid, peerStats.rejected,
+                peerStats.valid - peerStats.received, peerChatVisible and "ON" or "OFF",
+                peerStats.lastSender or "-"))
     elseif msg == "reset" then
         db.players = {}
         newThisSession = 0

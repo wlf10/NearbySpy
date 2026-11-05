@@ -63,7 +63,16 @@ local function NewWidget()
 end
 
 function CreateFrame(kind, name, parent, template)
-    return NewWidget()
+    local w = NewWidget()
+    -- observable title widget (real templated frames expose TitleText)
+    local t = { __shown = false }
+    t.SetText = function(self, x) self.__text = x end
+    t.GetText = function(self) return self.__text end
+    setmetatable(t, { __index = function(tt, k)
+        local f = MockAny(); rawset(tt, k, f); return f
+    end })
+    rawset(w, "TitleText", t)
+    return w
 end
 
 local LOCALE_EN = {
@@ -72,6 +81,7 @@ local LOCALE_EN = {
     SVR_PEAK = "Peak: %s %02d:00 - %d players",
     SVR_NODATA = "No data module found. Install NearbySpy_Data (datapack-latest release) next to NearbySpy.",
     SVR_STALE = "snapshot %d days old - update NearbySpy_Data",
+    SVR_SCOPE_ALL = "All realms",
     SVR_D1 = "Mon", SVR_D2 = "Tue", SVR_D3 = "Wed", SVR_D4 = "Thu", SVR_D5 = "Fri", SVR_D6 = "Sat", SVR_D7 = "Sun",
     ALLIANCE = "Alliance", HORDE = "Horde",
     ERR_WINDOW = "window ERROR: ",
@@ -107,7 +117,7 @@ _G.__TEST = {
 """
 
 
-def load_block(lua, game="forever"):
+def load_block(lua, game="forever", realm="?"):
     src = SRC.read_text(encoding="utf-8")
     # the block ends where the hub window begins — stop there, not at the
     # slash dispatcher (that would drag hub/settings/minimap into this test)
@@ -119,6 +129,7 @@ def load_block(lua, game="forever"):
     lua.execute(
         STUBS
         + f'GetDB = function() return {{ game = "{game}" }} end\n'
+        + f'PlayerRealm = function() return "{realm}" end\n'
         + m.group(1)
         + EXPORTS
     )
@@ -139,6 +150,9 @@ def main():
     g = lua.globals().NearbySpyData["games"]["forever"]
     assert t.svr.total["__text"] == str(g["total"]), f'total text: {t.svr.total["__text"]}'
     assert t.svr.nodata["__shown"] is False
+    # realm "?" resolves to nothing -> game aggregate, title says All realms
+    title = t.win()["TitleText"]["__text"] or ""
+    assert "All realms" in title, f"title: {title}"
 
     # heat is UTC in the datapack and rotated into LOCAL hours at fill time
     # (os.date/os.time offset trick); replicate the same offset here
@@ -206,6 +220,28 @@ def main():
     # classic_era is absent from the fixture -> forever fallback kicks in
     assert t3.svr.nodata["__shown"] is False
     assert t3.svr.total["__text"] == "200"
+
+    # format 2: a post-launch-style mega-realm name selects its own slice
+    lua4 = LuaRuntime()
+    lua4.execute(DATAPACK.read_text(encoding="utf-8"))
+    load_block(lua4, realm="Forever PvE EU")
+    t4 = lua4.globals().__TEST
+    t4.Show()
+    assert t4.svr.total["__text"] == "150", f'realm total: {t4.svr.total["__text"]}'
+    title4 = t4.win()["TitleText"]["__text"] or ""
+    assert "Forever PvE EU" in title4, f"realm title: {title4}"
+    row1 = t4.svr.classRows[1]
+    assert "80" in (row1.value["__text"] or ""), f'realm row1: {row1.value["__text"]}'
+
+    # an unregistered/future realm falls back to the explicit all-realms view
+    lua5 = LuaRuntime()
+    lua5.execute(DATAPACK.read_text(encoding="utf-8"))
+    load_block(lua5, realm="Forever PvE US")
+    t5 = lua5.globals().__TEST
+    t5.Show()
+    assert t5.svr.total["__text"] == "200", f'fallback total: {t5.svr.total["__text"]}'
+    title5 = t5.win()["TitleText"]["__text"] or ""
+    assert "All realms" in title5, f"fallback title: {title5}"
 
     print("SERVER WINDOW TEST OK")
 

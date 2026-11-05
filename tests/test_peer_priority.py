@@ -58,6 +58,39 @@ class PeerPriorityTests(unittest.TestCase):
         self.assertEqual(60, player["level"])
         self.assertEqual("MAGE", player["class"])
 
+    def test_local_observation_corrects_peer_race_and_faction(self):
+        # peer принёс неверную расу/фракцию — реальное наблюдение обязано
+        # исправить их (раньше поле залипало навсегда, приоритет был только
+        # у class/level)
+        self.upsert("peer", race="Orc", faction="Horde",
+                    **{"class": "MAGE"})
+        self.upsert("unit", race="Human", faction="Alliance",
+                    **{"class": "MAGE"})
+        player = self.db["players"]["Alice-Home"]
+        self.assertEqual("Human", player["race"])
+        self.assertEqual("Alliance", player["faction"])
+
+    def test_peer_cannot_overwrite_observed_race_and_faction(self):
+        self.upsert("unit", race="Human", faction="Alliance",
+                    **{"class": "MAGE"})
+        self.upsert("peer", race="Orc", faction="Horde",
+                    **{"class": "MAGE"})
+        player = self.db["players"]["Alice-Home"]
+        self.assertEqual("Human", player["race"])
+        self.assertEqual("Alliance", player["faction"])
+
+    def test_unknown_faction_never_overwrites_known(self):
+        self.upsert("unit", faction="Alliance", **{"class": "MAGE"})
+        self.upsert("unit", faction="Unknown", **{"class": "MAGE"})
+        player = self.db["players"]["Alice-Home"]
+        self.assertEqual("Alliance", player["faction"])
+
+    def test_peer_fills_unknown_faction(self):
+        self.upsert("unit", faction="Unknown", **{"class": "MAGE"})
+        self.upsert("peer", faction="Horde", **{"class": "MAGE"})
+        player = self.db["players"]["Alice-Home"]
+        self.assertEqual("Horde", player["faction"])
+
 
 if __name__ == "__main__":
     unittest.main()
