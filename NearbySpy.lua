@@ -1423,6 +1423,46 @@ end
 -- a locally recorded row printed "Друид". Fixed at DISPLAY time, so records
 -- already stored in SavedVariables get localized too — no rewrite needed.
 -- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
+-- Опционально: переводы классов под язык ИНТЕРФЕЙСА аддона.
+-- Зачем отдельная таблица: classLoc/zone приходят от КЛИЕНТА и уже локализованы
+-- на его языке. Если клиент русский, а интерфейс аддона переключён на English,
+-- показать "Маг" как "Mage" можно только своей таблицей — клиент другой строки
+-- не отдаст. Ключи — файл-ключи классов (их же несёт peer-пакет).
+local CLASS_LOC = {
+    WARRIOR = { enUS = "Warrior", ruRU = "Воин", zhCN = "战士", deDE = "Krieger", frFR = "Guerrier", koKR = "전사" },
+    PALADIN = { enUS = "Paladin", ruRU = "Паладин", zhCN = "圣骑士", deDE = "Paladin", frFR = "Paladin", koKR = "성기사" },
+    HUNTER = { enUS = "Hunter", ruRU = "Охотник", zhCN = "猎人", deDE = "Jäger", frFR = "Chasseur", koKR = "사냥꾼" },
+    ROGUE = { enUS = "Rogue", ruRU = "Разбойник", zhCN = "潜行者", deDE = "Schurke", frFR = "Voleur", koKR = "도적" },
+    PRIEST = { enUS = "Priest", ruRU = "Жрец", zhCN = "牧师", deDE = "Priester", frFR = "Prêtre", koKR = "사제" },
+    SHAMAN = { enUS = "Shaman", ruRU = "Шаман", zhCN = "萨满祭司", deDE = "Schamane", frFR = "Chaman", koKR = "주술사" },
+    MAGE = { enUS = "Mage", ruRU = "Маг", zhCN = "法师", deDE = "Magier", frFR = "Mage", koKR = "마법사" },
+    WARLOCK = { enUS = "Warlock", ruRU = "Чернокнижник", zhCN = "术士", deDE = "Hexenmeister", frFR = "Démoniste", koKR = "흑마법사" },
+    DRUID = { enUS = "Druid", ruRU = "Друид", zhCN = "德鲁伊", deDE = "Druide", frFR = "Druide", koKR = "드루이드" },
+}
+
+-- Язык интерфейса аддона: настройка (db.locale) важнее языка клиента.
+-- Отдельная функция, а не L(): EffectiveLocale объявлена ниже по файлу и здесь
+-- ещё не видна. Global — главный чанк у лимита 200 локалов.
+function UiLocale()
+    local ov = (type(NearbySpy) == "table") and NearbySpy.locale or nil
+    if ov and CLASS_LOC.DRUID and LOCALE[ov] then return ov end
+    local cl = GetLocale and GetLocale() or "enUS"
+    if LOCALE[cl] then return cl end
+    return "enUS"
+end
+
+-- Display name of a class in the INTERFACE language. fallback — то, что пришло от
+-- клиента (classLoc): используется, когда класс нам неизвестен (кастомный).
+function ClassDisplayName(file, fallback)
+    local row = type(file) == "string" and CLASS_LOC[file] or nil
+    if row then
+        local name = row[UiLocale()]
+        if name then return name end
+    end
+    -- Никогда не nil: вызывающие подставляют результат прямо в format("%s")
+    return fallback or ClassLocFromFile(file) or file or "?"
+end
+
 function ClassLocFromFile(file)
     if type(file) ~= "string" or file == "" then return nil end
     local male = LOCALIZED_CLASS_NAMES_MALE
@@ -3929,7 +3969,7 @@ local function TacticalRow(parent, index)
         local r, g, b = ClassColorRGB(p.class)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(p.name or "?", r, g, b)
-        GameTooltip:AddLine((p.classLoc or ClassLocFromFile(p.class) or p.class or "?")
+        GameTooltip:AddLine(ClassDisplayName(p.class, p.classLoc)
             .. "; " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
         GameTooltip:AddLine(L("UI_ZONE") .. ": " .. tostring(p.zone or "?"), 0.65, 0.72, 0.72)
         if p.peerForeign and p.realm and p.realm ~= "" then
@@ -3987,7 +4027,7 @@ local function TacticalRows()
                 row.realm:Hide()
             end
             row.profile:SetText(("%s; %s%s"):format(
-                p.classLoc or ClassLocFromFile(p.class) or p.class or "?",
+                ClassDisplayName(p.class, p.classLoc),
                 L("LVL_PREFIX"), tostring(p.level or "?")))
             -- Peer records carry no position or zone at all (the packet has
             -- neither), so a peer row honestly has no zone.
@@ -4039,7 +4079,7 @@ local function TacticalStats()
         local file = p.class or "UNKNOWN"
         if not st.classes[file] then
             st.classes[file] = {file = file,
-                label = p.classLoc or ClassLocFromFile(p.class) or p.class or "?", count = 0}
+                label = ClassDisplayName(p.class, p.classLoc), count = 0}
         end
         st.classes[file].count = st.classes[file].count + 1
         end
