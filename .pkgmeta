@@ -2,9 +2,17 @@ package-as: NearbySpy
 
 # dev/marketing files stay out of the release zip; the runtime set is
 # NearbySpy.lua, NearbySpy.toc, NearbySpyIcon.tga, README.md, LICENSE
+# Release notes are written by hand in RELEASE_NOTES.md and taken verbatim as
+# the GitHub release body. Without this the packager generates one long run-on
+# paragraph out of the commit messages.
+manual-changelog:
+  filename: RELEASE_NOTES.md
+  markup-type: markdown
+
 ignore:
   - CURSEFORGE.md
   - CHANGELOG-dev.md
+  - RELEASE_NOTES.md
   - NearbySpy-icon.png
   # "tests" без слэша: шаблон "tests/" packager не матчит, и каталог тестов
   # уезжал в релизный zip (проверено локальной сборкой 05.11.2026).
