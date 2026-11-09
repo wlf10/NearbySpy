@@ -1159,7 +1159,25 @@ local function UpsertPlayer(db, data)
 end
 
 -- Opt-in, realm-local peer exchange. Received records never re-enter the queue.
-local PEER_CHANNEL = "nearbyspydata"
+-- Канал обмена привязан к ФРАКЦИИ. Сервер не пускает персонажа одной фракции
+-- в канал, созданный другой (проверено 10.11.2026: под Ордой вход в общий
+-- "nearbyspydata", созданный Альянсом, отклонён сервером). Базовое имя общее,
+-- суффикс делает каналы независимыми: _a для Альянса, _h для Орды.
+--
+-- Обмен между фракциями не теряется: он идёт через сайт, куда обе фракции
+-- грузят свои SavedVariables. Канал — это только «здесь и сейчас».
+local PEER_CHANNEL_BASE = "nearbyspydata"
+
+-- Имя канала для текущего персонажа. Global on purpose — главный чанк стоит у
+-- потолка Lua 5.1 в 200 top-level locals.
+function PeerChannelName()
+    local ok, faction = pcall(UnitFactionGroup, "player")
+    if not ok or type(faction) ~= "string" then return PEER_CHANNEL_BASE end
+    if faction == "Alliance" then return PEER_CHANNEL_BASE .. "_a" end
+    if faction == "Horde" then return PEER_CHANNEL_BASE .. "_h" end
+    -- фракция неизвестна (ранний вызов, нестандартный сервер) — общий канал
+    return PEER_CHANNEL_BASE
+end
 local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
 local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- Per-session peer counters/state. Kept in ONE table on purpose: the main chunk
@@ -1184,10 +1202,14 @@ PeerSync = function()
     -- "bad argument #2 to 'tonumber' (number expected, got string)" — the
     -- whole call then aborts inside somebody else's pcall. Assign to a local
     -- first: an assignment keeps only the first value.
-    local channelId = GetChannelName(PEER_CHANNEL)
+    local channelId = GetChannelName(PeerChannelName())
     db.debug.peer = {
         enabled = db.peerEnabled and true or false,
         channel = tonumber(channelId) or 0,
+        -- Имя своего канала (фракционное, с 10.11.2026) и базовое: по SV видно,
+        -- в каком именно канале сидел персонаж, не заходя в игру.
+        channelName = PeerChannelName(),
+        channelBase = PEER_CHANNEL_BASE,
         queued = #peerQueue,
         sent = peerStats.sent, received = peerStats.received,
         merged = peerStats.merged, dropped = peerStats.dropped,
@@ -1289,7 +1311,7 @@ local function DrainPeerQueue()
         D(("Peer expired before send: %s"):format(PeerEsc(old.name or "?")))
     end
     if #peerQueue == 0 then return end
-    local channel = GetChannelName(PEER_CHANNEL)
+    local channel = GetChannelName(PeerChannelName())
     if not channel or channel == 0 then
         -- The usual reason for a silent outbound queue: we never joined the
         -- channel (or the client dropped it on a zone change). One line a
@@ -1297,7 +1319,7 @@ local function DrainPeerQueue()
         if nowT - peerStats.lastNoChannel >= 60 then
             peerStats.lastNoChannel = nowT
             D(("Peer send blocked: channel %s not joined (%s), q=%d")
-                :format(PEER_CHANNEL, tostring(channel), #peerQueue))
+                :format(PeerChannelName(), tostring(channel), #peerQueue))
             PeerSync()
         end
         return
@@ -1480,16 +1502,45 @@ local function ReceivePeerMessage(message, sender)
 end
 
 local function JoinPeerChannel()
-    if not GetDB().peerEnabled then return end
+    local db = GetDB()
+    if not db.peerEnabled then return end
+    local own = PeerChannelName()
     -- nil = channels not ready yet (early after login), 0 = not joined
-    local channel = GetChannelName(PEER_CHANNEL)
+    local channel = GetChannelName(own)
     if not channel or channel == 0 then
-        JoinChannelByName(PEER_CHANNEL, nil, nil, false)
+        -- Результат входа ПРОВЕРЯЕТСЯ: раньше возврат JoinChannelByName молча
+        -- игнорировался, и серверный отказ («not allowed to join channel»)
+        -- оставлял аддон без канала и без единой записи о причине. Теперь
+        -- отказ виден в db.debug.peer.join (по нему и нашли фракционную
+        -- блокировку 10.11.2026).
+        local okJoin, joined = pcall(JoinChannelByName, own, nil, nil, false)
+        db.debug = db.debug or {}
+        db.debug.peerJoin = {
+            channel = own,
+            ok = okJoin and joined and true or false,
+            result = okJoin and tostring(joined) or tostring(joined),
+            at = time(),
+        }
+    end
+    -- Слушающий вход в базовый канал: если сервер когда-нибудь пустит (или
+    -- канал создан нашим же персонажем в другой фракции), получим и его данные.
+    -- Отправка идёт ТОЛЬКО в свой фракционный канал — иначе дубли у тех, кто
+    -- сидит в обоих.
+    if own ~= PEER_CHANNEL_BASE then
+        local baseCh = GetChannelName(PEER_CHANNEL_BASE)
+        if not baseCh or baseCh == 0 then
+            pcall(JoinChannelByName, PEER_CHANNEL_BASE, nil, nil, false)
+        end
     end
     if not peerChatVisible and ChatFrame_RemoveChannel then
         for i = 1, 10 do
             local chat = _G["ChatFrame" .. i]
-            if chat then ChatFrame_RemoveChannel(chat, PEER_CHANNEL) end
+            if chat then
+                ChatFrame_RemoveChannel(chat, own)
+                if own ~= PEER_CHANNEL_BASE then
+                    ChatFrame_RemoveChannel(chat, PEER_CHANNEL_BASE)
+                end
+            end
         end
     end
 end
@@ -1499,7 +1550,7 @@ end
 -- is the first thing to check when inbound traffic looks absent.
 -- Global on purpose — a local function would cost a slot in the main chunk.
 function PeerLogChannel(what)
-    local ch = GetChannelName(PEER_CHANNEL)
+    local ch = GetChannelName(PeerChannelName())
     D(("Peer %s: channel=%s"):format(what, tostring(ch)))
     PeerSync()
 end
@@ -3299,17 +3350,18 @@ local HELP_COMMANDS = {
     "/nspy [show]", "/nspy help", "/nspy suggest",
     "/nspy who", "/nspy whostop",
     "/nspy count", "/nspy announce", "/nspy debug",
-    "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy peer new", "/nspy peer list", "/nspy reset",
+    "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy peer new", "/nspy peer list",
+    "/nspy peer send", "/nspy reset",
     "/nspy server", "/nspy menu", "/nspy minimap", "/nspy settings",
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Force-send the pending queue (no world click needed)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "强制发送待发队列（无需点击世界）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Отправить очередь принудительно (без клика по миру)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Warteschlange sofort senden (ohne Klick in die Welt)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
 }
 local helpWin
 local EffectiveLocale -- forward: defined with the settings selectors below
@@ -5072,7 +5124,7 @@ local function BuildSettingsWindow()
                 if not ok then DbgErr("peerJoin", err) end
             else
                 peerQueue, peerQueued = {}, {}
-                if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
+                if LeaveChannelByName then pcall(LeaveChannelByName, PeerChannelName()) end
             end
             hub.Refresh()
         end)
@@ -5403,14 +5455,14 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         db.peerEnabled = true
         local ok, err = pcall(JoinPeerChannel)
         if not ok then DbgErr("peerJoin", err) end
-        P(L("PEER_ON"):format(PEER_CHANNEL))
-        D(("Peer join attempt: channel=%s"):format(tostring(GetChannelName(PEER_CHANNEL))))
+        P(L("PEER_ON"):format(PeerChannelName()))
+        D(("Peer join attempt: channel=%s"):format(tostring(GetChannelName(PeerChannelName()))))
         if PeerSync then pcall(PeerSync) end
     elseif msg == "peer off" then
         db.peerEnabled = false
         peerQueue, peerQueued = {}, {}
         if peerChatVisible then pcall(SetPeerChatVisible, false) end
-        if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
+        if LeaveChannelByName then pcall(LeaveChannelByName, PeerChannelName()) end
         P(L("PEER_OFF"))
         if PeerSync then pcall(PeerSync) end
     elseif msg == "peer chat on" or msg == "peer chat off" then
@@ -5421,6 +5473,29 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         else
             P("Peer channel visibility unavailable: " .. tostring(result))
         end
+    elseif msg == "peer send" then
+        -- Ручная разгрузка очереди. Очередь штатно уходит только по клику в
+        -- 3D-мир (hardware gate беты: WorldFrame OnMouseDown). Если этот гейт
+        -- не срабатывает (кастомный клиент, окно поверх мира), пакеты стоят
+        -- вечно — что и наблюдалось 10.11.2026: queued=4, sent=0. Команда
+        -- пробует отправку тем же путём, но по явному требованию игрока.
+        local before = peerStats.sent
+        local okSend, errSend = pcall(DrainPeerQueue)
+        if not okSend then
+            P("Peer send error: " .. tostring(errSend))
+        else
+            local sent = peerStats.sent - before
+            local ch = GetChannelName(PeerChannelName())
+            P(("Peer send: %d sent, %d queued, channel=%s (%s)")
+                :format(sent, #peerQueue, tostring(ch), PeerChannelName()))
+            if sent == 0 and #peerQueue > 0 then
+                -- причины по порядку: канал не присоединён, гейт PEER_GAP,
+                -- ошибка SendChatMessage в db.debug.peerSendError
+                P("  not sent: channel " .. tostring(ch)
+                    .. (db.debug.peerSendError and (", error: " .. tostring(db.debug.peerSendError)) or ""))
+            end
+        end
+        if PeerSync then pcall(PeerSync) end
     elseif msg == "peer new" or msg == "peer list" then
         -- Everything the channel actually delivered, straight from the database:
         -- peerAt/peerNew are persisted, so this list survives a relog, unlike
@@ -5439,7 +5514,7 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             end
         end
         if #list == 0 then
-            P(L("PEER_LIST_EMPTY"):format(PEER_CHANNEL))
+            P(L("PEER_LIST_EMPTY"):format(PeerChannelName()))
         else
             table.sort(list, function(a, b) return (a.peerAt or 0) > (b.peerAt or 0) end)
             local shown = #list > 20 and 20 or #list
@@ -5456,9 +5531,16 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         end
     elseif msg == "peer" then
         P(L("PEER_STATUS"):format(
-            db.peerEnabled and L("ON") or L("OFF"), tostring(GetChannelName(PEER_CHANNEL)),
+            db.peerEnabled and L("ON") or L("OFF"), tostring(GetChannelName(PeerChannelName())),
             #peerQueue, peerStats.sent, peerStats.received, peerStats.dropped,
             db.debug.peerSendError and (", error=" .. db.debug.peerSendError) or ""))
+        -- Имя канала и результат последнего входа: канал привязан к фракции
+        -- (_a/_h), и отказ сервера виден только здесь — штатный вход молчит.
+        local joinInfo = type(db.debug) == "table" and db.debug.peerJoin or nil
+        P(("Peer channel: %s (base %s)%s")
+            :format(PeerChannelName(), PEER_CHANNEL_BASE,
+                joinInfo and (("; last join: %s ok=%s"):format(
+                    tostring(joinInfo.channel), tostring(joinInfo.ok))) or "; last join: -"))
         P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, merged=%d, foreign=%d, selfEcho=%d, chat=%s, lastSender=%s")
             :format(peerStats.seen, peerStats.valid, peerStats.rejected,
                 peerStats.valid - peerStats.received - peerStats.merged, peerStats.merged,
@@ -5521,8 +5603,16 @@ local chatFrame = CreateFrame("Frame")
 local function IsPeerChannel(channelName)
     if type(channelName) ~= "string" or (canaccessvalue and not canaccessvalue(channelName)) then return false end
     channelName = channelName:lower()
-    return channelName == PEER_CHANNEL or
-        channelName:match("^%d+%. " .. PEER_CHANNEL .. "$") ~= nil
+    -- Снимаем клиентский префикс "1. ": имя канала приходит и с ним, и без.
+    local base = channelName:match("^%d+%. (.+)$") or channelName
+    -- Принимаем базовое имя и ЛЮБОЙ фракционный вариант (_a, _h и будущие):
+    -- данные полезны независимо от того, кто их прислал, а сравнение с одним
+    -- именем отрезало бы половину канала после разделения по фракциям
+    -- (10.11.2026). Суффикс — РОВНО один буквенно-цифровой токен: иначе
+    -- "nearbyspydata_extra_deep" тоже считался бы нашим и фильтр чата съел бы
+    -- чужой канал (тест test_other_channels_are_not_peer).
+    if base == PEER_CHANNEL_BASE then return true end
+    return base:match("^" .. PEER_CHANNEL_BASE .. "_[%w]+$") ~= nil
 end
 -- Hide only our data messages, never suppress channel notices or other channels.
 local addMessageFilter = ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter or ChatFrame_AddMessageEventFilter
@@ -5561,7 +5651,7 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
                 local parts = {}
                 for i = 1, 9 do parts[i] = PeerEsc(select(i, ...), 40) end
                 local line = table.concat(parts, " | ")
-                if line:lower():find(PEER_CHANNEL, 1, true) then
+                if line:lower():find(PEER_CHANNEL_BASE, 1, true) then
                     D("Channel notice: " .. line)
                 end
             end, ...)
@@ -5643,7 +5733,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             if C_Timer and C_Timer.After then
                 C_Timer.After(30, function()
                     if not GetDB().peerEnabled then return end
-                    local ch = GetChannelName(PEER_CHANNEL)
+                    local ch = GetChannelName(PeerChannelName())
                     if not ch or ch == 0 then
                         local okR, errR = pcall(JoinPeerChannel)
                         if not okR then DbgErr("peerJoinRetry", errR) end
