@@ -19,6 +19,8 @@ class PeerDiagnosticsTests(unittest.TestCase):
             "time = function() return 1000 end\n"
             "local function Round4(x) return x end\n"
             "local function PlayerRealm() return 'Home' end\n"
+            "LOCALIZED_CLASS_NAMES_MALE = {MAGE='Маг', DRUID='Друид'}\n"
+            "function ClassLocFromFile(f) return (LOCALIZED_CLASS_NAMES_MALE or {})[f] end\n"
             "ME, SURNAME = 'Me', nil\n"
             "UnitName = function(unit) return ME, SURNAME end\n"
             "local function P(_) end\n"

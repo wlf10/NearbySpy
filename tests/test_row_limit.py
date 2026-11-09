@@ -32,6 +32,9 @@ local function SortedPlayers() return PLAYERS end
 local function TacticalVisible() return true end
 
 -- минимальный мок строки: методы-заглушки + наблюдаемые FontString'ы
+function ClassLocFromFile(f) return (LOCALIZED_CLASS_NAMES_MALE or {})[f] end
+LOCALIZED_CLASS_NAMES_MALE = {MAGE = "Маг", DRUID = "Друид"}
+
 local function FontString()
     local fs = {text = nil, shown = true}
     function fs:SetText(t) self.text = t end
@@ -60,6 +63,7 @@ end
 function RowsCount() return #tactical.rows end
 function RowShown(index) return tactical.rows[index] ~= nil and tactical.rows[index].shown end
 function GetWinList() return winList end
+function GetTactical() return tactical end
 """
 
 
@@ -90,6 +94,26 @@ class RowLimitTests(unittest.TestCase):
         shown, win_list = self.run_rows(500)
         self.assertEqual(500, shown)
         self.assertEqual(500 * 16, win_list["height"])
+
+    def test_peer_row_profile_shows_the_localized_class(self):
+        # a peer packet has only the file key; a locally observed row has classLoc.
+        # Without the display-time translation both spellings appeared in one list.
+        self.g["SetPlayers"](self.lua.table_from([
+            self.lua.table_from({"name": "FromChannel", "class": "DRUID",
+                                 "level": 20, "lastSeen": 1000}),
+        ]))
+        self.g["TestRows"]()
+        row = self.g["GetTactical"]()["rows"][1]
+        self.assertEqual("Друид; LVL_PREFIX20", row["profile"]["text"],
+                         "a peer row must show the localized class, not DRUID")
+
+    def test_local_row_keeps_its_own_classLoc(self):
+        self.g["SetPlayers"](self.lua.table_from([
+            self.lua.table_from({"name": "Seen", "class": "DRUID", "classLoc": "Друидка",
+                                 "level": 20, "lastSeen": 1000}),
+        ]))
+        self.g["TestRows"]()
+        self.assertEqual("Друидка; LVL_PREFIX20", self.g["GetTactical"]()["rows"][1]["profile"]["text"])
 
     def test_fewer_than_limit_is_not_truncated(self):
         shown, win_list = self.run_rows(3)

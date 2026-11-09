@@ -21,6 +21,8 @@ local REAP_SECONDS, newThisSession = 600, 0
 time = function() return 1000 end
 local function Round4(v) if v == nil then return nil end return math.floor(v * 10000 + 0.5) / 10000 end
 local function PlayerRealm() return "CAMWOW EU5 Realm 1 PvE" end
+LOCALIZED_CLASS_NAMES_MALE = {MAGE="Маг", DRUID="Друид", WARRIOR="Воин", HUNTER="Охотник", PRIEST="Жрец", WARLOCK="Чернокнижник", PALADIN="Паладин", SHAMAN="Шаман", ROGUE="Разбойник"}
+function ClassLocFromFile(f) return (LOCALIZED_CLASS_NAMES_MALE or {})[f] end
 -- the receive path ignores packets we sent ourselves; make the local player
 -- clearly someone else so real peer packets are not mistaken for self-echoes
 UnitName = function() return "Localhero", nil end

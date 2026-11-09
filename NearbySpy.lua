@@ -1418,6 +1418,20 @@ function WR.Counts()
     return vendors, items, fish
 end
 
+-- file key -> localized class name, for the window: peer packets carry only the
+-- file key ("DRUID"), so a row received from another player printed "DRUID" while
+-- a locally recorded row printed "Друид". Fixed at DISPLAY time, so records
+-- already stored in SavedVariables get localized too — no rewrite needed.
+-- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
+function ClassLocFromFile(file)
+    if type(file) ~= "string" or file == "" then return nil end
+    local male = LOCALIZED_CLASS_NAMES_MALE
+    if male and male[file] then return male[file] end
+    local female = LOCALIZED_CLASS_NAMES_FEMALE
+    if female and female[file] then return female[file] end
+    return nil
+end
+
 -- localized class name -> file key (for UI color)
 local function ClassFileFromLocalized(classStr)
     if not classStr or classStr == "" then return nil end
@@ -1820,6 +1834,9 @@ local function ReceivePeerMessage(message, sender)
     local foreign = realm ~= PlayerRealm()
     local isNew = UpsertPlayer(db, {key = name .. "-" .. realm, name = name, realm = realm,
         class = class, level = level, race = race ~= "?" and race or nil,
+        -- the packet has only the file key; translate it once at intake so the
+        -- stored record matches what a local observation would have written
+        classLoc = ClassLocFromFile(class),
         faction = faction ~= "?" and faction or nil, source = "peer", silent = true,
         peerRealm = realm, peerForeign = foreign,
         zone = (zoneName and zoneName ~= "?") and zoneName or nil,
@@ -3898,7 +3915,8 @@ local function TacticalRow(parent, index)
         local r, g, b = ClassColorRGB(p.class)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(p.name or "?", r, g, b)
-        GameTooltip:AddLine((p.classLoc or p.class or "?") .. "; " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
+        GameTooltip:AddLine((p.classLoc or ClassLocFromFile(p.class) or p.class or "?")
+            .. "; " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
         GameTooltip:AddLine(L("UI_ZONE") .. ": " .. tostring(p.zone or "?"), 0.65, 0.72, 0.72)
         if p.peerForeign and p.realm and p.realm ~= "" then
             -- A peer record from another realm: someone else in the channel met
@@ -3953,7 +3971,9 @@ local function TacticalRows()
                 row.realm:SetText("")
                 row.realm:Hide()
             end
-            row.profile:SetText(("%s; %s%s"):format(p.classLoc or p.class or "?", L("LVL_PREFIX"), tostring(p.level or "?")))
+            row.profile:SetText(("%s; %s%s"):format(
+                p.classLoc or ClassLocFromFile(p.class) or p.class or "?",
+                L("LVL_PREFIX"), tostring(p.level or "?")))
             -- Peer records carry no position or zone at all (the packet has
             -- neither), so a peer row honestly has no zone.
             row.zone:SetText(p.zone or "?")
@@ -4003,7 +4023,8 @@ local function TacticalStats()
         end
         local file = p.class or "UNKNOWN"
         if not st.classes[file] then
-            st.classes[file] = {file = file, label = p.classLoc or p.class or "?", count = 0}
+            st.classes[file] = {file = file,
+                label = p.classLoc or ClassLocFromFile(p.class) or p.class or "?", count = 0}
         end
         st.classes[file].count = st.classes[file].count + 1
         end
