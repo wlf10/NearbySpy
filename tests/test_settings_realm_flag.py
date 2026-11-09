@@ -63,6 +63,11 @@ function OptTextHeight(fs, fallback)
     return lines * ((fallback == 14) and 14 or 11)
 end
 
+-- The player window is a separate frame, built lazily; the checkbox may only
+-- repaint it when it is actually on screen.
+NearbySpyWindow = { __shown = false }
+function NearbySpyWindow:IsShown() return self.__shown end
+
 DB = { peerEnabled = true, peerAllRealms = true }
 function GetDB() return DB end
 
@@ -149,12 +154,21 @@ class SettingsRealmFlagTests(unittest.TestCase):
         self.assertEqual(True, cb["checked"])
 
     def test_unchecking_writes_false_and_repaints_the_list(self):
+        # the player window is open: its list must drop the foreign rows at once
+        self.lua.globals()["NearbySpyWindow"]["__shown"] = True
         self.click()
-        db = self.lua.globals()["DB"]
-        self.assertEqual(False, db["peerAllRealms"])
+        self.assertEqual(False, self.lua.globals()["DB"]["peerAllRealms"])
         repaints = self.lua.globals()["REPAINTS"]
         self.assertEqual(1, repaints["tactical"])
         self.assertEqual(1, repaints["hub"])
+
+    def test_unchecking_with_a_closed_player_window_does_not_repaint(self):
+        # a closed (or never built) player window has nothing to repaint; it
+        # refreshes on its own OnShow. Repainting anyway crashed the list update.
+        self.lua.globals()["NearbySpyWindow"]["__shown"] = False
+        self.click()
+        self.assertEqual(False, self.lua.globals()["DB"]["peerAllRealms"])
+        self.assertEqual(0, self.lua.globals()["REPAINTS"]["tactical"])
 
     def test_checking_again_restores_the_value(self):
         self.click()

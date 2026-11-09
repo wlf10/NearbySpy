@@ -64,6 +64,8 @@ development noise is left out.
 - The settings window gains a minimap icon switch and the "Accept other realms"
   checkbox; its rows now follow the height of their own text, so longer
   descriptions no longer run into the row below.
+- Switching "Accept other realms" off takes effect immediately: new records from
+  other realms are rejected and the ones already stored disappear from the list.
 - The minimap button was rebuilt to match the standard addon button geometry:
   a round masked icon with a soft transparency and the ring sitting exactly on it.
 - The menu window fits longer Cyrillic and German labels.

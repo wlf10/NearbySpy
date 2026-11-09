@@ -3992,6 +3992,11 @@ local function TacticalMetric(parent, x, width, label)
 end
 
 TacticalUpdate = function()
+    -- The widgets are built lazily by BuildWindow(): a caller that runs before
+    -- the player window was ever opened has nothing to update. Without this the
+    -- update died on `tactical.total.value` (nil) — seen in game 09.11.2026 when
+    -- the realm checkbox repainted the list from the settings window.
+    if not tactical.total then return end
     local ok, err = pcall(function()
         local st = TacticalStats()
         tactical.total.value:SetText(tostring(st.total))
@@ -5001,7 +5006,11 @@ local function BuildSettingsWindow()
             -- Both directions change what the list shows, so repaint it right
             -- away: with the flag off stored foreign rows disappear, with it on
             -- they come back (nothing is deleted either way).
-            if win and win.IsShown and win:IsShown() then pcall(TacticalUpdate) end
+            -- `win` here is the SETTINGS window: checking it told us only that
+            -- the checkbox was visible, and the repaint then ran against a player
+            -- window that may never have been built. Ask the player window.
+            local mainWin = _G and _G.NearbySpyWindow
+            if mainWin and mainWin.IsShown and mainWin:IsShown() then pcall(TacticalUpdate) end
             if hub and hub.Refresh then pcall(hub.Refresh) end
         end)
     rowY = NextCheckY(opt.allRealmsLabel, opt.allRealmsDesc)
