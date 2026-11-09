@@ -4,27 +4,40 @@ Cut from the NearbySpy.lua header when the version was publicly reset to 1.0.0 (
 
 ## Unreleased
 
-    1.5.3 (dev, 2026-11-09) — выборка по классу и уровню; peer-запись больше
-    не выдаёт себя за нашу встречу:
-      - FEATURE: в окне игроков появились два селектора рядом с селектором
-        мира — по классу и по уровню. Класс циклится по классам, которые
-        реально есть в базе (частые сверху), уровень — по диапазонам
-        1-10 … 51-60. Клик по столбцу в гистограмме уровней выбирает «ровно
-        N», клик по строке в панели «КЛАССЫ» — выборку по этому классу.
-        Фильтры складываются между собой и с фильтром по миру.
-      - Записи без класса (238 в живом файле) доступны отдельным пунктом
-        «без класса», а не прячутся молча.
-      - REFACTOR: аддон разделён на NearbySpy_Locale.lua (строки интерфейса
-        на шести языках и общие константы) и NearbySpy.lua (логика). Главный
-        чанк стоял в одном top-level local до предела Lua 5.1 в 200 — ещё одна
-        такая правка сломала бы загрузку аддона целиком. Свободных locals
-        стало 15.
-      - BUGFIX: запись из канала обмена (peer) больше не считается нашей
-        встречей. Пакет приходил без observe=false, поэтому запись получала
-        lastSeen = время получения и count + 1 — сайт получал встречу,
-        которой не было (522 записи в живом файле). Теперь у peer-записи
-        lastSeen = 0, count = 0, а время держит peerAt; наша собственная
-        встреча вытесняет source="peer" на реальный источник.
+    1.5.3 (2026-11-10) — class/level sampling; a peer packet stops posing as our meeting:
+      - FEATURE: the player window has two selectors next to the realm one — class
+        and level. The class selector walks the classes present in the database
+        (most frequent first); records with no class are reachable as their own
+        entry (238 in a live save). The level selector walks bands of ten; a
+        click on a histogram column selects that exact level, a second click
+        clears it; a click on a row in the CLASSES panel filters by that class and
+        highlights it. All filters combine (AND).
+      - FEATURE: peer records keep the sender character (peerFrom), and
+        /nspy peer new (only what the channel taught us) is split from
+        /nspy peer list (everything delivered, updates included). The "New"
+        filter now shows only our own finds.
+      - FEATURE: /nspy peer send drains the pending queue on demand — the queue
+        normally drains only on a click in the 3D world, and packets can sit
+        there indefinitely when that gate does not fire.
+      - BUGFIX: a peer record was treated as our own meeting (lastSeen = receive
+        time, count +1), so a player somebody else met read as "seen just now"
+        and inflated the encounter counter. Now the packet is passed with
+        observe = false: count 0, lastSeen empty, the packet time kept in peerAt.
+        A local sighting also replaces source="peer" now instead of the source
+        staying "peer" forever.
+      - BUGFIX: the peer channel is per faction — the server refuses to let a
+        character join a channel created by the other faction, and the addon
+        reported the channel as joined while it was dead (the return value of
+        JoinChannelByName was discarded). Channels are now nearbyspy (base),
+        nearbyspya (Alliance), nearbyspyh (Horde); the join result is stored in
+        db.debug.peerJoin and shown by /nspy peer; inbound messages are accepted
+        from any single-character suffix, and stale legacy channel memberships
+        are left on sight.
+      - INTERNAL: the addon is split into NearbySpy_Locale.lua (UI strings in six
+        languages plus the shared constants table NSP_CONST) and NearbySpy.lua
+        (logic), because the main chunk was ONE top-level local short of the Lua
+        5.1 limit of 200 — the next such edit would have broken the whole addon
+        at compile time. Free locals went from 1 to 14.
 
     1.5.2 (dev, 2026-11-09) — peer stops sharing the observer's position; settings rows fit their text:
       - BUGFIX: coordinates went into the peer packet for ANY record, including
