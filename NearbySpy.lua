@@ -1161,20 +1161,29 @@ end
 -- Opt-in, realm-local peer exchange. Received records never re-enter the queue.
 -- Канал обмена привязан к ФРАКЦИИ. Сервер не пускает персонажа одной фракции
 -- в канал, созданный другой (проверено 10.11.2026: под Ордой вход в общий
--- "nearbyspydata", созданный Альянсом, отклонён сервером). Базовое имя общее,
--- суффикс делает каналы независимыми: _a для Альянса, _h для Орды.
+-- "nearbyspydata", созданный Альянсом, отклонён сервером).
+--
+-- Суффикс приклеивается БЕЗ разделителя: подчёркивание в имени канала клиент
+-- не принимает (проверено в игре 10.11.2026). Отсюда имена nearbyspya /
+-- nearbyspyh, а не nearbyspy_a / nearbyspy_h.
 --
 -- Обмен между фракциями не теряется: он идёт через сайт, куда обе фракции
 -- грузят свои SavedVariables. Канал — это только «здесь и сейчас».
-local PEER_CHANNEL_BASE = "nearbyspydata"
+local PEER_CHANNEL_BASE = "nearbyspy"
+
+-- Имена, под которыми аддон сидел раньше. Персонаж мог остаться их членом с
+-- прошлых сессий, а пока membership есть, сервер отвечает
+-- NOT_ALLOWED_IN_CHANNEL и печатает это в чат. Поэтому: выходим из них при
+-- входе, а их сообщения по-прежнему прячем из чата (это тот же протокол).
+local PEER_CHANNEL_LEGACY = { "nearbyspydata", "nearbyspydata_a", "nearbyspydata_h" }
 
 -- Имя канала для текущего персонажа. Global on purpose — главный чанк стоит у
 -- потолка Lua 5.1 в 200 top-level locals.
 function PeerChannelName()
     local ok, faction = pcall(UnitFactionGroup, "player")
     if not ok or type(faction) ~= "string" then return PEER_CHANNEL_BASE end
-    if faction == "Alliance" then return PEER_CHANNEL_BASE .. "_a" end
-    if faction == "Horde" then return PEER_CHANNEL_BASE .. "_h" end
+    if faction == "Alliance" then return PEER_CHANNEL_BASE .. "a" end
+    if faction == "Horde" then return PEER_CHANNEL_BASE .. "h" end
     -- фракция неизвестна (ранний вызов, нестандартный сервер) — общий канал
     return PEER_CHANNEL_BASE
 end
@@ -1185,7 +1194,7 @@ local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- top-level local breaks the whole addon at compile time.
 local peerStats = {sent = 0, received = 0, merged = 0, dropped = 0, seen = 0, valid = 0, rejected = 0,
     foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, lastSend = 0, rejectLogged = {}, lastNoChannel = 0,
-    leftBase = false}
+    leftStale = nil}
 local peerChatVisible = false -- session-only diagnostic; never persist raw traffic
 
 -- Snapshot of peer counters into SavedVariables.
@@ -1399,7 +1408,7 @@ local function ReceivePeerMessage(message, sender)
         -- The beta has no ChatFrame_AddChannel: mirror only received peer events.
         -- Escape pipes so untrusted chat text cannot inject texture/link markup.
         pcall(DEFAULT_CHAT_FRAME.AddMessage, DEFAULT_CHAT_FRAME,
-            "[nearbyspydata] " .. sender:gsub("|", "?") .. ": " .. message:gsub("|", "?"))
+            "[" .. PeerChannelName() .. "] " .. sender:gsub("|", "?") .. ": " .. message:gsub("|", "?"))
     end
     local nowT = time()
     if nowT - peerStats.inStart >= 60 then
@@ -1522,15 +1531,18 @@ local function JoinPeerChannel()
             at = time(),
         }
     end
-    -- Выходим из устаревшего БАЗОВОГО канала, если персонаж в нём остался с
-    -- прошлых сессий (он создан фракцией-соперником): сервер на любой повторный
-    -- запрос отвечает NOT_ALLOWED_IN_CHANNEL и печатает это игроку в чат.
-    -- Один раз за сессию, чтобы не дёргать клиент на каждом ретрае.
-    if own ~= PEER_CHANNEL_BASE and not peerStats.leftBase and LeaveChannelByName then
-        local staleBase = GetChannelName(PEER_CHANNEL_BASE)
-        if staleBase and staleBase ~= 0 then
-            peerStats.leftBase = true
-            pcall(LeaveChannelByName, PEER_CHANNEL_BASE)
+    -- Выходим из устаревших каналов, если персонаж остался в них с прошлых
+    -- сессий (общий "nearbyspydata" и его фракционные варианты с подчёркиванием
+    -- — клиент такое имя не принимает). Пока membership есть, сервер отвечает
+    -- NOT_ALLOWED_IN_CHANNEL и печатает это игроку в чат. Один раз за сессию.
+    if not peerStats.leftStale then
+        peerStats.leftStale = {}
+        for _, legacy in ipairs(PEER_CHANNEL_LEGACY) do
+            local stale = GetChannelName(legacy)
+            if stale and stale ~= 0 and LeaveChannelByName then
+                peerStats.leftStale[#peerStats.leftStale + 1] = legacy
+                pcall(LeaveChannelByName, legacy)
+            end
         end
     end
     if not peerChatVisible and ChatFrame_RemoveChannel then
@@ -5604,14 +5616,18 @@ local function IsPeerChannel(channelName)
     channelName = channelName:lower()
     -- Снимаем клиентский префикс "1. ": имя канала приходит и с ним, и без.
     local base = channelName:match("^%d+%. (.+)$") or channelName
-    -- Принимаем базовое имя и ЛЮБОЙ фракционный вариант (_a, _h и будущие):
-    -- данные полезны независимо от того, кто их прислал, а сравнение с одним
-    -- именем отрезало бы половину канала после разделения по фракциям
-    -- (10.11.2026). Суффикс — РОВНО один буквенно-цифровой токен: иначе
-    -- "nearbyspydata_extra_deep" тоже считался бы нашим и фильтр чата съел бы
-    -- чужой канал (тест test_other_channels_are_not_peer).
     if base == PEER_CHANNEL_BASE then return true end
-    return base:match("^" .. PEER_CHANNEL_BASE .. "_[%w]+$") ~= nil
+    -- Фракционный вариант: базовое имя плюс РОВНО один буквенно-цифровой
+    -- символ (nearbyspya / nearbyspyh и любые будущие). Больше одного быть не
+    -- может: подчёркивание в имени канала клиент не принимает, а сравнение по
+    -- префиксу без этой границы съело бы чужой канал.
+    if base:match("^" .. PEER_CHANNEL_BASE .. "[%w]$") then return true end
+    -- Старые имена канала: сообщения того же протокола, их тоже прячем из чата,
+    -- чтобы после переименования старые строки не сыпались игроку.
+    for _, legacy in ipairs(PEER_CHANNEL_LEGACY) do
+        if base == legacy then return true end
+    end
+    return false
 end
 -- Hide only our data messages, never suppress channel notices or other channels.
 local addMessageFilter = ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter or ChatFrame_AddMessageEventFilter
