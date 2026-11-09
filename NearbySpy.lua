@@ -1423,43 +1423,17 @@ end
 -- a locally recorded row printed "Друид". Fixed at DISPLAY time, so records
 -- already stored in SavedVariables get localized too — no rewrite needed.
 -- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
--- Опционально: переводы классов под язык ИНТЕРФЕЙСА аддона.
--- Зачем отдельная таблица: classLoc/zone приходят от КЛИЕНТА и уже локализованы
--- на его языке. Если клиент русский, а интерфейс аддона переключён на English,
--- показать "Маг" как "Mage" можно только своей таблицей — клиент другой строки
--- не отдаст. Ключи — файл-ключи классов (их же несёт peer-пакет).
-local CLASS_LOC = {
-    WARRIOR = { enUS = "Warrior", ruRU = "Воин", zhCN = "战士", deDE = "Krieger", frFR = "Guerrier", koKR = "전사" },
-    PALADIN = { enUS = "Paladin", ruRU = "Паладин", zhCN = "圣骑士", deDE = "Paladin", frFR = "Paladin", koKR = "성기사" },
-    HUNTER = { enUS = "Hunter", ruRU = "Охотник", zhCN = "猎人", deDE = "Jäger", frFR = "Chasseur", koKR = "사냥꾼" },
-    ROGUE = { enUS = "Rogue", ruRU = "Разбойник", zhCN = "潜行者", deDE = "Schurke", frFR = "Voleur", koKR = "도적" },
-    PRIEST = { enUS = "Priest", ruRU = "Жрец", zhCN = "牧师", deDE = "Priester", frFR = "Prêtre", koKR = "사제" },
-    SHAMAN = { enUS = "Shaman", ruRU = "Шаман", zhCN = "萨满祭司", deDE = "Schamane", frFR = "Chaman", koKR = "주술사" },
-    MAGE = { enUS = "Mage", ruRU = "Маг", zhCN = "法师", deDE = "Magier", frFR = "Mage", koKR = "마법사" },
-    WARLOCK = { enUS = "Warlock", ruRU = "Чернокнижник", zhCN = "术士", deDE = "Hexenmeister", frFR = "Démoniste", koKR = "흑마법사" },
-    DRUID = { enUS = "Druid", ruRU = "Друид", zhCN = "德鲁伊", deDE = "Druide", frFR = "Druide", koKR = "드루이드" },
-}
-
--- Язык интерфейса аддона: настройка (db.locale) важнее языка клиента.
--- Отдельная функция, а не L(): EffectiveLocale объявлена ниже по файлу и здесь
--- ещё не видна. Global — главный чанк у лимита 200 локалов.
-function UiLocale()
-    local ov = (type(NearbySpy) == "table") and NearbySpy.locale or nil
-    if ov and CLASS_LOC.DRUID and LOCALE[ov] then return ov end
-    local cl = GetLocale and GetLocale() or "enUS"
-    if LOCALE[cl] then return cl end
-    return "enUS"
-end
-
--- Display name of a class in the INTERFACE language. fallback — то, что пришло от
--- клиента (classLoc): используется, когда класс нам неизвестен (кастомный).
+-- Отображаемое имя класса — ВСЕГДА на языке КЛИЕНТА, как и названия зон.
+-- Решение пользователя 09.11.2026: названия из игры (класс, зона) не переводим
+-- своей таблицей — аддон показывает то же, что игрок видит в игре. Поэтому
+-- переключение языка интерфейса меняет надписи аддона, но не имена из игры.
+--
+-- Зачем обёртка вообще нужна: peer-пакеты несут ТОЛЬКО файл-ключ класса
+-- ("DRUID"), поэтому без перевода ключа в клиентскую строку чужая запись
+-- показывала "DRUID" рядом с "Друид" у своей. ClassLocFromFile — это перевод
+-- ключа в строку ЯЗЫКА КЛИЕНТА, а не наш перевод.
 function ClassDisplayName(file, fallback)
-    local row = type(file) == "string" and CLASS_LOC[file] or nil
-    if row then
-        local name = row[UiLocale()]
-        if name then return name end
-    end
-    -- Никогда не nil: вызывающие подставляют результат прямо в format("%s")
+    -- Никогда не nil: результат идёт прямо в format("%s")
     return fallback or ClassLocFromFile(file) or file or "?"
 end
 
