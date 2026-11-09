@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.5.2
+    NearbySpy 1.5.3
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -100,7 +100,7 @@ local LOCALE = {
         HUB_HELP = "Help", HUB_HELP_D = "all commands",
         HUB_SETTINGS = "Settings", HUB_SETTINGS_D = "options and sharing",
         SET_PEER = "Peer sharing", SET_PEER_D = "Send new encounters to the nearbyspydata channel and receive from others",
-        SET_PEER_ALL = "Accept other realms", SET_PEER_ALL_D = "The channel is shared by the whole cluster. On: records from other realms are accepted and their realm is shown. Off: such packets are dropped and already stored ones are hidden.",
+        SET_PEER_ALL = "Accept other realms", SET_PEER_ALL_D = "Channel is cluster-wide. On: records from other realms are accepted and labelled. Off: they are dropped and hidden.",
         SCAN_RESUMED = "resuming the /who scan: %d queries left of %d. Start over: /nspy who new", SCAN_FORGOTTEN = "saved scan forgotten, the next run starts from the top level",
         SET_MINIMAP = "Show minimap button", SET_MINIMAP_D = "Turn the NearbySpy icon on the minimap on or off",
         SET_AUTO = "Auto (%s)",
@@ -171,7 +171,7 @@ local LOCALE = {
         HUB_HELP = "帮助", HUB_HELP_D = "所有命令",
         HUB_SETTINGS = "设置", HUB_SETTINGS_D = "选项与共享",
         SET_PEER = "共享数据 (peer)", SET_PEER_D = "发送新遇到的玩家到 nearbyspydata 频道并接收他人的数据",
-        SET_PEER_ALL = "接受其他服务器", SET_PEER_ALL_D = "频道由整个集群共享。开启：接收其他服务器的记录并显示其服务器。关闭：丢弃这些数据，已保存的也隐藏。",
+        SET_PEER_ALL = "接受其他服务器", SET_PEER_ALL_D = "频道为集群共享。开启：接收其他服务器的记录并标注。关闭：丢弃并隐藏。",
         SCAN_RESUMED = "继续 /who 扫描：剩余 %d 个查询，共 %d 个。重新开始: /nspy who new", SCAN_FORGOTTEN = "已保存的扫描已清除，下次从最高等级开始",
         SET_MINIMAP = "显示小地图按钮", SET_MINIMAP_D = "打开或关闭小地图上的 NearbySpy 图标",
         SET_AUTO = "自动 (%s)",
@@ -242,7 +242,7 @@ local LOCALE = {
         HUB_HELP = "Помощь", HUB_HELP_D = "все команды",
         HUB_SETTINGS = "Настройки", HUB_SETTINGS_D = "опции и обмен",
         SET_PEER = "Обмен данными (peer)", SET_PEER_D = "Отправлять новые встречи в канал nearbyspydata и принимать от других",
-        SET_PEER_ALL = "Принимать другие реалмы", SET_PEER_ALL_D = "Канал общий для всего кластера. Вкл: записи с других реалмов принимаются и реалм показывается. Выкл: такие пакеты отбрасываются, а уже сохранённые скрываются.",
+        SET_PEER_ALL = "Принимать другие реалмы", SET_PEER_ALL_D = "Канал общий на кластер. Вкл: записи с других реалмов принимаются и помечаются. Выкл: отбрасываются и скрываются.",
         SCAN_RESUMED = "продолжаю скан /who: осталось %d запросов из %d. Начать заново: /nspy who new", SCAN_FORGOTTEN = "сохранённый скан забыт, следующий начнётся с верхнего уровня",
         SET_MINIMAP = "Кнопка на миникарте", SET_MINIMAP_D = "Показать или скрыть иконку NearbySpy на миникарте",
         SET_AUTO = "Авто (%s)",
@@ -313,7 +313,7 @@ local LOCALE = {
         HUB_HELP = "Hilfe", HUB_HELP_D = "alle Befehle",
         HUB_SETTINGS = "Einstellungen", HUB_SETTINGS_D = "Optionen und Austausch",
         SET_PEER = "Peer-Austausch", SET_PEER_D = "Neue Begegnungen an den Kanal nearbyspydata senden und von anderen empfangen",
-        SET_PEER_ALL = "Andere Realms annehmen", SET_PEER_ALL_D = "Der Kanal wird vom ganzen Cluster geteilt. An: Einträge anderer Realms werden angenommen und ihr Realm angezeigt. Aus: solche Pakete werden verworfen, gespeicherte ausgeblendet.",
+        SET_PEER_ALL = "Andere Realms annehmen", SET_PEER_ALL_D = "Kanal gilt clusterweit. An: Einträge anderer Realms werden angenommen und markiert. Aus: sie werden verworfen und ausgeblendet.",
         SCAN_RESUMED = "/who-Scan wird fortgesetzt: %d von %d Abfragen übrig. Neu starten: /nspy who new", SCAN_FORGOTTEN = "gespeicherter Scan verworfen, der nächste beginnt bei der höchsten Stufe",
         SET_MINIMAP = "Minimap-Button anzeigen", SET_MINIMAP_D = "Das NearbySpy-Symbol auf der Minimap ein- oder ausblenden",
         SET_AUTO = "Auto (%s)",
@@ -384,7 +384,7 @@ local LOCALE = {
         HUB_HELP = "Aide", HUB_HELP_D = "toutes les commandes",
         HUB_SETTINGS = "Réglages", HUB_SETTINGS_D = "options et partage",
         SET_PEER = "Partage peer", SET_PEER_D = "Envoyer les nouvelles rencontres au canal nearbyspydata et recevoir celles des autres",
-        SET_PEER_ALL = "Accepter d'autres royaumes", SET_PEER_ALL_D = "Le canal est partagé par tout le cluster. Activé : les entrées d'autres royaumes sont acceptées et leur royaume est affiché. Désactivé : ces paquets sont ignorés et les entrées déjà stockées masquées.",
+        SET_PEER_ALL = "Accepter d'autres royaumes", SET_PEER_ALL_D = "Canal commun au cluster. Activé : les entrées d'autres royaumes sont acceptées et marquées. Désactivé : elles sont ignorées et masquées.",
         SCAN_RESUMED = "reprise du scan /who : %d requêtes restantes sur %d. Recommencer : /nspy who new", SCAN_FORGOTTEN = "scan enregistré oublié, le prochain repart du niveau le plus haut",
         SET_MINIMAP = "Afficher le bouton de minicarte", SET_MINIMAP_D = "Activer ou désactiver l'icône NearbySpy sur la minicarte",
         SET_AUTO = "Auto (%s)",
@@ -455,7 +455,7 @@ local LOCALE = {
         HUB_HELP = "도움말", HUB_HELP_D = "모든 명령어",
         HUB_SETTINGS = "설정", HUB_SETTINGS_D = "옵션 및 공유",
         SET_PEER = "피어 공유", SET_PEER_D = "새로 만난 플레이어를 nearbyspydata 채널로 보내고 다른 플레이어의 정보를 받기",
-        SET_PEER_ALL = "다른 서버 허용", SET_PEER_ALL_D = "채널은 클러스터 전체가 공유합니다. 켜짐: 다른 서버의 기록을 받아 서버를 표시합니다. 꺼짐: 해당 패킷을 버리고 저장된 기록도 숨깁니다.",
+        SET_PEER_ALL = "다른 서버 허용", SET_PEER_ALL_D = "채널은 클러스터 공용입니다. 켜짐: 다른 서버 기록을 받아 표시합니다. 꺼짐: 버리고 숨깁니다.",
         SCAN_RESUMED = "/who 스캔을 이어서 진행합니다: %d개 남음 (전체 %d개). 새로 시작: /nspy who new", SCAN_FORGOTTEN = "저장된 스캔을 삭제했습니다. 다음 스캔은 최고 레벨부터 시작합니다",
         SET_MINIMAP = "미니맵 버튼 표시", SET_MINIMAP_D = "미니맵의 NearbySpy 아이콘을 켜거나 끕니다",
         SET_AUTO = "자동 (%s)",
@@ -4704,6 +4704,19 @@ local function OptCheck(parent, x, y, labelKey, descKey, getter, setter)
     return cb, label, desc
 end
 
+-- Height of a laid-out FontString, or a conservative fallback when the widget
+-- cannot measure itself (the height depends on the CLIENT FONT and on the
+-- language — a German or Russian description wraps to more lines than English,
+-- which is exactly how the settings rows ended up overlapping each other).
+-- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
+function OptTextHeight(fs, fallback)
+    if fs and fs.GetStringHeight then
+        local ok, h = pcall(fs.GetStringHeight, fs)
+        if ok and type(h) == "number" and h > 0 then return h end
+    end
+    return fallback
+end
+
 -- Language selector data: Auto (client) first in the UI, then the fixed
 -- public order en -> zh -> ru -> de -> fr -> ko.
 local SET_LANG_ORDER = { "enUS", "zhCN", "ruRU", "deDE", "frFR", "koKR" }
@@ -4949,7 +4962,21 @@ local function BuildSettingsWindow()
     end)
     optWin = win
 
-    opt.peer, opt.peerLabel, opt.peerDesc = OptCheck(win, 16, -52, "SET_PEER", "SET_PEER_D",
+    -- Rows are stacked by their MEASURED height, not by fixed offsets: a
+    -- description wraps to two, three or four lines depending on the client
+    -- font and the language, so hard-coded step of 52px made the longer rows
+    -- overlap the next one (seen with the new "Accept other realms" checkbox).
+    local rowY = -52
+    local function NextCheckY(label, desc)
+        return rowY - (4 + OptTextHeight(label, 14) + 3 + OptTextHeight(desc, 22)) - 16
+    end
+    local function NextSelectY(sel)
+        -- a selector draws its label at y, the dropdown at y-14 and the
+        -- description at y-46, so its block never ends before 46 + desc height
+        return rowY - (46 + OptTextHeight(sel and sel.desc, 22)) - 18
+    end
+
+    opt.peer, opt.peerLabel, opt.peerDesc = OptCheck(win, 16, rowY, "SET_PEER", "SET_PEER_D",
         function() return GetDB().peerEnabled and true or false end,
         function(v)
             local db = GetDB()
@@ -4963,8 +4990,9 @@ local function BuildSettingsWindow()
             end
             hub.Refresh()
         end)
+    rowY = NextCheckY(opt.peerLabel, opt.peerDesc)
 
-    opt.allRealms, opt.allRealmsLabel, opt.allRealmsDesc = OptCheck(win, 16, -104,
+    opt.allRealms, opt.allRealmsLabel, opt.allRealmsDesc = OptCheck(win, 16, rowY,
         "SET_PEER_ALL", "SET_PEER_ALL_D",
         function() return GetDB().peerAllRealms and true or false end,
         function(v)
@@ -4976,8 +5004,9 @@ local function BuildSettingsWindow()
             if win and win.IsShown and win:IsShown() then pcall(TacticalUpdate) end
             if hub and hub.Refresh then pcall(hub.Refresh) end
         end)
+    rowY = NextCheckY(opt.allRealmsLabel, opt.allRealmsDesc)
 
-    opt.minimap, opt.minimapLabel, opt.minimapDesc = OptCheck(win, 16, -156, "SET_MINIMAP", "SET_MINIMAP_D",
+    opt.minimap, opt.minimapLabel, opt.minimapDesc = OptCheck(win, 16, rowY, "SET_MINIMAP", "SET_MINIMAP_D",
         function() return not GetDB().minimapHide end,
         function(v)
             local db = GetDB()
@@ -4989,8 +5018,9 @@ local function BuildSettingsWindow()
             if v and not miniBtn and BuildMinimapButton then pcall(BuildMinimapButton) end
             if MinimapButton_Update then MinimapButton_Update() end
         end)
+    rowY = NextCheckY(opt.minimapLabel, opt.minimapDesc)
 
-    opt.lang = OptSelect(win, -208, "NearbySpyLangDD", "SET_LANG", "SET_LANG_D", 190,
+    opt.lang = OptSelect(win, rowY, "NearbySpyLangDD", "SET_LANG", "SET_LANG_D", 190,
         LangEntries,
         function() return GetDB().locale or "AUTO" end,
         function(v)
@@ -4999,8 +5029,9 @@ local function BuildSettingsWindow()
             RefreshSettingsText()
             P(L("SET_RELOAD"))
         end)
+    rowY = NextSelectY(opt.lang)
 
-    opt.tz = OptSelect(win, -290, "NearbySpyTzDD", "SET_TZ", "SET_TZ_D", 190,
+    opt.tz = OptSelect(win, rowY, "NearbySpyTzDD", "SET_TZ", "SET_TZ_D", 190,
         TzEntries,
         function()
             local off = GetDB().tzOffset
@@ -5009,6 +5040,13 @@ local function BuildSettingsWindow()
         function(v)
             GetDB().tzOffset = (v ~= "AUTO") and v or nil
         end)
+    rowY = NextSelectY(opt.tz)
+
+    -- The window grows with its content: a fixed height clipped the last
+    -- selector once a longer description was added.
+    local needH = -rowY + 18
+    if needH < 360 then needH = 360 end
+    if win.SetHeight then win:SetHeight(needH) elseif win.SetSize then win:SetSize(380, needH) end
 
     win:Hide()
 end

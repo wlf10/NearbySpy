@@ -1,4 +1,4 @@
-## NearbySpy 1.5.2
+## NearbySpy 1.5.3
 
 Delta against 1.4.0. Everything below is visible to players; internal
 development noise is left out.
@@ -62,7 +62,8 @@ development noise is left out.
 ### Improved: interface
 
 - The settings window gains a minimap icon switch and the "Accept other realms"
-  checkbox.
+  checkbox; its rows now follow the height of their own text, so longer
+  descriptions no longer run into the row below.
 - The minimap button was rebuilt to match the standard addon button geometry:
   a round masked icon with a soft transparency and the ring sitting exactly on it.
 - The menu window fits longer Cyrillic and German labels.
