@@ -3712,7 +3712,8 @@ end
 -- Scout / Tactical window. It intentionally uses only basic textures and
 -- frames: this keeps the UI compatible with the custom Forever client while
 -- still looking distinct from the old flat list.
-local tactical = {rows = {}, bars = {}, classes = {}, filters = {}, filter = "all", started = time()}
+local tactical = {rows = {}, bars = {}, classes = {}, filters = {}, filter = "all", started = time(),
+    realmFilter = nil}   -- nil = все миры; иначе точное имя реалма
 local TACTICAL_ROW_H = 30
 local TACTICAL_FRESH = 300
 local TacticalUpdate
@@ -3781,6 +3782,10 @@ local function TacticalVisible(p, now)
     -- would contradict the setting the user just changed. Nothing is deleted —
     -- turning the flag back on brings them back.
     if p.peerForeign and GetDB().peerAllRealms == false then return false end
+    -- Realm filter: the database now holds players from other realms of the
+    -- cluster (they arrive over the peer channel), so "show me only EU4 Realm 6"
+    -- has to be answerable. An empty selection means all realms.
+    if tactical.realmFilter and (p.realm or "") ~= tactical.realmFilter then return false end
     if tactical.filter == "fresh" then
         return now - (p.lastSeen or 0) <= TACTICAL_FRESH
     elseif tactical.filter == "new" then
@@ -3929,7 +3934,13 @@ end
 local function TacticalStats()
     local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
     local now = time()
+    local realmSel = tactical.realmFilter
     for _, p in pairs(GetDB().players) do
+        -- counters follow the same realm selection as the list: a "Peer 12" badge
+        -- over a list of 3 realm rows would be a lie
+        if realmSel and (p.realm or "") ~= realmSel then
+            -- skip: counted nowhere
+        else
         st.total = st.total + 1
         local age = now - (p.lastSeen or 0)
         if age <= 300 then st.f5 = st.f5 + 1 end
@@ -3954,6 +3965,7 @@ local function TacticalStats()
             st.classes[file] = {file = file, label = p.classLoc or p.class or "?", count = 0}
         end
         st.classes[file].count = st.classes[file].count + 1
+        end
     end
     st.top = {}
     for _, item in pairs(st.classes) do st.top[#st.top + 1] = item end
@@ -3984,6 +3996,39 @@ local function TacticalFilterState(button, active)
     else button.label:SetTextColor(0.62, 0.55, 0.42) end
 end
 
+-- Compact realm name for the cycler button: "CAMWOW EU4 Realm 6 PvP" -> "EU4
+-- Realm 6 PvP". Only the leading cluster prefix is dropped — the rest is what
+-- tells the realms apart, so nothing is invented.
+-- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
+function RealmShortName(realm)
+    if type(realm) ~= "string" or realm == "" then return "?" end
+    local t = {}
+    for w in realm:gmatch("%S+") do t[#t + 1] = w end
+    -- the first token is the project prefix when there are at least three
+    local from = (#t >= 3) and 2 or 1
+    return table.concat(t, " ", from)
+end
+
+-- Realms actually present in the database, our own first. The list is rebuilt on
+-- every click so a newly arrived realm shows up without /reload.
+function TacticalRealmList()
+    local mine = PlayerRealm()
+    local seen, list = {}, {}
+    for _, p in pairs(GetDB().players) do
+        local r = p.realm
+        if type(r) == "string" and r ~= "" and not seen[r] then
+            seen[r] = true
+            list[#list + 1] = r
+        end
+    end
+    table.sort(list, function(a, b)
+        if a == mine then return true end
+        if b == mine then return false end
+        return a < b
+    end)
+    return list
+end
+
 local function TacticalFilter(parent, key, x)
     local button = CreateFrame("Button", nil, parent)
     button:SetSize(112, 25)
@@ -3998,6 +4043,58 @@ local function TacticalFilter(parent, key, x)
     button:SetScript("OnEnter", function(self) if tactical.filter ~= self.key then self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end end)
     button:SetScript("OnLeave", function(self) TacticalFilterState(self, tactical.filter == self.key) end)
     tactical.filters[key] = button
+end
+
+-- Realm cycler: one button that walks "all realms -> realm A -> realm B -> ... ->
+-- all". A dropdown would be the conventional control, but the list is 6 entries
+-- and the toolbar has no room for one; cycling needs no menu code on a client
+-- where dropdown templates are already cut down (see the settings selectors).
+-- Global, not local: the main chunk is at the Lua 5.1 ceiling of 200 locals.
+function TacticalRealmCycler(parent, x, y, width)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(width, 25)
+    -- TOPLEFT with an explicit y: the toolbar positions itself with "LEFT" inside a
+    -- 31px strip, but this button hangs off the window itself, where "LEFT" means
+    -- the vertical centre of a 668px frame.
+    button:SetPoint("TOPLEFT", x, y)
+    button.bg = button:CreateTexture(nil, "BACKGROUND")
+    button.bg:SetAllPoints()
+    button.label = NewText(button, 10)
+    button.label:SetPoint("CENTER")
+    button.label:SetWidth(width - 8)
+    button:SetScript("OnClick", function()
+        local list = TacticalRealmList()
+        if #list == 0 then
+            tactical.realmFilter = nil
+        else
+            -- position of the current selection in the fresh list; 0 means "not
+            -- found" (nothing selected = all realms), so the next step lands on
+            -- the first realm. Starting at -1 made nxt = 0 and the click did
+            -- nothing — caught by test_click_walks_realms_and_wraps_back.
+            local cur = 0
+            for i = 1, #list do
+                if list[i] == tactical.realmFilter then cur = i break end
+            end
+            local nxt = cur + 1
+            tactical.realmFilter = (nxt > #list) and nil or list[nxt]
+        end
+        TacticalUpdate()
+    end)
+    button:SetScript("OnEnter", function(self) self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end)
+    button:SetScript("OnLeave", function(self) TacticalRealmCyclerState(self) end)
+    tactical.realmButton = button
+    TacticalRealmCyclerState(button)
+    return button
+end
+
+function TacticalRealmCyclerState(button)
+    button = button or tactical.realmButton
+    if not button or not button.label then return end
+    local active = tactical.realmFilter ~= nil
+    button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
+    button.label:SetTextColor(active and 1 or 0.62, active and 0.85 or 0.55, active and 0.45 or 0.42)
+    local name = active and RealmShortName(tactical.realmFilter) or L("UI_ALL")
+    button.label:SetText(L("UI_REALM") .. ": " .. name)
 end
 
 local function TacticalMetric(parent, x, width, label)
@@ -4071,6 +4168,7 @@ TacticalUpdate = function()
         tactical.filters.peer.label:SetText(L("UI_PEER") .. " " .. st.peerN)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
+        TacticalRealmCyclerState()
         tactical.status:SetText("|cff45dc9b+|r " .. L("UI_LIVE") .. " ; " .. TacticalSources())
     end)
     if not ok then P(L("ERR_LIST") .. tostring(err)) end
@@ -4109,7 +4207,7 @@ local function BuildWindow()
         win.CloseButton:SetSize(26, 26); win.CloseButton:SetPoint("TOPRIGHT", -8, -8)
         local text = NewText(win.CloseButton, 15, 0.85, 0.65, 0.25); text:SetPoint("CENTER"); text:SetText("x")
     end
-    win:SetSize(700, 640)
+    win:SetSize(700, 668)
     win:SetPoint("CENTER")
     SolidUnderlay(win)
     win:SetFrameStrata("DIALOG")
@@ -4196,8 +4294,14 @@ local function BuildWindow()
     TacticalFilter(toolbar, "peer", 354)
     tactical.count = NewText(toolbar, 9, 0.6, 0.53, 0.4); tactical.count:SetPoint("RIGHT", -9, 0)
 
+    -- Realm row: the database can hold players from other realms of the cluster
+    -- (peer channel), so the list needs a realm selector of its own. A second row
+    -- rather than another toolbar tile: the four filters plus the counter already
+    -- fill the 668px strip.
+    TacticalRealmCycler(win, 22, -256, 200)
+
     local tableHeader = CreateFrame("Frame", nil, win)
-    tableHeader:SetPoint("TOPLEFT", 16, -260); tableHeader:SetSize(668, 24)
+    tableHeader:SetPoint("TOPLEFT", 16, -288); tableHeader:SetSize(668, 24)
     local thBg = tableHeader:CreateTexture(nil, "BACKGROUND"); thBg:SetAllPoints(); thBg:SetColorTexture(0.07, 0.055, 0.035, 1)
     local h1 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h1:SetPoint("LEFT", 34, 0); h1:SetText(L("UI_PLAYER"))
     local h2 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h2:SetPoint("LEFT", 180, 0); h2:SetText(L("UI_PROFILE"))
@@ -4206,7 +4310,7 @@ local function BuildWindow()
 
     local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
     if not okSf or not sf then sf = CreateFrame("ScrollFrame", nil, win) end
-    sf:SetPoint("TOPLEFT", 16, -284); sf:SetPoint("BOTTOMRIGHT", -32, 43)
+    sf:SetPoint("TOPLEFT", 16, -312); sf:SetPoint("BOTTOMRIGHT", -32, 43)
     local content = CreateFrame("Frame", nil, sf); content:SetSize(632, 1); sf:SetScrollChild(content); winList = content
 
     tactical.status = NewText(win, 9, 0.55, 0.5, 0.4); tactical.status:SetPoint("BOTTOMLEFT", 17, 20)
