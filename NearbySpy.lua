@@ -529,6 +529,14 @@ GetDB = function()
     -- GetBuildInfo: 1.60.x — Forever beta; other 1.x — classic live;
     -- >=11 — retail. Written once; no API → skip (the site fills in
     -- the default forever itself).
+    -- realm: the world tag for the site's world directory (vendors, fishing).
+    -- The file is account-level, so this is the realm of the LAST character
+    -- played — that is exactly the realm the world data of this session came
+    -- from. Player records carry their own realm, so they never rely on this.
+    if not db.realm then
+        local r = GetRealmName and GetRealmName() or nil
+        if type(r) == "string" and r ~= "" then db.realm = r end
+    end
     if not db.game then
         local v = GetBuildInfo and GetBuildInfo() or ""
         local major = tonumber(tostring(v):match("^(%d+)")) or 0
