@@ -19,5 +19,6 @@ tests/*
 !tests/test_peer_observation.py
 !tests/test_world_probe.py
 !tests/nsp_helpers.py
+!tests/test_class_level_filter.py
 !tests/fixtures/
 !tests/fixtures/datapack.lua

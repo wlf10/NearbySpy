@@ -3478,6 +3478,24 @@ local function TacticalVisible(p, now)
     -- cluster (they arrive over the peer channel), so "show me only EU4 Realm 6"
     -- has to be answerable. An empty selection means all realms.
     if tactical.realmFilter and (p.realm or "") ~= tactical.realmFilter then return false end
+    -- Класс: nil = все. Псевдокласс "?" — записи без класса (их видно в
+    -- панели «КЛАССЫ» как отдельная строка, молча прятать их нельзя).
+    if tactical.classFilter then
+        local file = p.class
+        if type(file) == "string" and file ~= "" then file = string.upper(file) else file = "?" end
+        if file ~= tactical.classFilter then return false end
+    end
+    -- Уровень: диапазон (levelFilter) и точное значение (levelExact) —
+    -- взаимоисключающие, точный сбрасывает диапазон.
+    if tactical.levelFilter then
+        local lvl = tonumber(p.level)
+        if not lvl or lvl < tactical.levelFilter[1] or lvl > tactical.levelFilter[2] then
+            return false
+        end
+    elseif tactical.levelExact then
+        local lvl = tonumber(p.level)
+        if not lvl or lvl ~= tactical.levelExact then return false end
+    end
     if tactical.filter == "fresh" then
         return now - (p.lastSeen or 0) <= TACTICAL_FRESH
     elseif tactical.filter == "new" then
@@ -3821,6 +3839,173 @@ function TacticalRealmCyclerState(button)
     button.label:SetText(L("UI_REALM") .. ": " .. name)
 end
 
+--- ============ Выборка по классу и уровню ============
+-- Три селектора в одну строку под тулбаром: мир (TacticalRealmCycler, выше),
+-- класс и уровень. Все три — циклеры по списку: список короткий, а меню на
+-- этом клиенте пришлось бы поднимать руками (см. комментарий к циклеру миров).
+--
+-- Состояние лежит в tactical (classFilter / levelFilter), а не в отдельных
+-- local-переменных: главный чанк стоит у потолка Lua 5.1 в 200 top-level
+-- locals, и каждый новый local — это шаг к «main function has more than 200
+-- local variables».
+
+-- Список классов, реально встречающихся в базе: строки файлов классов в
+-- верхнем регистре плюс псевдокласс "?" для записей без класса (238 в живом
+-- файле). Список строится из данных, а не зашит: класс, которого в базе ещё
+-- не было, не должен занимать место в циклере.
+function TacticalClassList()
+    local seen, list = {}, {}
+    for _, p in pairs(GetDB().players) do
+        local file = p.class
+        if type(file) == "string" and file ~= "" then
+            file = string.upper(file)
+            if not seen[file] then
+                seen[file] = true
+                list[#list + 1] = file
+            end
+        end
+    end
+    if not seen["?"] then
+        -- записи без класса — честная отдельная группа, а не «невидимые»
+        list[#list + 1] = "?"
+    end
+    -- Порядок: частые сверху (как в панели «КЛАССЫ»), редкие вниз.
+    local counts = {}
+    for _, p in pairs(GetDB().players) do
+        local file = p.class
+        if type(file) == "string" and file ~= "" then
+            file = string.upper(file)
+            counts[file] = (counts[file] or 0) + 1
+        end
+    end
+    table.sort(list, function(a, b)
+        local ca, cb = counts[a] or 0, counts[b] or 0
+        if ca ~= cb then return ca > cb end
+        return a < b
+    end)
+    return list
+end
+
+-- Диапазоны уровня: широкие шаги для быстрого ответа «кто на капе» плюс
+-- «ровно N» для точного уровня (его ставит клик по столбцу гистограммы).
+TacticalLevelRanges = {
+    {1, 10}, {11, 20}, {21, 30}, {31, 40}, {41, 50}, {51, 60},
+}
+
+-- Подпись диапазона уровня: "1-10" или "56".
+function TacticalLevelLabel(range)
+    if type(range) == "number" then return tostring(range) end
+    if range[1] == range[2] then return tostring(range[1]) end
+    return tostring(range[1]) .. "-" .. tostring(range[2])
+end
+
+-- Циклер уровня: nil → 1-10 → 11-20 → ... → 51-60 → nil. Точное значение
+-- («ровно N») в этот цикл не входит: его ставит клик по столбцу гистограммы
+-- (TacticalLevelExact), который виден на глаз, а не выбирается из списка.
+function TacticalLevelCycler(parent, x, y, width)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(width, 25)
+    button:SetPoint("TOPLEFT", x, y)
+    button.bg = button:CreateTexture(nil, "BACKGROUND")
+    button.bg:SetAllPoints()
+    button.label = NewText(button, 10)
+    button.label:SetPoint("CENTER")
+    button.label:SetWidth(width - 8)
+    button:SetScript("OnClick", function()
+        local ranges = TacticalLevelRanges
+        local cur = 0
+        for i = 1, #ranges do
+            local r = ranges[i]
+            if tactical.levelFilter and tactical.levelFilter[1] == r[1]
+                and tactical.levelFilter[2] == r[2] then cur = i break end
+        end
+        local nxt = cur + 1
+        if nxt > #ranges then
+            tactical.levelFilter = nil
+        else
+            local r = ranges[nxt]
+            tactical.levelFilter = { r[1], r[2] }
+        end
+        TacticalUpdate()
+    end)
+    button:SetScript("OnEnter", function(self) self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end)
+    button:SetScript("OnLeave", function(self) TacticalLevelCyclerState(self) end)
+    tactical.levelButton = button
+    TacticalLevelCyclerState(button)
+    return button
+end
+
+function TacticalLevelCyclerState(button)
+    button = button or tactical.levelButton
+    if not button or not button.label then return end
+    local active = tactical.levelFilter ~= nil
+    button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
+    button.label:SetTextColor(active and 1 or 0.62, active and 0.85 or 0.55, active and 0.45 or 0.42)
+    local name = active and TacticalLevelLabel(tactical.levelFilter) or L("UI_ALL")
+    button.label:SetText(L("UI_LEVEL") .. ": " .. name)
+end
+
+-- Циклер класса: nil → самый частый класс → ... → nil.
+function TacticalClassCycler(parent, x, y, width)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(width, 25)
+    button:SetPoint("TOPLEFT", x, y)
+    button.bg = button:CreateTexture(nil, "BACKGROUND")
+    button.bg:SetAllPoints()
+    button.label = NewText(button, 10)
+    button.label:SetPoint("CENTER")
+    button.label:SetWidth(width - 8)
+    button:SetScript("OnClick", function()
+        local list = TacticalClassList()
+        if #list == 0 then
+            tactical.classFilter = nil
+        else
+            local cur = 0
+            for i = 1, #list do
+                if list[i] == tactical.classFilter then cur = i break end
+            end
+            local nxt = cur + 1
+            tactical.classFilter = (nxt > #list) and nil or list[nxt]
+        end
+        TacticalUpdate()
+    end)
+    button:SetScript("OnEnter", function(self) self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end)
+    button:SetScript("OnLeave", function(self) TacticalClassCyclerState(self) end)
+    tactical.classButton = button
+    TacticalClassCyclerState(button)
+    return button
+end
+
+function TacticalClassCyclerState(button)
+    button = button or tactical.classButton
+    if not button or not button.label then return end
+    local active = tactical.classFilter ~= nil
+    button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
+    button.label:SetTextColor(active and 1 or 0.62, active and 0.85 or 0.55, active and 0.45 or 0.42)
+    local name = L("UI_ALL")
+    if active then
+        if tactical.classFilter == "?" then
+            name = L("UI_NO_CLASS")
+        else
+            name = ClassDisplayName(tactical.classFilter)
+        end
+    end
+    button.label:SetText(L("UI_CLASS") .. ": " .. name)
+end
+
+-- Точный уровень: клик по столбцу гистограммы. Повторный клик по тому же
+-- столбцу снимает фильтр («ровно N» → «все»).
+function TacticalLevelExact(level)
+    if tactical.levelExact == level then
+        tactical.levelExact = nil
+    else
+        tactical.levelExact = level
+    end
+    -- точный уровень и диапазон взаимоисключающи: показан ровно один
+    if tactical.levelExact then tactical.levelFilter = nil end
+    TacticalUpdate()
+end
+
 local function TacticalMetric(parent, x, width, label)
     local card = TacticalPanel(parent)
     card:SetPoint("TOPLEFT", x, -52)
@@ -3871,6 +4056,16 @@ TacticalUpdate = function()
                 row:Show()
                 TacticalClassIcon(row.icon, item.file)
                 row.label:SetText(item.label)
+                -- файл класса для обработчика клика (он читает row.classFile)
+                row.classFile = item.file
+                -- выбранный класс подсвечен: иначе фильтр не виден — в списке
+                -- просто меньше строк, а почему — непонятно
+                local selected = tactical.classFilter == item.file
+                if selected then
+                    row.label:SetTextColor(1, 0.85, 0.45)
+                else
+                    row.label:SetTextColor(0.85, 0.82, 0.75)
+                end
                 -- count + share of all players: the top classes are nearly
                 -- equal (3026/2992/2894), a pure max-relative bar looks flat
                 row.value:SetText(("%d (%.0f%%)"):format(item.count, 100 * item.count / math.max(1, st.total)))
@@ -3894,6 +4089,8 @@ TacticalUpdate = function()
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
         TacticalRealmCyclerState()
+        TacticalClassCyclerState()
+        TacticalLevelCyclerState()
         tactical.status:SetText("|cff45dc9b+|r " .. L("UI_LIVE") .. " ; " .. TacticalSources())
     end)
     if not ok then P(L("ERR_LIST") .. tostring(err)) end
@@ -3972,6 +4169,14 @@ local function BuildWindow()
         bar:SetPoint("BOTTOMLEFT", 9 + (level - 1) * 6.5, 10)
         bar:SetWidth(5.5); bar:SetHeight(1)
         tactical.bars[level] = bar
+        -- Прозрачная кнопка поверх столбца: сам столбец 5.5 px — мелкая цель
+        -- для мыши, а зона клика в 12 px ловит уровень надёжно. Высота — вся
+        -- высота гистограммы: промахнуться по уровню невозможно.
+        local hit = CreateFrame("Button", nil, chart)
+        hit:SetPoint("BOTTOMLEFT", 9 + (level - 1) * 6.5 - 3, 8)
+        hit:SetSize(12, NSP_CONST.LEVEL_CHART_H)
+        hit.level = level
+        hit:SetScript("OnClick", function(self) TacticalLevelExact(self.level) end)
     end
     local axis = chart:CreateTexture(nil, "ARTWORK")
     axis:SetPoint("BOTTOMLEFT", 8, 9); axis:SetSize(391, 1); axis:SetColorTexture(0.3, 0.24, 0.12, 1)
@@ -3981,7 +4186,7 @@ local function BuildWindow()
     local classTitle = NewText(classes, 9, 0.62, 0.55, 0.42)
     classTitle:SetPoint("TOPLEFT", 9, -7); classTitle:SetText(L("UI_CLASSES"))
     for i = 1, NSP_CONST.CLASS_BARS do
-        local row = CreateFrame("Frame", nil, classes)
+        local row = CreateFrame("Button", nil, classes)
         row:SetSize(230, 20); row:SetPoint("TOPLEFT", 9, -23 - (i - 1) * 23)
         row.icon = row:CreateTexture(nil, "ARTWORK"); row.icon:SetSize(18, 18); row.icon:SetPoint("LEFT")
         row.label = NewText(row, 9, 0.85, 0.82, 0.75); row.label:SetPoint("LEFT", 23, 0); row.label:SetWidth(68); row.label:SetJustifyH("LEFT")
@@ -4010,6 +4215,25 @@ local function BuildWindow()
             row.value = NewText(row, 9); row.value:SetPoint("RIGHT", -1, 0)
         end
         tactical.classes[i] = row
+        -- Клик по строке класса — выборка по нему. Файл класса известен после
+        -- отрисовки (TacticalUpdate заполняет row.classFile), поэтому обработчик
+        -- читает его оттуда, а не из замыкания по i.
+        row:SetScript("OnClick", function(self)
+            local file = self.classFile
+            if not file then return end
+            tactical.classFilter = (tactical.classFilter == file) and nil or file
+            TacticalUpdate()
+        end)
+        row:SetScript("OnEnter", function(self)
+            if self.classFile and tactical.classFilter ~= self.classFile then
+                self.label:SetTextColor(1, 0.9, 0.6)
+            end
+        end)
+        row:SetScript("OnLeave", function(self)
+            if self.classFile and tactical.classFilter ~= self.classFile then
+                self.label:SetTextColor(0.85, 0.82, 0.75)
+            end
+        end)
     end
 
     local toolbar = TacticalPanel(win)
@@ -4021,11 +4245,14 @@ local function BuildWindow()
     TacticalFilter(toolbar, "peern", 470)
     tactical.count = NewText(toolbar, 9, 0.6, 0.53, 0.4); tactical.count:SetPoint("RIGHT", -9, 0)
 
-    -- Realm row: the database can hold players from other realms of the cluster
-    -- (peer channel), so the list needs a realm selector of its own. A second row
-    -- rather than another toolbar tile: the four filters plus the counter already
-    -- fill the 668px strip.
+    -- Selector row: the database can hold players from other realms of the
+    -- cluster (peer channel), so the list needs a realm selector of its own.
+    -- A second row rather than another toolbar tile: the five filters plus the
+    -- counter already fill the 668px strip. The class and level selectors
+    -- live in the same row — three selectors, one strip.
     TacticalRealmCycler(win, 22, -256, 200)
+    TacticalClassCycler(win, 238, -256, 200)
+    TacticalLevelCycler(win, 454, -256, 200)
 
     local tableHeader = CreateFrame("Frame", nil, win)
     tableHeader:SetPoint("TOPLEFT", 16, -288); tableHeader:SetSize(668, 24)
