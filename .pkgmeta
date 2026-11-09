@@ -5,6 +5,10 @@ package-as: NearbySpy
 # Release notes are written by hand in RELEASE_NOTES.md and taken verbatim as
 # the GitHub release body. Without this the packager generates one long run-on
 # paragraph out of the commit messages.
+# ⚠️ The file must contain ONLY the release being tagged: it is copied verbatim,
+# so a cumulative file puts the previous release's notes into the new body too
+# (happened with 1.5.3, fixed 10.11.2026). Older notes live in the GitHub
+# releases themselves and in CHANGELOG-dev.md.
 manual-changelog:
   filename: RELEASE_NOTES.md
   markup-type: markdown
