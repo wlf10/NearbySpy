@@ -1,4 +1,4 @@
-## NearbySpy 1.5.3
+## NearbySpy 1.5.2
 
 Delta against 1.4.0. Everything below is visible to players; internal
 development noise is left out.
