@@ -1535,6 +1535,12 @@ local function UpsertPlayer(db, data)
             entry.count = (entry.count or 1) + 1
         end
         entry.lastSeen = nowT
+        -- Источник: НАША наблюденная встреча вытесняет "peer". Раньше source
+        -- не обновлялся вовсе, и игрок, которого мы встретили лично, оставался
+        -- с source="peer" навсегда — а по нему приёмник считал запись чужой.
+        -- Теперь source честно отражает последнее, ЧТО мы знаем: видели мы его
+        -- сами (who/unit/chat/guild) или только слышали о нём от другого.
+        if data.source and data.source ~= "peer" then entry.source = data.source end
         -- Place from OUR OWN sighting only. `observed` is true for peer packets
         -- too (it means "not a profile-only row"), so without this guard a peer
         -- packet overwrote the zone we had seen ourselves — caught by
@@ -1868,8 +1874,17 @@ local function ReceivePeerMessage(message, sender)
     end
     peerStats.valid = peerStats.valid + 1
     local foreign = realm ~= PlayerRealm()
+    -- observe = false: a packet is somebody else's report, not our own meeting.
+    -- Without it the row claimed "seen right now" (lastSeen = receive time,
+    -- count +1) and the site received a sighting we never had — the row is
+    -- honest only as a peer observation, and peerAt below is what carries its
+    -- time. A NEW row therefore keeps lastSeen = 0 / count = 0 (the site accepts
+    -- such rows by peerAt, never as a local sighting), and a known row keeps its
+    -- own lastSeen/count untouched; the place/profile gaps are still filled by
+    -- the source == "peer" branch of UpsertPlayer.
     local isNew = UpsertPlayer(db, {key = name .. "-" .. realm, name = name, realm = realm,
         class = class, level = level, race = race ~= "?" and race or nil,
+        observe = false,
         -- the packet has only the file key; translate it once at intake so the
         -- stored record matches what a local observation would have written
         classLoc = ClassLocFromFile(class),
@@ -3989,8 +4004,14 @@ local function TacticalRow(parent, index)
             -- here.
             GameTooltip:AddLine(L("UI_REALM") .. ": " .. tostring(p.realm), 0.7, 0.62, 0.45)
         end
-        GameTooltip:AddLine(L("UI_FIRST") .. ": " .. (p.firstSeen and date("%d.%m.%Y %H:%M", p.firstSeen) or "?"), 0.58, 0.65, 0.65)
-        GameTooltip:AddLine(L("UI_CONTACT") .. ": " .. (p.lastSeen and date("%d.%m.%Y %H:%M", p.lastSeen) or "?"), 0.58, 0.65, 0.65)
+        -- firstSeen/lastSeen = 0 means "never observed by us" (a peer row): date(0)
+        -- would print 01.01.1970, so the absence is printed as "?" and the peer
+        -- packet time takes the contact line instead.
+        local fs, ls = p.firstSeen or 0, p.lastSeen or 0
+        local contact = (ls > 0 and date("%d.%m.%Y %H:%M", ls)) or
+            ((p.peerAt or 0) > 0 and (date("%d.%m.%Y %H:%M", p.peerAt) .. " (" .. L("UI_PEER") .. ")") or "?")
+        GameTooltip:AddLine(L("UI_FIRST") .. ": " .. ((fs > 0 and date("%d.%m.%Y %H:%M", fs)) or "?"), 0.58, 0.65, 0.65)
+        GameTooltip:AddLine(L("UI_CONTACT") .. ": " .. contact, 0.58, 0.65, 0.65)
         GameTooltip:AddLine(L("UI_SOURCE") .. ": " .. tostring(p.source or "?"), 0.45, 0.72, 0.62)
         GameTooltip:AddLine(L("UI_ENCOUNTERS") .. ": " .. tostring(p.count or 1), 0.45, 0.72, 0.62)
         GameTooltip:Show()
@@ -4044,7 +4065,11 @@ local function TacticalRows()
             row.zone:SetText(p.zone or "?")
             -- In the peer list the CONTACT column answers "when did this arrive
             -- over the channel", which is the only timestamp a peer row has.
-            local stamp = (tactical.filter == "peer" and p.peerAt) or p.lastSeen
+            -- Everywhere else our own sighting wins; a peer row has none
+            -- (lastSeen = 0 since 1.5.3), so it falls back to the packet time
+            -- instead of showing "?" for a contact we do know.
+            local stamp = (p.lastSeen or 0) > 0 and p.lastSeen or p.peerAt
+            if tactical.filter == "peer" and (p.peerAt or 0) > 0 then stamp = p.peerAt end
             local age = now - (stamp or 0)
             row.seen:SetText(TimeAgo(stamp))
             if age <= 300 then row.seen:SetTextColor(0.3, 0.9, 0.62)

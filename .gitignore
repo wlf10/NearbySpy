@@ -16,5 +16,6 @@ tests/*
 !tests/test_server_window.py
 !tests/test_guild_presence.py
 !tests/test_row_limit.py
+!tests/test_peer_observation.py
 !tests/fixtures/
 !tests/fixtures/datapack.lua
