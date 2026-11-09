@@ -33,6 +33,7 @@ local function TacticalVisible() return true end
 
 -- минимальный мок строки: методы-заглушки + наблюдаемые FontString'ы
 function ClassLocFromFile(f) return (LOCALIZED_CLASS_NAMES_MALE or {})[f] end
+function RealmBadge(realm) return realm end
 LOCALIZED_CLASS_NAMES_MALE = {MAGE = "Маг", DRUID = "Друид"}
 
 local function FontString()

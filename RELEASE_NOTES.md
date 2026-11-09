@@ -37,8 +37,8 @@ development noise is left out.
 ### Improved: peer sharing
 
 - The player window has a **Peer** filter and `/nspy peer new` lists what arrived
-  over the channel; a record from another realm shows that realm on its own line
-  under the player name, in a smaller font.
+  over the channel. Every row shows its realm on a small second line under the
+  player name: your own realm as just "PvE" or "PvP", another realm by its name.
 - A realm selector under the player filters shows one realm at a time (all realms,
   yours, then each other realm): click to step through. Both the list and the
   counters follow it. Both are stored with the player record, so they answer after

@@ -3831,6 +3831,20 @@ function PeerRealmTag(realm, mine)
     return tag
 end
 
+-- Badge under the player name for EVERY row, not only for foreign ones. Our own
+-- realm shrinks to its ruleset ("PvE" / "PvP"), because repeating a long realm
+-- name under every line of a 12k-row list is noise; a foreign realm keeps the
+-- part that identifies it. Global: the main chunk is at the 200-local ceiling.
+function RealmBadge(realm)
+    if type(realm) ~= "string" or realm == "" then return nil end
+    if realm == PlayerRealm() then
+        -- last token of "CAMWOW EU5 Realm 1 PvE" — the ruleset
+        local rules = realm:match("(%S+)$")
+        return rules or realm
+    end
+    return PeerRealmTag(realm)
+end
+
 local function TacticalVisible(p, now)
     -- Foreign peer rows are hidden as soon as the "all realms" flag is off:
     -- they were accepted while it was on, and a list that keeps showing them
@@ -3959,9 +3973,10 @@ local function TacticalRows()
             row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
             row.player = p
             TacticalClassIcon(row.icon, p.class)
-            -- Foreign realm goes UNDER the name in a smaller font. Never into
-            -- the ZONE column — that column is for locations and stays honest.
-            local realmTag = p.peerForeign and PeerRealmTag(p.realm) or nil
+            -- The realm goes UNDER the name in a smaller font — for our own
+            -- records too, so one list never mixes labelled and unlabelled rows.
+            -- Never into the ZONE column: that column is for locations.
+            local realmTag = RealmBadge(p.realm)
             row.name:SetText(p.name or "?")
             row.name:SetTextColor(ClassColorRGB(p.class))
             if realmTag then
