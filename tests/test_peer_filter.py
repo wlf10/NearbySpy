@@ -50,6 +50,16 @@ class PeerFilterTests(unittest.TestCase):
         self.lua.execute("ALL_REALMS = true")
         self.assertTrue(self.visible("all", {"peerAt": 900, "peerForeign": True}))
 
+    def test_new_filter_shows_only_our_own_finds(self):
+        # A peer record gets firstSeen when the packet arrives, so it used to fill
+        # "New" with players somebody else met. "New" = what I discovered.
+        self.assertFalse(self.visible("new", {"firstSeen": 1000, "source": "peer"}),
+                         "a row from the channel is not my find")
+        self.assertTrue(self.visible("new", {"firstSeen": 1000, "source": "unit"}))
+        self.assertTrue(self.visible("new", {"firstSeen": 1000, "source": "who"}))
+        self.assertFalse(self.visible("new", {"firstSeen": 500, "source": "unit"}),
+                         "found before this session started")
+
     def test_other_filters_are_untouched_by_the_peer_branch(self):
         self.assertTrue(self.visible("all", {"lastSeen": 1000}))
         self.assertTrue(self.visible("fresh", {"lastSeen": 900}))

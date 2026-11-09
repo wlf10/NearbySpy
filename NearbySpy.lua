@@ -3872,7 +3872,12 @@ local function TacticalVisible(p, now)
     if tactical.filter == "fresh" then
         return now - (p.lastSeen or 0) <= TACTICAL_FRESH
     elseif tactical.filter == "new" then
-        return (p.firstSeen or 0) >= tactical.started
+        -- Only OUR OWN finds. A peer record gets firstSeen at the moment the
+        -- packet arrives, so it satisfied the time check and filled "New" with
+        -- players somebody else met (215 of them in the live save). "New" answers
+        -- "whom did I discover this session", so peer rows are excluded; they have
+        -- their own filter.
+        return (p.firstSeen or 0) >= tactical.started and p.source ~= "peer"
     elseif tactical.filter == "peer" then
         -- Rows that arrived over the nearbyspydata channel. peerAt is written
         -- on receipt (new row) or on refresh of a known one, so this is the
@@ -4036,7 +4041,9 @@ local function TacticalStats()
         if age <= 300 then st.f5 = st.f5 + 1 end
         if age <= 900 then st.f15 = st.f15 + 1 end
         if age <= 3600 then st.f60 = st.f60 + 1 end
-        if (p.firstSeen or 0) >= tactical.started then st.newN = st.newN + 1 end
+        if (p.firstSeen or 0) >= tactical.started and p.source ~= "peer" then
+            st.newN = st.newN + 1
+        end
         if (p.peerAt or 0) > 0 and not (p.peerForeign and GetDB().peerAllRealms == false) then
             st.peerN = st.peerN + 1
             if p.peerNew then st.peerNewN = st.peerNewN + 1 end
