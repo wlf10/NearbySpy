@@ -3561,9 +3561,44 @@ end
 -- all), while GameFontNormal renders Cyrillic from second zero. No bundled
 -- TTF, no polling, no repaint hacks. GameFontNormal also matches the client's
 -- locale (native CJK/Korean fonts on zhCN/koKR clients).
+-- ApplyFont honours the requested size — through Blizzard FONT OBJECTS, never
+-- through SetFont(path, size): an explicit file path renders nothing for the
+-- first 10-20s after a cold login on this client (FRIZQT__.TTF never renders at
+-- all), while a font object renders Cyrillic from second zero.
+--
+-- Until 09.11.2026 the size argument was ignored outright: every label rendered at
+-- GameFontNormal, so "the realm tag is 8pt against a 12pt name" was a fiction and
+-- no text in the window could be made smaller. Sizes <= 9 now map to the client's
+-- own small font object, >= 14 to the large one, with a fallback to normal.
+-- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
+function FontObjectFor(size)
+    local n = tonumber(size) or 12
+    if n <= 9 then
+        return _G.GameFontNormalSmall or _G.GameFontHighlightSmall or GameFontNormal
+    elseif n >= 14 then
+        return _G.GameFontNormalLarge or _G.GameFontHighlightLarge or GameFontNormal
+    end
+    return GameFontNormal
+end
+
 local function ApplyFont(fs, size, flags)
-    if GameFontNormal and fs.SetFontObject then
-        pcall(fs.SetFontObject, fs, GameFontNormal)
+    local obj = FontObjectFor(size)
+    if obj and fs.SetFontObject then
+        pcall(fs.SetFontObject, fs, obj)
+        -- Which object was actually used is invisible from outside, and the client
+        -- is not guaranteed to ship every variant: record it once per size so the
+        -- choice can be verified from SavedVariables instead of guessed.
+        local okDb, db = pcall(GetDB)
+        if okDb and type(db) == "table" then
+            db.debug = db.debug or {}
+            local fonts = db.debug.fonts
+            if type(fonts) ~= "table" then fonts = {}; db.debug.fonts = fonts end
+            local key = tostring(size)
+            if fonts[key] == nil then
+                fonts[key] = (obj == _G.GameFontNormalSmall and "small")
+                    or (obj == _G.GameFontNormalLarge and "large") or "normal"
+            end
+        end
     end
 end
 
@@ -3830,11 +3865,14 @@ local function TacticalRow(parent, index)
     -- cannot carry two sizes, and appending it to the name pushed the name
     -- itself off the 142px column.
     row.name = NewText(row, 12)
-    row.name:SetPoint("LEFT", 34, 4)
+    row.name:SetPoint("LEFT", 34, 5)
     row.name:SetWidth(142)
     row.name:SetJustifyH("LEFT")
-    row.realm = NewText(row, 8, 0.55, 0.5, 0.4)
-    row.realm:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, 1)
+    -- 7pt: the realm is a dim annotation, not data the eye should land on first.
+    -- 12pt name + 7pt tag + gap is ~24px in a 30px row, so nothing clips; the
+    -- name moved 5px up (was 4) to keep the pair centred.
+    row.realm = NewText(row, 7, 0.55, 0.5, 0.4)
+    row.realm:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, 0)
     row.realm:SetWidth(142)
     row.realm:SetJustifyH("LEFT")
     row.realm:Hide()
