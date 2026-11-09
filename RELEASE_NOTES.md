@@ -1,8 +1,5 @@
 ## NearbySpy 1.5.3
 
-Delta against 1.5.2. Everything below is visible to players; internal
-development noise is left out.
-
 ### New: filter the player list by class and by level
 
 - Two selectors now sit next to the realm selector: class and level.
