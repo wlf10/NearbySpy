@@ -1,4 +1,4 @@
-## NearbySpy 1.5.1
+## NearbySpy 1.5.2
 
 Delta against 1.4.0. Everything below is visible to players; internal
 development noise is left out.
@@ -40,8 +40,11 @@ development noise is left out.
   over the channel. Both are stored with the player record, so they answer after
   a relog as well.
 - Peer messages now carry the zone: zone id (a number, identical in every client
-  language), the localized zone name and map coordinates. Older clients in the
-  channel keep working — their messages are still accepted.
+  language) and the localized zone name. Map coordinates travel only when the
+  game exposes the other player's own position (a unit you can see); a /who
+  entry has the player's zone but no position, so no coordinates are invented for
+  it. Older clients in the channel keep working — their messages are still
+  accepted.
 - The channel turned out to be shared by the whole cluster, so records from other
   realms can arrive. They are accepted and marked with their realm; a new
   **Accept other realms** setting rejects and hides them if you prefer.

@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.5.1
+    NearbySpy 1.5.2
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -1618,7 +1618,15 @@ QueuePeerNew = function(db, data)
     local zoneName = PeerField(data.zone, 60) and data.zone or "?"
     local zoneId = (data.zoneId and tonumber(data.zoneId)) or 0
     if zoneId < 0 or zoneId % 1 ~= 0 then zoneId = 0 end
-    local px, py = PeerCoord(data.x), PeerCoord(data.y)
+    -- Coordinates are shared ONLY when they belong to the reported player.
+    -- A /who entry knows the player's ZONE but has no position, so its x/y is
+    -- where WE stood — sending that put a stranger on our own map spot (10 428
+    -- such rows in the live database, the vast majority of it). Same for any
+    -- record whose position fell back to the observer.
+    local px, py = "-", "-"
+    if data.coordsFromUnit then
+        px, py = PeerCoord(data.x), PeerCoord(data.y)
+    end
 
     local function Build(z, zid, cx, cy)
         return table.concat({"N3", db.game, data.realm, data.name,
@@ -1981,9 +1989,13 @@ local function Record(unit)
     end
     LearnRace(db, raceLoc, raceFile, faction)
 
-    -- coordinates: the unit's real ones first, else the player approximation
+    -- coordinates: the unit's real ones first, else the player approximation.
+    -- Remember WHICH of the two it was: only the unit's own point may be shared
+    -- with peers. The fallback is where WE stand, and passing it off as the
+    -- player's position put strangers on our own map spot.
     local okP, x, y = pcall(UnitPosition, unit)
-    if not okP or not x then
+    local coordsFromUnit = okP and x ~= nil and y ~= nil
+    if not coordsFromUnit then
         x, y = PlayerXY()
     end
 
@@ -1999,6 +2011,7 @@ local function Record(unit)
         guid = UnitGUID(unit),
         zone = PlayerZone(),
         zoneId = PlayerZoneId(),
+        coordsFromUnit = coordsFromUnit and true or nil,
         x = x,
         y = y,
         source = "unit",

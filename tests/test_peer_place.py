@@ -67,7 +67,8 @@ class PeerPlaceTests(unittest.TestCase):
         self.lua.globals()["TestQueue"](self.lua.globals()["TestDB"], self.lua.table_from(data))
 
     def test_packet_carries_zone_and_position(self):
-        self.queue(zone="Таверна \"Гордость льва\"", zoneId=1429, x=0.52314, y=0.71129)
+        self.queue(zone="Таверна \"Гордость льва\"", zoneId=1429, x=0.52314, y=0.71129,
+                   coordsFromUnit=True)
         self.lua.execute("time = function() return 1100 end")
         self.lua.globals()["TestDrain"]()
         sent = [str(p) for p in self.lua.globals()["QUEUED"].values()]
@@ -79,6 +80,30 @@ class PeerPlaceTests(unittest.TestCase):
         self.assertEqual("Таверна \"Гордость льва\"", parts[9])
         self.assertEqual("0.5231", parts[10])
         self.assertEqual("0.7113", parts[11])
+
+    def test_who_record_never_sends_the_observers_position(self):
+        # A /who entry has the player's zone but no coordinates: its x/y is where
+        # WE stood. Sharing that put a stranger on our own map spot, and /who rows
+        # are the vast majority of the database.
+        parts = self.sent_parts(source="who", zone="Elwynn", zoneId=12, x=0.42, y=0.61)
+        self.assertEqual("12", parts[8])      # the zone still travels
+        self.assertEqual("Elwynn", parts[9])
+        self.assertEqual("-", parts[10])      # no position
+        self.assertEqual("-", parts[11])
+
+    def test_chat_record_never_sends_a_position(self):
+        parts = self.sent_parts(source="chat", zone="Stormwind", zoneId=1519,
+                                x=0.5, y=0.5)
+        self.assertEqual("-", parts[10])
+        self.assertEqual("-", parts[11])
+
+    def test_unit_record_without_unit_coordinates_sends_no_position(self):
+        # the client refused UnitPosition, so x/y fell back to the observer —
+        # that is not this player's position either
+        parts = self.sent_parts(source="unit", zone="Elwynn", zoneId=12,
+                                x=0.42, y=0.61)
+        self.assertEqual("-", parts[10])
+        self.assertEqual("-", parts[11])
 
     def test_missing_place_is_marked_not_invented(self):
         parts = self.sent_parts(**{})
@@ -97,7 +122,7 @@ class PeerPlaceTests(unittest.TestCase):
     def test_packet_never_exceeds_the_chat_byte_limit(self):
         # long Cyrillic zone name: 60 chars = 120 bytes, plus a long name/realm
         zone = "З" * 60
-        parts = self.sent_parts(zone=zone, zoneId=1429, x=0.5, y=0.5)
+        parts = self.sent_parts(zone=zone, zoneId=1429, x=0.5, y=0.5, coordsFromUnit=True)
         joined = ";".join(parts)
         self.assertLessEqual(len(joined.encode("utf-8")), 240)
         # the id survives: it is what the site needs to place the record
