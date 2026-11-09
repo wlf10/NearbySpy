@@ -1510,6 +1510,10 @@ local function UpsertPlayer(db, data)
             -- sightings-by-peer from another realm's.
             peerRealm = data.peerRealm or nil,
             peerForeign = data.peerForeign or nil,
+            -- Which character's addon told us about this player. Provenance is
+            -- the only way to answer "whose data is this row" later: peer
+            -- records are never re-sent, so the sender IS the discoverer.
+            peerFrom = data.peerFrom or nil,
         }
         newThisSession = newThisSession + 1
         -- per-source counter (1.5.1, full debug): who actually feeds the database
@@ -1563,6 +1567,8 @@ local function UpsertPlayer(db, data)
         entry.peerAt = nowT
         if data.peerRealm then entry.peerRealm = data.peerRealm end
         if data.peerForeign then entry.peerForeign = true end
+        -- the latest sender wins: the row is "last corroborated by" this character
+        if data.peerFrom then entry.peerFrom = data.peerFrom end
         -- Place from a peer only fills a gap. It is someone else's snapshot of
         -- where they saw the player, and our own observation is both closer and
         -- newer, so it must never lose to a packet.
@@ -1781,6 +1787,16 @@ local function ReceivePeerMessage(message, sender)
         end
     end
     peerStats.lastSender = sender
+    -- Per-sender tally: tells the owner which addon users actually feed the
+    -- channel, and is the first thing to look at when a bad batch arrives.
+    do
+        local okDb, db = pcall(GetDB)
+        if okDb and type(db) == "table" and type(db.debug) == "table" then
+            db.debug.peerSenders = db.debug.peerSenders or {}
+            local key = PeerEsc(sender, 40)
+            db.debug.peerSenders[key] = (db.debug.peerSenders[key] or 0) + 1
+        end
+    end
     if peerChatVisible and DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
         -- The beta has no ChatFrame_AddChannel: mirror only received peer events.
         -- Escape pipes so untrusted chat text cannot inject texture/link markup.
@@ -1859,6 +1875,8 @@ local function ReceivePeerMessage(message, sender)
         classLoc = ClassLocFromFile(class),
         faction = faction ~= "?" and faction or nil, source = "peer", silent = true,
         peerRealm = realm, peerForeign = foreign,
+        -- provenance: the character whose addon sent the packet
+        peerFrom = sender,
         zone = (zoneName and zoneName ~= "?") and zoneName or nil,
         zoneId = (zoneId and zoneId > 0) and zoneId or nil,
         x = px, y = py})
