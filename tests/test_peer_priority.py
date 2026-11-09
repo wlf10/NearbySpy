@@ -5,6 +5,8 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
+from nsp_helpers import CONST_PRELUDE
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -18,7 +20,7 @@ class PeerPriorityTests(unittest.TestCase):
         ]
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
-            "local REAP_SECONDS, newThisSession = 600, 0\n"
+            CONST_PRELUDE + "\n"            "local REAP_SECONDS, newThisSession = 600, 0\n"
             "time = function() return 1000 end\n"
             "local function Round4(x) return x end\n"
             + block + "\nTestUpsert = UpsertPlayer\n"

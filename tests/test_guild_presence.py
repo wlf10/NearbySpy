@@ -12,6 +12,8 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
+from nsp_helpers import CONST_PRELUDE
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -53,7 +55,7 @@ class GuildPresenceTests(unittest.TestCase):
         ]
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
-            STUBS
+            CONST_PRELUDE + "\n" + STUBS
             + block
             + "\nTestGuild = RecordGuild\nTestUpsert = UpsertPlayer\n"
         )

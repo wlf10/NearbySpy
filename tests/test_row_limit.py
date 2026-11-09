@@ -10,6 +10,8 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
+from nsp_helpers import CONST_PRELUDE
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -76,7 +78,7 @@ class RowLimitTests(unittest.TestCase):
         end = source.index("local function TacticalStats()")
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
-            STUBS + source[start:end] + "\nTestRows = TacticalRows\n"
+            CONST_PRELUDE + "\n" + STUBS + source[start:end] + "\nTestRows = TacticalRows\n"
         )
         self.g = self.lua.globals()
 
