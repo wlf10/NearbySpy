@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.4.0
+    NearbySpy 1.5.1
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -18,7 +18,11 @@
         clicks the search button.
     Commands: /nearbyspy (or /nspy) — window with the list; suggest/who/
               whoclass/whorace — assisted /who (you click the search button),
-              count | announce | debug | peer | reset
+              who speed — surface layer: level bands of 10 from the top, a band
+              that hits the 50-row cap expands into classes, then into races
+              (~20-30 queries instead of ~110; capping is by design),
+              count | announce | debug | peer | reset | world (world data
+              counters) | probe (API discovery: /nspy probe, /nspy probe off)
 
 ]]
 
@@ -60,7 +64,12 @@ local LOCALE = {
         UI_SUBTITLE = "LIVE SERVER INTELLIGENCE",
         UI_DETECTED = "DETECTED", UI_ACTIVE5 = "ACTIVE < 5 MIN", UI_FACTIONS = "FACTIONS",
         UI_CLASSES = "CLASSES", UI_ALL = "All", UI_FRESH = "Fresh", UI_NEW = "New", UI_NEW_SHORT = "new",
-        UI_PLAYER = "PLAYER", UI_PROFILE = "PROFILE", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
+        UI_PEER = "Peer",
+        PEER_LIST_HEAD = "Peer channel: %d records, %d of them new. Latest %d:",
+        PEER_LIST_EMPTY = "Peer channel: no records yet - nothing has arrived over %s.",
+        PEER_TAG_NEW = "new", PEER_TAG_UPD = "upd",
+        PEER_LIST_FOREIGN = "%d of them came from other realms of the cluster (channel is shared).",
+        UI_PLAYER = "PLAYER", UI_PROFILE = "PROFILE", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT", UI_REALM = "REALM",
         UI_FIRST = "First seen", UI_SOURCE = "Source", UI_ENCOUNTERS = "Encounters", UI_LIVE = "COLLECTING",
         SCAN_NOT_RUNNING = "no scan running",
         SUGGEST_STARTED = "suggest: typing queries into the who box — you only click the search button. Stop: /nspy suggest",
@@ -69,8 +78,13 @@ local LOCALE = {
         ANNOUNCE_TOGGLE = "new player announcements: ",
         DEBUG_ON = "debug mode: on — logs to chat (digests, scan, who, gate blocks)",
         DEBUG_OFF = "debug mode: off — stealth mode, logs go only to the SV ring",
+        WORLD_STATUS = "world data: %d vendors, %d vendor items, %d fishing rows",
+        PROBE_ON = "API probe: %d available, %d missing — saved to SV",
+        PROBE_HINT = "open a vendor and fish, then /reload — the probe writes to SavedVariables",
+        PROBE_OFF = "API probe: off",
         DB_CLEARED = "encounter database cleared",
         QUERIES_FMT = "%d queries",
+        WHO_SPEED_ON = "speed: surface layer — level bands of 10 from the top; a band that hits the 50-row cap expands into classes, then into races; a capped slice is expected, not an error",
         STARTUP = "started, %d players in db. Commands: /nspy (suggest — assisted /who)",
         SVR_TITLE = "Server census", SVR_SNAPSHOT = "RealmPulse snapshot: %s", SVR_TOTAL = "PLAYERS",
         SVR_PRIME = "PRIME TIME (28 DAYS)", SVR_CLASSES = "CLASSES", SVR_ZONES = "TOP ZONES",
@@ -78,6 +92,7 @@ local LOCALE = {
         SVR_NODATA = "No data module found. Install NearbySpy_Data (datapack-latest release) next to NearbySpy.",
         SVR_STALE = "snapshot %d days old - update NearbySpy_Data",
         SVR_SCOPE_ALL = "All realms",
+        SVR_NO_REALM = "no per-realm slice for %s — the data module has only the all-realms aggregate, install a fresh NearbySpy_Data",
         SVR_D1 = "Mon", SVR_D2 = "Tue", SVR_D3 = "Wed", SVR_D4 = "Thu", SVR_D5 = "Fri", SVR_D6 = "Sat", SVR_D7 = "Sun",
         HUB_STATUS = "%d records - peer %s - v%s",
         HUB_PLAYERS = "Players", HUB_PLAYERS_D = "encounter list",
@@ -85,6 +100,9 @@ local LOCALE = {
         HUB_HELP = "Help", HUB_HELP_D = "all commands",
         HUB_SETTINGS = "Settings", HUB_SETTINGS_D = "options and sharing",
         SET_PEER = "Peer sharing", SET_PEER_D = "Send new encounters to the nearbyspydata channel and receive from others",
+        SET_PEER_ALL = "Accept other realms", SET_PEER_ALL_D = "The channel is shared by the whole cluster. On: records from other realms are accepted and their realm is shown. Off: such packets are dropped and already stored ones are hidden.",
+        SCAN_RESUMED = "resuming the /who scan: %d queries left of %d. Start over: /nspy who new", SCAN_FORGOTTEN = "saved scan forgotten, the next run starts from the top level",
+        SET_MINIMAP = "Show minimap button", SET_MINIMAP_D = "Turn the NearbySpy icon on the minimap on or off",
         SET_AUTO = "Auto (%s)",
         SET_LANG = "Language", SET_LANG_D = "Addon interface language. Other windows update after /reload.",
         SET_TZ = "Heatmap timezone", SET_TZ_D = "The prime-time map in the server window is shown in this timezone; Auto = system clock.",
@@ -117,7 +135,12 @@ local LOCALE = {
         UI_SUBTITLE = "实时服务器情报",
         UI_DETECTED = "已发现", UI_ACTIVE5 = "5分钟内活跃", UI_FACTIONS = "阵营",
         UI_CLASSES = "职业", UI_ALL = "全部", UI_FRESH = "最近", UI_NEW = "新增", UI_NEW_SHORT = "新增",
-        UI_PLAYER = "玩家", UI_PROFILE = "资料", UI_ZONE = "区域", UI_CONTACT = "最后发现",
+        UI_PEER = "共享",
+        PEER_LIST_HEAD = "共享频道：共 %d 条，其中新增 %d 条。最近 %d 条：",
+        PEER_LIST_EMPTY = "共享频道：暂无记录 —— %s 上还没有收到数据。",
+        PEER_TAG_NEW = "新增", PEER_TAG_UPD = "更新",
+        PEER_LIST_FOREIGN = "其中 %d 条来自集群的其他服务器（频道是共享的）。",
+        UI_PLAYER = "玩家", UI_PROFILE = "资料", UI_ZONE = "区域", UI_CONTACT = "最后发现", UI_REALM = "服务器",
         UI_FIRST = "首次发现", UI_SOURCE = "来源", UI_ENCOUNTERS = "相遇次数", UI_LIVE = "正在收集",
         SCAN_NOT_RUNNING = "没有进行中的扫描",
         SUGGEST_STARTED = "suggest: 正在将查询填入搜索框 —— 你只需点击搜索按钮。停止: /nspy suggest",
@@ -126,8 +149,13 @@ local LOCALE = {
         ANNOUNCE_TOGGLE = "新玩家公告: ",
         DEBUG_ON = "调试模式: 开启 —— 日志输出到聊天（摘要、扫描、who、门禁拦截）",
         DEBUG_OFF = "调试模式: 关闭 —— 静默模式，日志仅写入SV环形缓冲区",
+        WORLD_STATUS = "世界数据: %d 个商人, %d 个商品, %d 条钓鱼记录",
+        PROBE_ON = "API 探测: 可用 %d, 缺失 %d — 已写入 SV",
+        PROBE_HINT = "打开商人并钓鱼，然后 /reload —— 探测结果写入 SavedVariables",
+        PROBE_OFF = "API 探测: 关闭",
         DB_CLEARED = "遭遇数据库已清空",
         QUERIES_FMT = "%d 个查询",
+        WHO_SPEED_ON = "快速：表层扫描——等级按10级从上往下分段；填满50条的分段再按职业细分，然后按种族；被截断属正常",
         STARTUP = "已启动，数据库中有%d名玩家。命令: /nspy（suggest —— 辅助 /who）",
         SVR_TITLE = "服务器普查", SVR_SNAPSHOT = "RealmPulse 快照: %s", SVR_TOTAL = "玩家总数",
         SVR_PRIME = "高峰时段 (28天)", SVR_CLASSES = "职业", SVR_ZONES = "热门区域",
@@ -135,6 +163,7 @@ local LOCALE = {
         SVR_NODATA = "未找到数据模块。请在 NearbySpy 旁安装 NearbySpy_Data (datapack-latest)。",
         SVR_STALE = "快照已过期 %d 天 - 请更新 NearbySpy_Data",
         SVR_SCOPE_ALL = "所有服务器",
+        SVR_NO_REALM = "没有 %s 的服务器切片 —— 数据模块只有全服汇总，请更新 NearbySpy_Data",
         SVR_D1 = "一", SVR_D2 = "二", SVR_D3 = "三", SVR_D4 = "四", SVR_D5 = "五", SVR_D6 = "六", SVR_D7 = "日",
         HUB_STATUS = "%d 条记录 - 共享 %s - v%s",
         HUB_PLAYERS = "玩家", HUB_PLAYERS_D = "遇到的玩家列表",
@@ -142,6 +171,9 @@ local LOCALE = {
         HUB_HELP = "帮助", HUB_HELP_D = "所有命令",
         HUB_SETTINGS = "设置", HUB_SETTINGS_D = "选项与共享",
         SET_PEER = "共享数据 (peer)", SET_PEER_D = "发送新遇到的玩家到 nearbyspydata 频道并接收他人的数据",
+        SET_PEER_ALL = "接受其他服务器", SET_PEER_ALL_D = "频道由整个集群共享。开启：接收其他服务器的记录并显示其服务器。关闭：丢弃这些数据，已保存的也隐藏。",
+        SCAN_RESUMED = "继续 /who 扫描：剩余 %d 个查询，共 %d 个。重新开始: /nspy who new", SCAN_FORGOTTEN = "已保存的扫描已清除，下次从最高等级开始",
+        SET_MINIMAP = "显示小地图按钮", SET_MINIMAP_D = "打开或关闭小地图上的 NearbySpy 图标",
         SET_AUTO = "自动 (%s)",
         SET_LANG = "语言", SET_LANG_D = "插件界面语言。其他窗口将在 /reload 后更新。",
         SET_TZ = "热力图时区", SET_TZ_D = "服务器窗口的高峰时段图按此时区显示；自动 = 系统时钟。",
@@ -174,7 +206,12 @@ local LOCALE = {
         UI_SUBTITLE = "РАЗВЕДКА СЕРВЕРА В РЕАЛЬНОМ ВРЕМЕНИ",
         UI_DETECTED = "ОБНАРУЖЕНО", UI_ACTIVE5 = "АКТИВНЫ < 5 МИН", UI_FACTIONS = "ФРАКЦИИ",
         UI_CLASSES = "КЛАССЫ", UI_ALL = "Все", UI_FRESH = "Свежие", UI_NEW = "Новые", UI_NEW_SHORT = "новых",
-        UI_PLAYER = "ИГРОК", UI_PROFILE = "ПРОФИЛЬ", UI_ZONE = "ЗОНА", UI_CONTACT = "КОНТАКТ",
+        UI_PEER = "Обмен",
+        PEER_LIST_HEAD = "Канал обмена: %d записей, из них новых %d. Последние %d:",
+        PEER_LIST_EMPTY = "Канал обмена: записей пока нет — по %s ничего не приходило.",
+        PEER_TAG_NEW = "новый", PEER_TAG_UPD = "обновл",
+        PEER_LIST_FOREIGN = "из них %d с других реалмов кластера (канал общий).",
+        UI_PLAYER = "ИГРОК", UI_PROFILE = "ПРОФИЛЬ", UI_ZONE = "ЗОНА", UI_CONTACT = "КОНТАКТ", UI_REALM = "РЕАЛМ",
         UI_FIRST = "Первая встреча", UI_SOURCE = "Источник", UI_ENCOUNTERS = "Встреч", UI_LIVE = "СБОР АКТИВЕН",
         SCAN_NOT_RUNNING = "скан не идёт",
         SUGGEST_STARTED = "suggest: вписываю запросы в поле who — твоё дело только жать лупу. Стоп: /nspy suggest",
@@ -183,8 +220,13 @@ local LOCALE = {
         ANNOUNCE_TOGGLE = "анонсы новых игроков: ",
         DEBUG_ON = "режим дебага: вкл — логи в чат (дайджесты, скан, who, блокировки гейта)",
         DEBUG_OFF = "режим дебага: выкл — скрытный, логи только в SV-кольцо",
+        WORLD_STATUS = "данные мира: %d вендоров, %d позиций, %d строк рыбалки",
+        PROBE_ON = "проба API: доступно %d, отсутствует %d — записано в SV",
+        PROBE_HINT = "открой торговца и поймай рыбу, потом /reload — проба пишется в SavedVariables",
+        PROBE_OFF = "проба API: выкл",
         DB_CLEARED = "база встреч очищена",
         QUERIES_FMT = "%d запросов",
+        WHO_SPEED_ON = "быстрый слой: полосы уровней по 10 сверху вниз; полоса, упёршаяся в лимит 50 строк, раскрывается по классам, затем по расам — обрезка это норма",
         STARTUP = "запущен, в базе %d игроков. Команды: /nspy (suggest — расширенный /who)",
         SVR_TITLE = "Ценз сервера", SVR_SNAPSHOT = "Снимок RealmPulse: %s", SVR_TOTAL = "ИГРОКОВ",
         SVR_PRIME = "ПРАЙМ-ТАЙМ (28 ДНЕЙ)", SVR_CLASSES = "КЛАССЫ", SVR_ZONES = "ТОП ЗОН",
@@ -192,6 +234,7 @@ local LOCALE = {
         SVR_NODATA = "Нет data-модуля. Поставь NearbySpy_Data (релиз datapack-latest) рядом с NearbySpy.",
         SVR_STALE = "снимку %d дн. - обнови NearbySpy_Data",
         SVR_SCOPE_ALL = "Все миры",
+        SVR_NO_REALM = "нет среза по миру %s — в модуле данных только общий агрегат, обновите NearbySpy_Data",
         SVR_D1 = "Пн", SVR_D2 = "Вт", SVR_D3 = "Ср", SVR_D4 = "Чт", SVR_D5 = "Пт", SVR_D6 = "Сб", SVR_D7 = "Вс",
         HUB_STATUS = "%d записей - обмен %s - v%s",
         HUB_PLAYERS = "Игроки", HUB_PLAYERS_D = "список встреченных",
@@ -199,6 +242,9 @@ local LOCALE = {
         HUB_HELP = "Помощь", HUB_HELP_D = "все команды",
         HUB_SETTINGS = "Настройки", HUB_SETTINGS_D = "опции и обмен",
         SET_PEER = "Обмен данными (peer)", SET_PEER_D = "Отправлять новые встречи в канал nearbyspydata и принимать от других",
+        SET_PEER_ALL = "Принимать другие реалмы", SET_PEER_ALL_D = "Канал общий для всего кластера. Вкл: записи с других реалмов принимаются и реалм показывается. Выкл: такие пакеты отбрасываются, а уже сохранённые скрываются.",
+        SCAN_RESUMED = "продолжаю скан /who: осталось %d запросов из %d. Начать заново: /nspy who new", SCAN_FORGOTTEN = "сохранённый скан забыт, следующий начнётся с верхнего уровня",
+        SET_MINIMAP = "Кнопка на миникарте", SET_MINIMAP_D = "Показать или скрыть иконку NearbySpy на миникарте",
         SET_AUTO = "Авто (%s)",
         SET_LANG = "Язык", SET_LANG_D = "Язык интерфейса аддона. Остальные окна обновятся после /reload.",
         SET_TZ = "Часовой пояс теплокарты", SET_TZ_D = "Карта прайм-тайма в окне сервера показывается в этом поясе; Авто = системные часы.",
@@ -231,7 +277,12 @@ local LOCALE = {
         UI_SUBTITLE = "LIVE-SERVER-AUFKLÄRUNG",
         UI_DETECTED = "ENTDECKT", UI_ACTIVE5 = "AKTIV < 5 MIN", UI_FACTIONS = "FRAKTIONEN",
         UI_CLASSES = "KLASSEN", UI_ALL = "Alle", UI_FRESH = "Aktuell", UI_NEW = "Neu", UI_NEW_SHORT = "neu",
-        UI_PLAYER = "SPIELER", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "KONTAKT",
+        UI_PEER = "Austausch",
+        PEER_LIST_HEAD = "Austauschkanal: %d Einträge, davon %d neu. Letzte %d:",
+        PEER_LIST_EMPTY = "Austauschkanal: noch keine Einträge — über %s kam nichts an.",
+        PEER_TAG_NEW = "neu", PEER_TAG_UPD = "akt.",
+        PEER_LIST_FOREIGN = "davon %d von anderen Realms des Clusters (Kanal ist gemeinsam).",
+        UI_PLAYER = "SPIELER", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "KONTAKT", UI_REALM = "REALM",
         UI_FIRST = "Zuerst gesehen", UI_SOURCE = "Quelle", UI_ENCOUNTERS = "Begegnungen", UI_LIVE = "SAMMLUNG AKTIV",
         SCAN_NOT_RUNNING = "kein Scan aktiv",
         SUGGEST_STARTED = "suggest: trage Anfragen ins Who-Feld ein — du klickst nur die Lupe. Stopp: /nspy suggest",
@@ -240,8 +291,13 @@ local LOCALE = {
         ANNOUNCE_TOGGLE = "Ansagen neuer Spieler: ",
         DEBUG_ON = "Debug-Modus: an — Logs im Chat (Digests, Scan, Who, Gate-Blockierungen)",
         DEBUG_OFF = "Debug-Modus: aus — versteckt, Logs nur im SV-Ring",
+        WORLD_STATUS = "Weltdaten: %d Händler, %d Artikel, %d Angel-Einträge",
+        PROBE_ON = "API-Probe: %d vorhanden, %d fehlen — in SV gespeichert",
+        PROBE_HINT = "Händler öffnen und angeln, dann /reload — die Probe landet in SavedVariables",
+        PROBE_OFF = "API-Probe: aus",
         DB_CLEARED = "Begegnungs-Datenbank geleert",
         QUERIES_FMT = "%d Anfragen",
+        WHO_SPEED_ON = "Schnellmodus: Stufenbänder zu 10 von oben; ein Band, das das Limit von 50 Zeilen erreicht, wird nach Klassen, dann nach Rassen aufgeteilt — Kürzung ist normal",
         STARTUP = "gestartet, %d Spieler in der DB. Befehle: /nspy (suggest — assistiertes /who)",
         SVR_TITLE = "Server-Zensus", SVR_SNAPSHOT = "RealmPulse-Snapshot: %s", SVR_TOTAL = "SPIELER",
         SVR_PRIME = "PRIME TIME (28 TAGE)", SVR_CLASSES = "KLASSEN", SVR_ZONES = "TOP-ZONEN",
@@ -249,6 +305,7 @@ local LOCALE = {
         SVR_NODATA = "Kein Datenmodul gefunden. Installiere NearbySpy_Data (Release datapack-latest) neben NearbySpy.",
         SVR_STALE = "Snapshot ist %d Tage alt - NearbySpy_Data aktualisieren",
         SVR_SCOPE_ALL = "Alle Realms",
+        SVR_NO_REALM = "kein Realm-Schnitt für %s — das Datenmodul hat nur den Gesamt-Aggregat, NearbySpy_Data aktualisieren",
         SVR_D1 = "Mo", SVR_D2 = "Di", SVR_D3 = "Mi", SVR_D4 = "Do", SVR_D5 = "Fr", SVR_D6 = "Sa", SVR_D7 = "So",
         HUB_STATUS = "%d Einträge - Austausch %s - v%s",
         HUB_PLAYERS = "Spieler", HUB_PLAYERS_D = "Begegnungsliste",
@@ -256,6 +313,9 @@ local LOCALE = {
         HUB_HELP = "Hilfe", HUB_HELP_D = "alle Befehle",
         HUB_SETTINGS = "Einstellungen", HUB_SETTINGS_D = "Optionen und Austausch",
         SET_PEER = "Peer-Austausch", SET_PEER_D = "Neue Begegnungen an den Kanal nearbyspydata senden und von anderen empfangen",
+        SET_PEER_ALL = "Andere Realms annehmen", SET_PEER_ALL_D = "Der Kanal wird vom ganzen Cluster geteilt. An: Einträge anderer Realms werden angenommen und ihr Realm angezeigt. Aus: solche Pakete werden verworfen, gespeicherte ausgeblendet.",
+        SCAN_RESUMED = "/who-Scan wird fortgesetzt: %d von %d Abfragen übrig. Neu starten: /nspy who new", SCAN_FORGOTTEN = "gespeicherter Scan verworfen, der nächste beginnt bei der höchsten Stufe",
+        SET_MINIMAP = "Minimap-Button anzeigen", SET_MINIMAP_D = "Das NearbySpy-Symbol auf der Minimap ein- oder ausblenden",
         SET_AUTO = "Auto (%s)",
         SET_LANG = "Sprache", SET_LANG_D = "Sprache der Addon-Oberfläche. Andere Fenster aktualisieren sich nach /reload.",
         SET_TZ = "Heatmap-Zeitzone", SET_TZ_D = "Die Prime-Time-Karte im Serverfenster wird in dieser Zeitzone gezeigt; Auto = Systemuhr.",
@@ -288,7 +348,12 @@ local LOCALE = {
         UI_SUBTITLE = "RENSEIGNEMENT SERVEUR EN DIRECT",
         UI_DETECTED = "DÉTECTÉS", UI_ACTIVE5 = "ACTIFS < 5 MIN", UI_FACTIONS = "FACTIONS",
         UI_CLASSES = "CLASSES", UI_ALL = "Tous", UI_FRESH = "Récents", UI_NEW = "Nouveaux", UI_NEW_SHORT = "nouveaux",
-        UI_PLAYER = "JOUEUR", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT",
+        UI_PEER = "Partage",
+        PEER_LIST_HEAD = "Canal de partage : %d entrées, dont %d nouvelles. Les %d dernières :",
+        PEER_LIST_EMPTY = "Canal de partage : aucune entrée — rien reçu via %s.",
+        PEER_TAG_NEW = "nouveau", PEER_TAG_UPD = "maj",
+        PEER_LIST_FOREIGN = "dont %d d'autres royaumes du cluster (canal partagé).",
+        UI_PLAYER = "JOUEUR", UI_PROFILE = "PROFIL", UI_ZONE = "ZONE", UI_CONTACT = "CONTACT", UI_REALM = "ROYAUME",
         UI_FIRST = "Première vue", UI_SOURCE = "Source", UI_ENCOUNTERS = "Rencontres", UI_LIVE = "COLLECTE ACTIVE",
         SCAN_NOT_RUNNING = "aucun scan en cours",
         SUGGEST_STARTED = "suggest : je saisis les requêtes dans le champ who — tu n'as qu'à cliquer la loupe. Stop : /nspy suggest",
@@ -297,8 +362,13 @@ local LOCALE = {
         ANNOUNCE_TOGGLE = "annonces des nouveaux joueurs : ",
         DEBUG_ON = "mode debug : activé — logs dans le chat (digests, scan, who, blocages du gate)",
         DEBUG_OFF = "mode debug : désactivé — furtif, logs uniquement dans le ring SV",
+        WORLD_STATUS = "données du monde : %d marchands, %d articles, %d lignes de pêche",
+        PROBE_ON = "sonde API : %d disponibles, %d manquantes — enregistré dans SV",
+        PROBE_HINT = "ouvre un marchand et pêche, puis /reload — la sonde écrit dans SavedVariables",
+        PROBE_OFF = "sonde API : désactivée",
         DB_CLEARED = "base des rencontres vidée",
         QUERIES_FMT = "%d requêtes",
+        WHO_SPEED_ON = "rapide : tranches de 10 niveaux de haut en bas ; une tranche qui atteint la limite de 50 lignes est découpée par classes, puis par races — la troncature est normale",
         STARTUP = "démarré, %d joueurs en base. Commandes : /nspy (suggest — /who assisté)",
         SVR_TITLE = "Recensement du royaume", SVR_SNAPSHOT = "Snapshot RealmPulse : %s", SVR_TOTAL = "JOUEURS",
         SVR_PRIME = "HEURES DE POINTE (28 JOURS)", SVR_CLASSES = "CLASSES", SVR_ZONES = "ZONES PRINCIPALES",
@@ -306,6 +376,7 @@ local LOCALE = {
         SVR_NODATA = "Module de données absent. Installez NearbySpy_Data (release datapack-latest) à côté de NearbySpy.",
         SVR_STALE = "snapshot vieux de %d jours - mettez à jour NearbySpy_Data",
         SVR_SCOPE_ALL = "Tous les royaumes",
+        SVR_NO_REALM = "pas de tranche pour %s — le module de données ne contient que l'agrégat global, mettez à jour NearbySpy_Data",
         SVR_D1 = "Lun", SVR_D2 = "Mar", SVR_D3 = "Mer", SVR_D4 = "Jeu", SVR_D5 = "Ven", SVR_D6 = "Sam", SVR_D7 = "Dim",
         HUB_STATUS = "%d entrées - partage %s - v%s",
         HUB_PLAYERS = "Joueurs", HUB_PLAYERS_D = "liste des rencontres",
@@ -313,6 +384,9 @@ local LOCALE = {
         HUB_HELP = "Aide", HUB_HELP_D = "toutes les commandes",
         HUB_SETTINGS = "Réglages", HUB_SETTINGS_D = "options et partage",
         SET_PEER = "Partage peer", SET_PEER_D = "Envoyer les nouvelles rencontres au canal nearbyspydata et recevoir celles des autres",
+        SET_PEER_ALL = "Accepter d'autres royaumes", SET_PEER_ALL_D = "Le canal est partagé par tout le cluster. Activé : les entrées d'autres royaumes sont acceptées et leur royaume est affiché. Désactivé : ces paquets sont ignorés et les entrées déjà stockées masquées.",
+        SCAN_RESUMED = "reprise du scan /who : %d requêtes restantes sur %d. Recommencer : /nspy who new", SCAN_FORGOTTEN = "scan enregistré oublié, le prochain repart du niveau le plus haut",
+        SET_MINIMAP = "Afficher le bouton de minicarte", SET_MINIMAP_D = "Activer ou désactiver l'icône NearbySpy sur la minicarte",
         SET_AUTO = "Auto (%s)",
         SET_LANG = "Langue", SET_LANG_D = "Langue de l'interface de l'addon. Les autres fenêtres se mettent à jour après /reload.",
         SET_TZ = "Fuseau de la carte", SET_TZ_D = "La carte des heures de pointe (fenêtre serveur) s'affiche dans ce fuseau ; Auto = horloge système.",
@@ -345,7 +419,12 @@ local LOCALE = {
         UI_SUBTITLE = "실시간 서버 정보",
         UI_DETECTED = "발견", UI_ACTIVE5 = "5분 내 활동", UI_FACTIONS = "진영",
         UI_CLASSES = "직업", UI_ALL = "전체", UI_FRESH = "최근", UI_NEW = "신규", UI_NEW_SHORT = "신규",
-        UI_PLAYER = "플레이어", UI_PROFILE = "프로필", UI_ZONE = "지역", UI_CONTACT = "마지막 접촉",
+        UI_PEER = "공유",
+        PEER_LIST_HEAD = "공유 채널: 총 %d개, 그중 신규 %d개. 최근 %d개:",
+        PEER_LIST_EMPTY = "공유 채널: 아직 기록이 없습니다 — %s 에서 받은 데이터가 없습니다.",
+        PEER_TAG_NEW = "신규", PEER_TAG_UPD = "갱신",
+        PEER_LIST_FOREIGN = "그중 %d개는 클러스터의 다른 서버에서 왔습니다 (채널 공유).",
+        UI_PLAYER = "플레이어", UI_PROFILE = "프로필", UI_ZONE = "지역", UI_CONTACT = "마지막 접촉", UI_REALM = "서버",
         UI_FIRST = "최초 발견", UI_SOURCE = "출처", UI_ENCOUNTERS = "조우", UI_LIVE = "수집 중",
         SCAN_NOT_RUNNING = "진행 중인 스캔 없음",
         SUGGEST_STARTED = "suggest: 검색창에 쿼리를 입력합니다 — 돋보기 버튼만 클릭하세요. 중지: /nspy suggest",
@@ -354,8 +433,13 @@ local LOCALE = {
         ANNOUNCE_TOGGLE = "신규 플레이어 알림: ",
         DEBUG_ON = "디버그 모드: 켜짐 — 채팅에 로그 출력 (다이제스트, 스캔, who, 게이트 차단)",
         DEBUG_OFF = "디버그 모드: 꺼짐 — 스텔스 모드, 로그는 SV 링에만 기록",
+        WORLD_STATUS = "월드 데이터: 상인 %d, 상품 %d, 낚시 기록 %d",
+        PROBE_ON = "API 프로브: 사용 가능 %d, 없음 %d — SV에 저장됨",
+        PROBE_HINT = "상인 창을 열고 낚시한 뒤 /reload — 프로브 결과가 SavedVariables에 기록됩니다",
+        PROBE_OFF = "API 프로브: 꺼짐",
         DB_CLEARED = "조우 데이터베이스 삭제됨",
         QUERIES_FMT = "%d개 쿼리",
+        WHO_SPEED_ON = "빠른 모드: 레벨을 10단위로 위에서 아래로; 50줄 한도에 걸린 구간은 직업으로, 다음은 종족으로 세분화 — 잘리는 것은 정상",
         STARTUP = "시작됨, DB에 플레이어 %d명. 명령어: /nspy (suggest — 보조 /who)",
         SVR_TITLE = "서버 센서스", SVR_SNAPSHOT = "RealmPulse 스냅샷: %s", SVR_TOTAL = "플레이어",
         SVR_PRIME = "프라임 타임 (28일)", SVR_CLASSES = "직업", SVR_ZONES = "인기 지역",
@@ -363,6 +447,7 @@ local LOCALE = {
         SVR_NODATA = "데이터 모듈이 없습니다. NearbySpy 옆에 NearbySpy_Data(datapack-latest)를 설치하세요.",
         SVR_STALE = "스냅샷이 %d일 지남 - NearbySpy_Data 업데이트",
         SVR_SCOPE_ALL = "모든 서버",
+        SVR_NO_REALM = "%s 의 서버별 데이터가 없습니다 — 데이터 모듈에 전체 집계만 있습니다, NearbySpy_Data를 업데이트하세요",
         SVR_D1 = "월", SVR_D2 = "화", SVR_D3 = "수", SVR_D4 = "목", SVR_D5 = "금", SVR_D6 = "토", SVR_D7 = "일",
         HUB_STATUS = "%d개 기록 - 공유 %s - v%s",
         HUB_PLAYERS = "플레이어", HUB_PLAYERS_D = "만난 플레이어 목록",
@@ -370,6 +455,9 @@ local LOCALE = {
         HUB_HELP = "도움말", HUB_HELP_D = "모든 명령어",
         HUB_SETTINGS = "설정", HUB_SETTINGS_D = "옵션 및 공유",
         SET_PEER = "피어 공유", SET_PEER_D = "새로 만난 플레이어를 nearbyspydata 채널로 보내고 다른 플레이어의 정보를 받기",
+        SET_PEER_ALL = "다른 서버 허용", SET_PEER_ALL_D = "채널은 클러스터 전체가 공유합니다. 켜짐: 다른 서버의 기록을 받아 서버를 표시합니다. 꺼짐: 해당 패킷을 버리고 저장된 기록도 숨깁니다.",
+        SCAN_RESUMED = "/who 스캔을 이어서 진행합니다: %d개 남음 (전체 %d개). 새로 시작: /nspy who new", SCAN_FORGOTTEN = "저장된 스캔을 삭제했습니다. 다음 스캔은 최고 레벨부터 시작합니다",
+        SET_MINIMAP = "미니맵 버튼 표시", SET_MINIMAP_D = "미니맵의 NearbySpy 아이콘을 켜거나 끕니다",
         SET_AUTO = "자동 (%s)",
         SET_LANG = "언어", SET_LANG_D = "애드온 인터페이스 언어. 다른 창은 /reload 후에 적용됩니다.",
         SET_TZ = "히트맵 시간대", SET_TZ_D = "서버 창의 프라임타임 지도가 이 시간대로 표시됩니다; 자동 = 시스템 시계.",
@@ -392,6 +480,10 @@ end
 local newThisSession = 0
 local whoScan = nil           -- active layered scan {zone, sent, results, added, current, suggest}
 local whoQueue = {}           -- queue of ranges {lo, hi}
+local SaveScanState           -- forward: the scan queue is mirrored into SV (defined below)
+local whoTest = nil           -- active /nspy whotest probe (defined with the probe)
+local WHO_TEST_BOX_TEXT = nil -- what the search box actually contained at click time
+local WHO_TEST_REOPEN_LOG = nil -- what the forced reopen did (hid/showed counts)
 
 local GetDB   -- forward: P's body writes the ring into db through this reference
 
@@ -425,6 +517,12 @@ GetDB = function()
     -- an explicit "/nspy peer off" (false) is respected, nil means "never set"
     if NearbySpy.peerEnabled == nil then
         NearbySpy.peerEnabled = true
+    end
+    -- Accept records from other realms of the cluster (the channel is shared).
+    -- On by default: the whole point of the channel is coverage. Turning it off
+    -- drops foreign packets AND hides already-stored foreign rows.
+    if NearbySpy.peerAllRealms == nil then
+        NearbySpy.peerAllRealms = true
     end
     local db = NearbySpy
     -- game tag for the site (14.10.2026): retail / classic_era / forever.
@@ -538,6 +636,11 @@ local function DbgErr(src, err)
     db.debug.err = db.debug.err or {}
     if not db.debug.err[src] then
         db.debug.err[src] = tostring(err):sub(1, 200)
+        -- err survives logout in SavedVariables, so without a stamp a month-old
+        -- entry reads exactly like a fresh failure (cost me a hunt on 09.11.2026:
+        -- the ring said line 1471 while the deployed code had no tonumber there).
+        db.debug.errAt = db.debug.errAt or {}
+        db.debug.errAt[src] = time()
         D(("DEBUG error [%s]: %s"):format(src, tostring(err):sub(1, 120)))
     end
 end
@@ -579,6 +682,734 @@ local function Round4(v)
     return math.floor(v * 10000 + 0.5) / 10000
 end
 
+-- ============ world data probe (vendor / fishing API discovery) ============
+-- Клиент Forever 1.60.x — кастомная сборка, а FrameXML в клиент не
+-- поставляется (только Interface/AddOns), поэтому наличие функций вроде
+-- GetMerchantItemLink / IsFishingLoot / UnitGUID("npc") и ПОРЯДОК их возвратов
+-- нельзя ни прочитать в файлах клиента, ни взять из документации другой эпохи.
+-- Проба снимает это с живой игры: какие функции есть, что вернули реальные
+-- окна торговца и улова. Порядок возвратов пишем как есть (v1..vn), чтобы
+-- сигнатуру установить по данным, а не по догадке.
+-- Включается: /nspy probe. Выключается: /nspy probe off.
+local PROBE_API = {
+    "GetMerchantNumItems", "GetMerchantItemInfo", "GetMerchantItemLink",
+    "GetMerchantItemID", "GetMerchantItemMaxStack", "GetItemInfo",
+    "GetNumLootItems", "GetLootSlotInfo", "GetLootSlotLink", "GetLootSlot",
+    "IsFishingLoot", "LootSlot", "UnitExists", "UnitGUID", "UnitName",
+    "GetRealZoneText", "GetSubZoneText",
+}
+local PROBE_MAX_EVENTS = 4 -- сколько окон торговца/улова запоминать
+local PROBE_MAX_ITEMS  = 8 -- сколько позиций окна запоминать
+
+-- ProbeCall — безопасный вызов: {v = {"возврат1", "возврат2", ...}} либо
+-- {err = "текст"}. Отсутствующая функция — пустая таблица (не ошибка).
+local function ProbeCall(fn, ...)
+    if type(fn) ~= "function" then return {} end
+    local r = { pcall(fn, ...) }
+    if not r[1] then return { err = tostring(r[2]):sub(1, 160) } end
+    local v = {}
+    for i = 2, #r do
+        local x = r[i]
+        if type(x) == "string" then
+            v[#v + 1] = x:sub(1, 120)
+        else
+            v[#v + 1] = tostring(x)
+        end
+    end
+    return { v = v }
+end
+
+local function ProbeFirst(call)
+    if type(call) == "table" and type(call.v) == "table" then return call.v[1] end
+end
+
+-- itemID из линка "|Hitem:7073:0:0:0:0:0:0:0|h[...]|h"
+local function ProbeItemID(link)
+    if type(link) ~= "string" then return nil end
+    local id = link:match("item:(%d+)")
+    return tonumber(id)
+end
+
+-- ProbeEntry — общая шапка записи: когда, где (зона = локация улова/торговли)
+local function ProbeEntry(kind)
+    local db = GetDB()
+    if not db.probeOn then return nil end
+    local p = db.probe
+    if type(p) ~= "table" then p = {}; db.probe = p end
+    p[kind] = p[kind] or {}
+    if #p[kind] >= PROBE_MAX_EVENTS then return nil end
+    local e = { at = time(), zone = PlayerZone(), zoneId = PlayerZoneId() }
+    p[kind][#p[kind] + 1] = e
+    return e
+end
+
+local ProbeGlobals -- forward: определена ниже (перечисление _G)
+
+local function ProbeRun()
+    local db = GetDB()
+    local p = db.probe
+    if type(p) ~= "table" then p = {}; db.probe = p end
+    local api = {}
+    for _, name in ipairs(PROBE_API) do
+        api[name] = (type(_G[name]) == "function") and 1 or 0
+    end
+    p.api = api
+    p.build = (GetBuildInfo and tostring(GetBuildInfo())) or ""
+    p.locale = (GetLocale and GetLocale()) or ""
+    p.realm = PlayerRealm()
+    p.zone = PlayerZone()
+    p.zoneId = PlayerZoneId()
+    p.at = time()
+    -- /nspy probe = свежий снимок: копилки чистим, иначе лимит событий уже
+    -- исчерпан прошлыми прогонами и новые записи молча не добавляются
+    p.merchants = {}
+    p.loots = {}
+    db.probeOn = true
+    pcall(ProbeGlobals)
+    return api
+end
+
+local ProbeTooltip, ProbeItemFuncs, ProbeMerchantFrame -- forward: определены ниже, в блоке probe v2
+local PB                     -- forward: хелперы разбора таблиц (блок probe v2)
+
+local function ProbeMerchant()
+    local e = ProbeEntry("merchants")
+    if not e then return end
+    e.npcName = ProbeCall(UnitName, "npc")
+    e.npcGuid = ProbeCall(UnitGUID, "npc")
+    e.npcExists = ProbeCall(UnitExists, "npc")
+    local num = ProbeCall(GetMerchantNumItems)
+    -- tonumber(nil) в Lua 5.1 бросает ошибку — значение может отсутствовать
+    -- (функции нет или клиент отказал), поэтому приводим с проверкой типа
+    local count = ProbeFirst(num)
+    e.numItems = (count and tonumber(count)) or 0
+    if num.err then e.numItemsErr = num.err end -- клиент отказал: причина в SV
+    e.items = {}
+    for i = 1, math.min(e.numItems, PROBE_MAX_ITEMS) do
+        local it = { idx = i }
+        it.info = ProbeCall(GetMerchantItemInfo, i)
+        it.id = ProbeCall(GetMerchantItemID, i)
+        it.link = ProbeCall(GetMerchantItemLink, i)
+        it.stack = ProbeCall(GetMerchantItemMaxStack, i)
+        local link = ProbeFirst(it.link)
+        local itemID = ProbeItemID(link)
+        if itemID then
+            it.itemId = itemID
+            it.item = ProbeCall(GetItemInfo, link)
+        end
+        e.items[#e.items + 1] = it
+    end
+    e.tip = ProbeTooltip(e.numItems)
+    e.merchantFrame = ProbeMerchantFrame(e.numItems)
+    e.merchantInfo = PB.MerchantInfo(e.numItems)
+    e.namesByTip = PB.NamesByTooltip()
+    for _, it in ipairs(e.items) do
+        if it.itemId then
+            e.itemFuncs = ProbeItemFuncs(it.itemId)
+            break
+        end
+    end
+end
+
+local function ProbeLoot()
+    local e = ProbeEntry("loots")
+    if not e then return end
+    e.isFishing = ProbeCall(IsFishingLoot)
+    e.target = ProbeCall(UnitName, "target")
+    e.targetExists = ProbeCall(UnitExists, "target")
+    local num = ProbeCall(GetNumLootItems)
+    local count = ProbeFirst(num)
+    e.numLoot = (count and tonumber(count)) or 0
+    if num.err then e.numLootErr = num.err end
+    e.slots = {}
+    for i = 1, math.min(e.numLoot, PROBE_MAX_ITEMS) do
+        local s = { idx = i }
+        s.info = ProbeCall(GetLootSlotInfo, i)
+        s.link = ProbeCall(GetLootSlotLink, i)
+        local link = ProbeFirst(s.link)
+        if link then
+            s.itemId = ProbeItemID(link)
+            s.item = ProbeCall(GetItemInfo, link)
+        end
+        e.slots[#e.slots + 1] = s
+    end
+end
+
+-- ============ probe v2 (08.11.2026): что реально есть в клиенте ============
+-- Проба v1 на 1.60.1 показала: GetMerchantItemInfo и GetItemInfo ОТСУТСТВУЮТ,
+-- а GetMerchantItemLink отдаёт nil для части позиций. Имя, качество и цену
+-- этими функциями не получить. Поэтому проба v2 снимает три вещи:
+--   1) перечисление _G по темам Item/Merchant/Loot/Tooltip/Container —
+--      список реальных имён вместо догадок (FrameXML не поставляется,
+--      прочитать UI-код клиента нельзя);
+--   2) текст тултипа торговой позиции: там лежат имя и цена, даже когда
+--      GetItemInfo нет. Строки читаются через canaccessvalue: в этом клиенте
+--      есть secret-значения, сравнение с которыми бросает ошибку;
+--   3) гипотеза ленивого кеша: если после GameTooltip:SetMerchantItem(i)
+--      GetMerchantItemLink(i) начинает отдавать линк, то имя можно брать
+--      оттуда, а не из тултипа.
+-- константы пробы v2: сколько позиций/строк читать
+local PROBE_TIP_ITEMS = 3  -- позиций торговца через тултип
+local PROBE_TIP_LINES = 12 -- строк тултипа на позицию
+
+-- ProbeText — текст FontString через гейт секретных значений.
+-- Возвращает nil (пусто), "[secret]" (читать нельзя) или обрезанный текст.
+local function ProbeText(fs)
+    if not fs or type(fs.GetText) ~= "function" then return nil end
+    local ok, txt = pcall(fs.GetText, fs)
+    if not ok or txt == nil then return nil end
+    if type(txt) ~= "string" then return "[secret]" end
+    if canaccessvalue and not canaccessvalue(txt) then return "[secret]" end
+    return txt:sub(1, 120)
+end
+
+-- ProbeGlobals — какие функции и таблицы-пространства имён есть в клиенте.
+-- Для таблиц (C_Item, C_MerchantFrame, ...) сохраняются и их ключи.
+-- 08.11.2026: перебор _G по шаблонам оказался ненадёжным — pairs() выдаёт
+-- произвольный порядок, и срез в 260 имён выкинул C_Item, из-за чего проба
+-- v2 показала «C_Item нет». Теперь перечисляются ВСЕ пространства C_*
+-- (их немного) — детерминированно и без среза; функции из шаблонов остаются
+-- как дополнительный список.
+function ProbeGlobals()
+    local db = GetDB()
+    local p = db.probe
+    if type(p) ~= "table" then p = {}; db.probe = p end
+    local ns, nns = {}, 0
+    for name, val in pairs(_G) do
+        if type(name) == "string" and name:sub(1, 2) == "C_" and type(val) == "table" then
+            local keys = {}
+            for k in pairs(val) do
+                if type(k) == "string" then keys[#keys + 1] = k end
+            end
+            table.sort(keys)
+            ns[name] = table.concat(keys, ",")
+            nns = nns + 1
+        end
+    end
+    p.namespaces = ns
+    p.namespacesCount = nns
+    p.globals = nil -- старый неполный список не нужен
+    p.globalsCount = nil
+end
+
+-- ProbeMerchantFrame — API торговца: в современном FrameXML старый
+-- GetMerchantItemInfo заменён на C_MerchantFrame.GetItemInfo. Сохраняем
+-- ВСЕ возвраты как есть (v1..vn): порядок полей угадывать нельзя, цену
+-- определим по данным, сравнив с MoneyFrame окна торговца.
+function ProbeMerchantFrame(numItems)
+    local res = { calls = {} }
+    local cmf = _G.C_MerchantFrame
+    res.hasNamespace = (type(cmf) == "table") and 1 or 0
+    if type(cmf) == "table" then
+        local keys = {}
+        for k in pairs(cmf) do
+            if type(k) == "string" then keys[#keys + 1] = k end
+        end
+        table.sort(keys)
+        res.keys = table.concat(keys, ",")
+    end
+    local pos = math.min(numItems or 0, 3)
+    for i = 1, pos do
+        local one = { idx = i }
+        if type(cmf) == "table" and type(cmf.GetItemInfo) == "function" then
+            one.getInfo = ProbeCall(cmf.GetItemInfo, i)
+        end
+        -- второй источник цены: MoneyFrame окна торговца (то, что видит игрок)
+        local mf = _G["MerchantItem" .. i .. "MoneyFrame"]
+        if mf then
+            one.moneyFrame = 1
+            if type(mf.GetMoney) == "function" then
+                one.money = ProbeCall(mf.GetMoney, mf)
+            end
+            if type(mf.GetAmount) == "function" then
+                one.amount = ProbeCall(mf.GetAmount, mf)
+            end
+        end
+        res.calls[#res.calls + 1] = one
+    end
+    return res
+end
+
+-- ProbeTable — разбор таблицы-результата: ключи, типы, скалярные значения.
+-- Нужен потому, что C_MerchantFrame.GetItemInfo(i) на 1.60.1 возвращает
+-- ТАБЛИЦУ (а не кортеж значений): tostring даёт "table: 0x..." и никакой
+-- информации, а поля этой таблицы — единственный путь к цене.
+local ProbeTip -- forward: определена ниже, после блока PB
+PB = {}
+
+function PB.Table(t, depth)
+    if type(t) ~= "table" then return tostring(t) end
+    depth = depth or 0
+    local parts = {}
+    for k, v in pairs(t) do
+        if type(k) == "string" or type(k) == "number" then
+            local tv = type(v)
+            local shown
+            if tv == "table" then
+                shown = (depth < 1) and ("{" .. PB.Table(v, depth + 1) .. "}") or "{...}"
+            elseif tv == "function" then
+                shown = "fn"
+            elseif tv == "string" then
+                if canaccessvalue and not canaccessvalue(v) then
+                    shown = "[secret]"
+                else
+                    shown = '"' .. v:sub(1, 60) .. '"'
+                end
+            else
+                shown = tostring(v)
+            end
+            parts[#parts + 1] = tostring(k) .. "=" .. shown
+        end
+    end
+    table.sort(parts)
+    return table.concat(parts, ", ")
+end
+
+-- PB.MoneyFrame — что реально есть у денежного фрейма позиции: методы и
+-- поля. MoneyFrame окна торговца — второй кандидат на источник цены.
+function PB.MoneyFrame(idx)
+    local mf = _G["MerchantItem" .. idx .. "MoneyFrame"]
+    if not mf then return { present = 0 } end
+    local out = { present = 1, methods = {}, fields = {} }
+    for k, v in pairs(mf) do
+        if type(k) == "string" then
+            local tv = type(v)
+            if tv == "function" then
+                out.methods[#out.methods + 1] = k
+            elseif tv == "number" or tv == "string" or tv == "boolean" then
+                if type(v) == "string" and canaccessvalue and not canaccessvalue(v) then
+                    out.fields[#out.fields + 1] = k .. "=[secret]"
+                else
+                    out.fields[#out.fields + 1] = k .. "=" .. tostring(v)
+                end
+            end
+        end
+    end
+    table.sort(out.methods)
+    table.sort(out.fields)
+    out.methods = table.concat(out.methods, ",")
+    out.fields = table.concat(out.fields, ",")
+    return out
+end
+
+-- PB.MerchantInfo — структура C_MerchantFrame.GetItemInfo для первых позиций.
+function PB.MerchantInfo(numItems)
+    local cmf = _G.C_MerchantFrame
+    if type(cmf) ~= "table" or type(cmf.GetItemInfo) ~= "function" then return { present = 0 } end
+    local out = { present = 1, rows = {} }
+    for i = 1, math.min(numItems or 0, 3) do
+        local ok, res = pcall(cmf.GetItemInfo, i)
+        local row = { idx = i }
+        if not ok then
+            row.err = tostring(res):sub(1, 120)
+        else
+            row.type = type(res)
+            if type(res) == "table" then
+                row.fields = PB.Table(res)
+            else
+                row.value = tostring(res)
+            end
+        end
+        row.money = PB.MoneyFrame(i)
+        out.rows[#out.rows + 1] = row
+    end
+    return out
+end
+
+-- PB.NamesByTooltip — имена позиций, у которых C_Item.GetItemNameByID молчит.
+-- Путь: SetMerchantItem(i) рисует строку тултипа, оттуда и берём имя.
+-- Возвращает { [idx] = "имя" }.
+function PB.NamesByTooltip()
+    local tip = ProbeTip()
+    if not tip then return nil end
+    local out = {}
+    local pos = math.min(tonumber(select(1, GetMerchantNumItems())) or 0, 5)
+    for i = 1, pos do
+        local okID, itemID = pcall(GetMerchantItemID, i)
+        itemID = okID and tonumber(itemID) or nil
+        local known = false
+        if itemID and type(C_Item) == "table" and type(C_Item.GetItemNameByID) == "function" then
+            local ok, name = pcall(C_Item.GetItemNameByID, itemID)
+            known = ok and type(name) == "string" and name ~= ""
+        end
+        if not known then
+            local okSet = pcall(tip.SetMerchantItem, tip, i)
+            local line = okSet and ProbeText(_G[(tip.GetName and tip:GetName() or "GameTooltip") .. "TextLeft1"]) or nil
+            out[#out + 1] = { idx = i, id = itemID, line = line }
+        end
+    end
+    return out
+end
+
+local probeTip
+-- ProbeTip — тултип для чтения торговой позиции. Свой, чтобы не трогать
+-- подсказку пользователя; шаблон может отсутствовать — тогда пробуем
+-- GameTooltip, и только если нет и его, проба сдаётся.
+function ProbeTip()
+    if probeTip then return probeTip end
+    local ok, tip = pcall(CreateFrame, "GameTooltip", "NearbySpyProbeTip", UIParent, "GameTooltipTemplate")
+    if ok and tip then
+        pcall(tip.SetOwner, tip, UIParent, "ANCHOR_NONE")
+        probeTip = tip
+        return probeTip
+    end
+    if GameTooltip then
+        probeTip = GameTooltip
+        return probeTip
+    end
+    return nil
+end
+
+-- ProbeTooltip — читает строки тултипа первых POS-позиций окна торговца.
+function ProbeTooltip(numItems)
+    local tip = ProbeTip()
+    if not tip then return nil end
+    local res = {}
+    local pos = math.min(numItems or 0, PROBE_TIP_ITEMS)
+    for i = 1, pos do
+        local one = { idx = i }
+        local okSet = pcall(tip.SetMerchantItem, tip, i)
+        one.setOk = okSet and 1 or 0
+        one.lines = {}
+        for l = 1, PROBE_TIP_LINES do
+            local fs = _G[(tip.GetName and tip:GetName() or "GameTooltip") .. "TextLeft" .. l]
+            local txt = ProbeText(fs)
+            if txt and txt ~= "" then one.lines[#one.lines + 1] = txt end
+        end
+        -- гипотеза ленивого кеша: линк после SetMerchantItem
+        one.linkAfter = ProbeCall(GetMerchantItemLink, i)
+        res[#res + 1] = one
+    end
+    return res
+end
+
+-- ProbeItemFuncs — как ещё можно получить имя/класс по itemID.
+local PROBE_ITEM_FUNCS = {
+    "GetItemInfo", "GetItemInfoInstant", "GetItemNameByID", "GetItemLink",
+    "GetItemQualityByID", "GetItemClassByID", "GetItemIconByID",
+}
+
+function ProbeItemFuncs(itemID)
+    local out = {}
+    for _, name in ipairs(PROBE_ITEM_FUNCS) do
+        local fn = _G[name]
+        if type(fn) == "function" and itemID then
+            out[name] = ProbeCall(fn, itemID)
+        end
+    end
+    local ci = _G.C_Item
+    if type(ci) == "table" and itemID then
+        for _, name in ipairs({ "GetItemNameByID", "GetItemInfoInstant", "GetItemInfo", "GetItemLink" }) do
+            if type(ci[name]) == "function" then
+                out["C_Item." .. name] = ProbeCall(ci[name], itemID)
+            end
+        end
+    end
+    return out
+end
+
+-- ============ world data: vendors and fishing (сбор, 08.11.2026) ============
+
+
+-- Хелперы мира — поля одной таблицы: в Lua 5.1 на главный чанк приходится
+-- не больше 200 локалов, а каждая отдельная local function съедает один.
+local WR = {}
+
+-- WR.TipName — имя предмета из тултипа торговой позиции, но ТОЛЬКО когда
+-- клиент действительно знает предмет.
+--
+-- Проблема (живые данные 09.11.2026): для предметов, которых нет в кэше
+-- клиента, тултип показывает ОДНУ служебную строку «Получение сведений о
+-- предмете» / «Retrieving item information». Она уезжала в базу как имя
+-- (13 позиций у четырёх торговцев). Признак заглушки структурный, а не
+-- текстовый: у известного предмета тултип всегда многострочный (имя +
+-- тип/применение/цена), у заглушки вторая строка пуста. Список локализованных
+-- строк не нужен и был бы хрупким.
+function WR.TipName(tip)
+    if not tip then return nil end
+    local base = (tip.GetName and tip:GetName()) or "GameTooltip"
+    local first = ProbeText(_G[base .. "TextLeft1"])
+    if not first or first == "" or first == "[secret]" then return nil end
+    local second = ProbeText(_G[base .. "TextLeft2"])
+    if not second or second == "" or second == "[secret]" then return nil end
+    return first
+end
+
+-- UnitMapXY — координаты юнита в системе карты (0..1), как у игроков:
+-- C_Map.GetPlayerMapPosition принимает любой юнит, поэтому у торговца берётся
+-- его собственная точка, а не позиция игрока. Если клиент отказал — nil, и
+-- вызывающий код откатывается на PlayerXY.
+function WR.UnitMapXY(unit)
+    local ok, mapID = pcall(C_Map.GetBestMapForUnit, unit)
+    if not ok or not mapID or mapID == 0 then return nil, nil end
+    local ok2, pos = pcall(C_Map.GetPlayerMapPosition, mapID, unit)
+    if not ok2 or not pos then return nil, nil end
+    local x, y = pos:GetXY()
+    if not x or not y or (x == 0 and y == 0) then return nil, nil end
+    return Round4(x), Round4(y)
+end
+
+-- API снят с живого клиента 1.60.1 (пробы 08.11.2026), не из документации:
+--   GetItemInfo / GetMerchantItemInfo / GetLootSlot — ОТСУТСТВУЮТ;
+--   C_Item.GetItemInfoInstant(id) -> id, class, subclass, invType, icon,
+--                                   classID, subclassID (числа, не зависят от языка);
+--   C_Item.GetItemNameByID(id)    -> локализованное имя;
+--   C_Item.GetItemInfo(id)        -> name, link, quality, iLvl, reqLevel, ...
+--   GetMerchantNumItems / GetMerchantItemID / GetMerchantItemMaxStack — работают;
+--   GetMerchantItemLink отдаёт nil, пока позиция не отрисована тултипом —
+--   поэтому линки не нужны: itemID берём из GetMerchantItemID.
+-- Цена: C_MerchantFrame (проба v3) либо MoneyFrame окна торговца; если нет ни
+-- того ни другого — цена не пишется (не выдумываем).
+--
+-- Классы предметов числовые и одинаковы во всех локалях: 9 = Recipe
+-- (рецепты), 7 = Tradeskill (материалы), 0 = Consumable. Фильтр «показать
+-- рецепты» делает сайт по classID, поэтому в SV едут все позиции вендора.
+-- Лимиты SV: растущий SavedVariables замедляет выход из игры, поэтому потолки
+-- жёсткие, а отброшенное считается в debug. Одна таблица — экономия локалов
+-- (в Lua 5.1 их не больше 200 на функцию, а основной чанк уже близок к лимиту).
+local WORLD_LIM = {
+    vendors = 300,   -- вендоров
+    perVendor = 200, -- позиций на вендора
+    items = 4000,    -- позиций всего
+    fish = 3000,     -- строк рыбалки
+    -- сколько позиций вендора догадывать именем через тултип (каждая
+    -- отрисовка небесплатна; на практике безымянных единицы)
+    nameLookup = 40,
+}
+
+-- WorldItem — имя и классы предмета по itemID. Все вызовы под pcall:
+-- в этом клиенте есть secret-значения и защищённые функции.
+function WR.Item(itemID)
+    if not itemID then return nil end
+    local out = { id = itemID }
+    local ci = _G.C_Item
+    if type(ci) == "table" then
+        if type(ci.GetItemInfoInstant) == "function" then
+            -- pcall добавляет флаг успеха первым, поэтому индексы сдвинуты на 1:
+            -- r[2]=itemID, r[3]=class(loc), r[4]=subclass(loc), r[5]=invType,
+            -- r[6]=icon, r[7]=classID, r[8]=subclassID (проверено пробой 08.11.2026)
+            local r = { pcall(ci.GetItemInfoInstant, itemID) }
+            if r[1] then
+                local cid, sid = tonumber(r[7]), tonumber(r[8])
+                if cid then out.c = cid end
+                if sid then out.s = sid end
+            end
+        end
+        if type(ci.GetItemNameByID) == "function" then
+            local ok, name = pcall(ci.GetItemNameByID, itemID)
+            if ok and type(name) == "string" and name ~= "" then out.n = name end
+        end
+        if type(ci.GetItemInfo) == "function" then
+            local r = { pcall(ci.GetItemInfo, itemID) }
+            if r[1] then
+                -- r[2] — имя; у части предметов GetItemNameByID молчит,
+                -- а GetItemInfo имя отдаёт (проверено на 159 и 2678)
+                if not out.n and type(r[2]) == "string" and r[2] ~= "" then out.n = r[2] end
+                local q, stack = tonumber(r[4]), tonumber(r[9])
+                if q then out.q = q end
+                if stack then out.st = stack end
+            end
+        end
+    end
+    return out
+end
+
+-- WorldVendorPrice — цена позиции в меди. Порядок источников:
+-- MoneyFrame окна торговца (то, что видит игрок) → C_MerchantFrame.GetItemInfo.
+function WR.Price(idx)
+    -- Основной путь: C_MerchantFrame.GetItemInfo(idx) возвращает ОДНУ таблицу
+    -- { name, texture, price, stackCount, numAvailable, ... } — цена в меди.
+    -- Проверено пробой 08.11.2026: price=25 у «Освежающей ключевой воды».
+    local cmf = _G.C_MerchantFrame
+    if type(cmf) == "table" and type(cmf.GetItemInfo) == "function" then
+        local ok, info = pcall(cmf.GetItemInfo, idx)
+        if ok and type(info) == "table" then
+            local price = tonumber(info.price)
+            if price and price > 0 then return price, tonumber(info.stackCount) end
+        end
+    end
+    -- Резерв: деньги на кнопке позиции (в части клиентов price не отдаётся)
+    local mf = _G["MerchantItem" .. idx .. "MoneyFrame"]
+    if mf then
+        if type(mf.GetMoney) == "function" then
+            local ok, money = pcall(mf.GetMoney, mf)
+            if ok and tonumber(money) then return tonumber(money) end
+        end
+        if type(mf.GetAmount) == "function" then
+            local ok, money = pcall(mf.GetAmount, mf)
+            if ok and tonumber(money) then return tonumber(money) end
+        end
+    end
+end
+
+-- WorldVendorKey — идентичность вендора: GUID существа, иначе имя+зона
+function WR.VendorKey(guid, name, zoneId)
+    if guid and guid ~= "" then return guid end
+    return tostring(name) .. "@" .. tostring(zoneId or 0)
+end
+
+-- CollectVendor — снимок окна торговца в db.world.vendors.
+-- Вызывается на MERCHANT_SHOW (сбор пассивный, кликов не требует).
+function WR.CollectVendor()
+    local okNum, num = pcall(GetMerchantNumItems)
+    num = okNum and tonumber(num) or 0
+    if num <= 0 then return end
+    local db = GetDB()
+    local world = db.world
+    if type(world) ~= "table" then world = { vendors = {}, fish = {} }; db.world = world end
+    world.vendors = world.vendors or {}
+    local guid = pcall(UnitGUID, "npc") and select(1, UnitGUID("npc")) or nil
+    local name = pcall(UnitName, "npc") and select(1, UnitName("npc")) or ""
+    local zoneId = PlayerZoneId()
+    local key = WR.VendorKey(type(guid) == "string" and guid or nil, name, zoneId)
+    local v = world.vendors[key]
+    if not v then
+        local count = 0
+        for _ in pairs(world.vendors) do count = count + 1 end
+        if count >= WORLD_LIM.vendors then
+            db.debug = db.debug or {}
+            db.debug.vendorsDropped = (db.debug.vendorsDropped or 0) + 1
+            return
+        end
+        v = { items = {}, first = time() }
+        world.vendors[key] = v
+    end
+    v.guid = type(guid) == "string" and guid or nil
+    v.n = (name ~= "" and name) or v.n
+    v.z = zoneId
+    v.zn = PlayerZone()
+    -- точка вендора: сначала собственная позиция NPC, затем позиция игрока
+    -- (он стоит у прилавка — это ближайшее приближение, если клиент не отдал
+    -- координаты не-игрового юнита)
+    local nx, ny = WR.UnitMapXY("npc")
+    if not nx then nx, ny = PlayerXY() end
+    if nx then v.x, v.y = nx, ny end
+    v.last = time()
+    v.seen = (v.seen or 0) + 1
+    local total = 0
+    for _, vv in pairs(world.vendors) do
+        for _ in pairs(vv.items or {}) do total = total + 1 end
+    end
+    for i = 1, num do
+        local okID, itemID = pcall(GetMerchantItemID, i)
+        itemID = okID and tonumber(itemID) or nil
+        if itemID then
+            local it = v.items[itemID]
+            if not it then
+                local n = 0
+                for _ in pairs(v.items) do n = n + 1 end
+                if n < WORLD_LIM.perVendor and total < WORLD_LIM.items then
+                    it = WR.Item(itemID) or { id = itemID }
+                    it.first = time()
+                    v.items[itemID] = it
+                    total = total + 1
+                end
+            end
+            if it then
+                it.last = time()
+                it.seen = (it.seen or 0) + 1
+                local price, buyStack = WR.Price(i)
+                if price then it.p = price end
+                -- price относится к лоту покупки (stackCount), а не к единице:
+                -- без этого цена за штуку считается неверно при stackCount > 1
+                if buyStack and buyStack > 0 then it.bs = buyStack end
+                if not it.st then
+                    local okS, stack = pcall(GetMerchantItemMaxStack, i)
+                    if okS and tonumber(stack) then it.st = tonumber(stack) end
+                end
+            end
+        end
+    end
+    -- безымянные позиции: имя не пришло из C_Item — добираем тултипом.
+    -- Окно торговца открыто (мы в MERCHANT_SHOW), поэтому SetMerchantItem
+    -- работает; ограничено лимитом, чтобы открытие торговца не превращалось
+    -- в сотню отрисовок.
+    local tip, looked = nil, 0
+    for i = 1, num do
+        if looked >= WORLD_LIM.nameLookup then break end
+        local okID, itemID = pcall(GetMerchantItemID, i)
+        itemID = okID and tonumber(itemID) or nil
+        local row = itemID and v.items[itemID]
+        if row and not row.n then
+            if not tip then tip = ProbeTip() end
+            if tip then
+                looked = looked + 1
+                if pcall(tip.SetMerchantItem, tip, i) then
+                    -- WR.TipName отсекает служебную заглушку «Получение
+                    -- сведений о предмете»: имя остаётся пустым и запишется
+                    -- при следующем визите, когда кэш клиента прогрет
+                    local line = WR.TipName(tip)
+                    if line then row.n = line end
+                end
+            end
+        end
+    end
+end
+
+-- CollectFishing — улов в db.world.fish, ключ «зона:предмет».
+-- Пишется только когда IsFishingLoot() истинно: обычный лут с трупов
+-- в базу не попадает.
+function WR.CollectFishing()
+    local okFlag, isFish = pcall(IsFishingLoot)
+    if not okFlag or not isFish then return end
+    local okNum, num = pcall(GetNumLootItems)
+    num = okNum and tonumber(num) or 0
+    if num <= 0 then return end
+    local db = GetDB()
+    local world = db.world
+    if type(world) ~= "table" then world = { vendors = {}, fish = {} }; db.world = world end
+    world.fish = world.fish or {}
+    local zoneId = PlayerZoneId() or 0
+    local ok, err = pcall(function()
+        for i = 1, num do
+            local okLink, link = pcall(GetLootSlotLink, i)
+            local itemID
+            if okLink and type(link) == "string" then
+                itemID = tonumber(link:match("item:(%d+)"))
+            end
+            if itemID then
+                local key = zoneId .. ":" .. itemID
+                local row = world.fish[key]
+                if not row then
+                    local count = 0
+                    for _ in pairs(world.fish) do count = count + 1 end
+                    if count >= WORLD_LIM.fish then
+                        db.debug = db.debug or {}
+                        db.debug.fishDropped = (db.debug.fishDropped or 0) + 1
+                        return
+                    end
+                    row = WR.Item(itemID) or { id = itemID }
+                    row.z = zoneId
+                    row.zn = PlayerZone()
+                    row.first = time()
+                    row.cnt = 0
+                    world.fish[key] = row
+                end
+                row.cnt = (row.cnt or 0) + 1
+                row.last = time()
+                -- последняя точка, где поймано: строки агрегированы по зоне,
+                -- поэтому храним свежую координату, а не список всех уловов
+                local px, py = PlayerXY()
+                if px then row.x, row.y = px, py end
+            end
+        end
+    end)
+    if not ok then DbgErr("fishing", err) end
+end
+
+-- WorldCounts — сколько собрано (для /nspy world)
+function WR.Counts()
+    local db = GetDB()
+    local world = db.world or {}
+    local vendors, items, fish = 0, 0, 0
+    for _ in pairs(world.vendors or {}) do vendors = vendors + 1 end
+    for _, v in pairs(world.vendors or {}) do
+        for _ in pairs(v.items or {}) do items = items + 1 end
+    end
+    for _ in pairs(world.fish or {}) do fish = fish + 1 end
+    return vendors, items, fish
+end
+
 -- localized class name -> file key (for UI color)
 local function ClassFileFromLocalized(classStr)
     if not classStr or classStr == "" then return nil end
@@ -614,14 +1445,29 @@ local function UpsertPlayer(db, data)
             faction = data.faction,
             race = data.race,
             guid = data.guid,
-            zone = observed and data.zone or nil,
-            zoneId = observed and data.zoneId or nil,
-            x = observed and Round4(data.x) or nil,
-            y = observed and Round4(data.y) or nil,
+            -- A peer packet carries the reporter's zone and position (protocol
+            -- N3). For a row we have never seen ourselves this is the only place
+            -- we have, so it is stored; see the update branch below for why it
+            -- never overwrites our own sighting.
+            zone = (observed or data.source == "peer") and data.zone or nil,
+            zoneId = (observed or data.source == "peer") and data.zoneId or nil,
+            x = (observed or data.source == "peer") and Round4(data.x) or nil,
+            y = (observed or data.source == "peer") and Round4(data.y) or nil,
             firstSeen = observed and nowT or 0,
             lastSeen = observed and nowT or 0,
             count = observed and 1 or 0,
             source = data.source,
+            -- peerAt/peerNew: the row came in over the nearbyspydata channel.
+            -- Stored in SV so the Peer filter and /nspy peer new still answer
+            -- after a relog (the in-memory counters do not survive logout).
+            peerAt = data.source == "peer" and nowT or nil,
+            peerNew = data.source == "peer" or nil,
+            -- Which realm reported the record, and whether that realm is not
+            -- ours: the channel turned out to be shared cluster-wide (09.11.2026,
+            -- CAMWOW EU4/EU5), so the export must be able to tell our own
+            -- sightings-by-peer from another realm's.
+            peerRealm = data.peerRealm or nil,
+            peerForeign = data.peerForeign or nil,
         }
         newThisSession = newThisSession + 1
         -- per-source counter (1.5.1, full debug): who actually feeds the database
@@ -643,9 +1489,13 @@ local function UpsertPlayer(db, data)
             entry.count = (entry.count or 1) + 1
         end
         entry.lastSeen = nowT
-        if data.zone then entry.zone = data.zone end
-        if data.zoneId then entry.zoneId = data.zoneId end
-        if data.x then
+        -- Place from OUR OWN sighting only. `observed` is true for peer packets
+        -- too (it means "not a profile-only row"), so without this guard a peer
+        -- packet overwrote the zone we had seen ourselves — caught by
+        -- test_peer_place_does_not_overwrite_our_own_sighting.
+        if data.zone and data.source ~= "peer" then entry.zone = data.zone end
+        if data.zoneId and data.source ~= "peer" then entry.zoneId = data.zoneId end
+        if data.x and data.source ~= "peer" then
             entry.x = Round4(data.x)
             entry.y = Round4(data.y)
         end
@@ -664,6 +1514,23 @@ local function UpsertPlayer(db, data)
         entry.race = data.race
     end
     entry.guid = entry.guid or data.guid
+    if data.source == "peer" then
+        -- The row already existed: remember when a peer last reported it. This
+        -- keeps peerNew untouched (the player was first known from a real
+        -- sighting) while the Peer filter still shows the record.
+        entry.peerAt = nowT
+        if data.peerRealm then entry.peerRealm = data.peerRealm end
+        if data.peerForeign then entry.peerForeign = true end
+        -- Place from a peer only fills a gap. It is someone else's snapshot of
+        -- where they saw the player, and our own observation is both closer and
+        -- newer, so it must never lose to a packet.
+        if not entry.zone and data.zone then entry.zone = data.zone end
+        if not entry.zoneId and data.zoneId then entry.zoneId = data.zoneId end
+        if not entry.x and data.x then
+            entry.x = Round4(data.x)
+            entry.y = Round4(data.y)
+        end
+    end
     return false
 end
 
@@ -671,13 +1538,69 @@ end
 local PEER_CHANNEL = "nearbyspydata"
 local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
 local peerQueue, peerQueued, peerSent = {}, {}, {}
-local peerIncoming = {start = 0, count = 0}
-local lastPeerSend = 0
-local peerStats = {sent = 0, received = 0, dropped = 0, seen = 0, valid = 0, rejected = 0}
+-- Per-session peer counters/state. Kept in ONE table on purpose: the main chunk
+-- of this file sits at the Lua 5.1 ceiling of 200 locals, so every new
+-- top-level local breaks the whole addon at compile time.
+local peerStats = {sent = 0, received = 0, merged = 0, dropped = 0, seen = 0, valid = 0, rejected = 0,
+    foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, lastSend = 0, rejectLogged = {}, lastNoChannel = 0}
 local peerChatVisible = false -- session-only diagnostic; never persist raw traffic
+
+-- Snapshot of peer counters into SavedVariables.
+-- peerStats lives in memory only, so a plain logout used to wipe every trace
+-- of channel activity: the SV showed source="peer" only for players that were
+-- genuinely new, and nothing at all when a peer record merely refreshed an
+-- existing row. db.debug.peer keeps the counters (no raw traffic, no names
+-- beyond lastSender) and is written together with the rest of the SV.
+PeerSync = function()
+    local ok, db = pcall(GetDB)
+    if not ok or type(db) ~= "table" then return end
+    if type(db.debug) ~= "table" then return end
+    -- GetChannelName returns TWO values (id, display name). Inside tonumber()
+    -- that second return lands in tonumber's BASE argument and raises
+    -- "bad argument #2 to 'tonumber' (number expected, got string)" — the
+    -- whole call then aborts inside somebody else's pcall. Assign to a local
+    -- first: an assignment keeps only the first value.
+    local channelId = GetChannelName(PEER_CHANNEL)
+    db.debug.peer = {
+        enabled = db.peerEnabled and true or false,
+        channel = tonumber(channelId) or 0,
+        queued = #peerQueue,
+        sent = peerStats.sent, received = peerStats.received,
+        merged = peerStats.merged, dropped = peerStats.dropped,
+        seen = peerStats.seen, valid = peerStats.valid,
+        rejected = peerStats.rejected, foreign = peerStats.foreign,
+        selfEcho = peerStats.selfEcho,
+        lastSender = peerStats.lastSender,
+        chat = peerChatVisible and true or false,
+    }
+end
+
+-- Untrusted chat text: strip control chars and pipe escapes before it reaches
+-- chat or the SV ring (a peer name must not be able to inject markup).
+-- Global on purpose — a local function would cost a slot in the main chunk.
+function PeerEsc(s, maxLen)
+    if type(s) ~= "string" then return tostring(s) end
+    s = s:gsub("[%c|]", "?")
+    maxLen = maxLen or 60
+    if #s > maxLen then s = s:sub(1, maxLen) .. "..." end
+    return s
+end
 local function PeerField(s, maxLen)
     return type(s) == "string" and #s > 0 and #s <= maxLen
         and not s:find("[%c|;]")
+end
+
+-- Peers now carry the place as well (protocol N3, fields 9-12). A chat message
+-- is capped by the client at 255 bytes, so the payload is built with a budget and
+-- loses its optional parts in a fixed order instead of being dropped whole:
+-- zone name first (zoneId and coordinates survive), then the coordinates.
+-- #s in Lua counts BYTES, which is exactly what the client limit measures —
+-- a Cyrillic zone name costs two bytes per character.
+local PEER_PAYLOAD_MAX = 240
+function PeerCoord(v)
+    local n = v and tonumber(v)
+    if not n then return "-" end
+    return ("%.4f"):format(n)
 end
 
 QueuePeerNew = function(db, data)
@@ -691,31 +1614,62 @@ QueuePeerNew = function(db, data)
     local faction = (data.faction == "Alliance" or data.faction == "Horde") and data.faction or "?"
     local key = db.game .. "|" .. data.key
     if peerSent[key] or peerQueued[key] then return end
-    local payload = table.concat({"N2", db.game, data.realm, data.name,
-        data.class, tostring(level), race, faction}, ";")
-    if #payload > 220 then return end
+
+    local zoneName = PeerField(data.zone, 60) and data.zone or "?"
+    local zoneId = (data.zoneId and tonumber(data.zoneId)) or 0
+    if zoneId < 0 or zoneId % 1 ~= 0 then zoneId = 0 end
+    local px, py = PeerCoord(data.x), PeerCoord(data.y)
+
+    local function Build(z, zid, cx, cy)
+        return table.concat({"N3", db.game, data.realm, data.name,
+            data.class, tostring(level), race, faction,
+            tostring(zid), z, cx, cy}, ";")
+    end
+    local payload = Build(zoneName, zoneId, px, py)
+    if #payload > PEER_PAYLOAD_MAX then payload = Build("?", zoneId, px, py) end
+    if #payload > PEER_PAYLOAD_MAX then payload = Build("?", zoneId, "-", "-") end
+    if #payload > PEER_PAYLOAD_MAX then return end
     if #peerQueue >= PEER_QUEUE_MAX then
         local old = table.remove(peerQueue, 1)
         peerQueued[old.key] = nil
         peerStats.dropped = peerStats.dropped + 1
+        D(("Peer queue full: dropped %s"):format(PeerEsc(old.name or "?")))
     end
-    peerQueue[#peerQueue + 1] = {key = key, payload = payload, at = time()}
+    peerQueue[#peerQueue + 1] = {key = key, payload = payload, name = data.name, at = time()}
     peerQueued[key] = true
+    -- Only the first detailed encounter is queued: this line is the proof that
+    -- the record passed every gate and is waiting for a mouse click to go out.
+    D(("Peer queued: %s (%s %d, %s) q=%d"):format(
+        PeerEsc(data.name), PeerEsc(data.class, 20), level,
+        PeerEsc(db.game, 16), #peerQueue))
+    PeerSync()
 end
 
 local function DrainPeerQueue()
     local db = GetDB()
     if not db.peerEnabled or #peerQueue == 0 then return end
     local nowT = time()
-    if nowT - lastPeerSend < PEER_GAP then return end
+    if nowT - peerStats.lastSend < PEER_GAP then return end
     while #peerQueue > 0 and nowT - peerQueue[1].at > PEER_TTL do
         local old = table.remove(peerQueue, 1)
         peerQueued[old.key] = nil
         peerStats.dropped = peerStats.dropped + 1
+        D(("Peer expired before send: %s"):format(PeerEsc(old.name or "?")))
     end
     if #peerQueue == 0 then return end
     local channel = GetChannelName(PEER_CHANNEL)
-    if not channel or channel == 0 then return end
+    if not channel or channel == 0 then
+        -- The usual reason for a silent outbound queue: we never joined the
+        -- channel (or the client dropped it on a zone change). One line a
+        -- minute, otherwise every mouse click would repeat it.
+        if nowT - peerStats.lastNoChannel >= 60 then
+            peerStats.lastNoChannel = nowT
+            D(("Peer send blocked: channel %s not joined (%s), q=%d")
+                :format(PEER_CHANNEL, tostring(channel), #peerQueue))
+            PeerSync()
+        end
+        return
+    end
     -- The beta may require a hardware input event for sending channel chat.
     local send = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
     if not send then return end
@@ -723,27 +1677,59 @@ local function DrainPeerQueue()
     local ok, result = pcall(send, item.payload, "CHANNEL", nil, channel)
     if not ok or result == false then
         db.debug.peerSendError = tostring(result):sub(1, 150)
+        D(("Peer send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
+        PeerSync()
         return
     end
     table.remove(peerQueue, 1)
     peerQueued[item.key] = nil
     peerSent[item.key] = true
-    lastPeerSend = nowT
+    peerStats.lastSend = nowT
     peerStats.sent = peerStats.sent + 1
     db.debug.peerSendError = nil
+    D(("Peer sent: %s q=%d sent=%d"):format(PeerEsc(item.name or "?"), #peerQueue, peerStats.sent))
+    PeerSync()
 end
 
 local function ReceivePeerMessage(message, sender)
     peerStats.seen = peerStats.seen + 1
-    local function Reject()
+    -- Reject(reason) — the reason is logged once per session (first occurrence)
+    -- so a misconfigured realm or a foreign client version is visible in chat
+    -- instead of the traffic silently vanishing.
+    local function Reject(reason)
         peerStats.rejected = peerStats.rejected + 1
+        if not peerStats.rejectLogged[reason] then
+            peerStats.rejectLogged[reason] = true
+            D(("Peer rejected: %s (from %s)"):format(reason, PeerEsc(sender or "?", 40)))
+        end
+        PeerSync()
     end
     local db = GetDB()
-    if not db.peerEnabled or type(message) ~= "string"
-        or (canaccessvalue and not canaccessvalue(message)) then return Reject() end
-    if #message > 220 or type(sender) ~= "string"
+    if not db.peerEnabled then return Reject("sharing disabled") end
+    if type(message) ~= "string" or (canaccessvalue and not canaccessvalue(message)) then
+        return Reject("unreadable message")
+    end
+    if #message > 255 or type(sender) ~= "string"
         or (canaccessvalue and not canaccessvalue(sender))
-        or not PeerField(sender, 120) then return Reject() end
+        or not PeerField(sender, 120) then return Reject("bad sender/length") end
+    -- Our OWN packet comes back through the channel as a normal chat message, and
+    -- counting it as a received record made `received`/`merged` lie: the live save
+    -- showed merged=1 right after our first send, with the "peer" being the player
+    -- we had just reported ourselves. Self-echoes are recognised by the speaker's
+    -- name (that is us) and never touch the stats or the database.
+    do
+        local me, surname = UnitName("player")
+        if me and me ~= "" and (sender == me
+            or (surname and surname ~= "" and sender == me .. " " .. surname)
+            or sender == me .. "-" .. PlayerRealm()) then
+            peerStats.selfEcho = peerStats.selfEcho + 1
+            if not peerStats.rejectLogged.selfEcho then
+                peerStats.rejectLogged.selfEcho = true
+                D(("Peer: own packet echoed back, ignored (sender=%s)"):format(PeerEsc(sender, 40)))
+            end
+            return
+        end
+    end
     peerStats.lastSender = sender
     if peerChatVisible and DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
         -- The beta has no ChatFrame_AddChannel: mirror only received peer events.
@@ -752,30 +1738,89 @@ local function ReceivePeerMessage(message, sender)
             "[nearbyspydata] " .. sender:gsub("|", "?") .. ": " .. message:gsub("|", "?"))
     end
     local nowT = time()
-    if nowT - peerIncoming.start >= 60 then
-        peerIncoming.start, peerIncoming.count = nowT, 0
+    if nowT - peerStats.inStart >= 60 then
+        peerStats.inStart, peerStats.inCount = nowT, 0
     end
-    peerIncoming.count = peerIncoming.count + 1
-    if peerIncoming.count > 120 then return Reject() end
+    peerStats.inCount = peerStats.inCount + 1
+    if peerStats.inCount > 120 then return Reject("rate limit") end
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
-    if #fields ~= 8 or fields[1] ~= "N2" or fields[2] ~= db.game
-        or fields[3] ~= PlayerRealm() then return Reject() end
+    -- N2 = 8 fields (no place), N3 = 12 fields (zone id, zone name, x, y).
+    -- Both are accepted so an older client in the channel is not cut off, and a
+    -- new one is understood by a client that has not been updated yet only for
+    -- its N2 peers — the protocol version is the first field, not a guess.
+    if #fields ~= 8 and #fields ~= 12 then return Reject("field count") end
+    local proto = fields[1]
+    if proto ~= "N2" and proto ~= "N3" then
+        return Reject("unknown protocol " .. PeerEsc(proto, 8))
+    end
+    if fields[2] ~= db.game then
+        return Reject(("game mismatch got=%s want=%s")
+            :format(PeerEsc(fields[2], 12), PeerEsc(db.game, 12)))
+    end
+    if fields[3] ~= PlayerRealm() then
+        -- The channel is shared across the whole cluster (observed
+        -- 09.11.2026: our CAMWOW EU5 Realm 1 PvE next to CAMWOW EU4 Realm 6
+        -- PvP), so a foreign realm is expected data, not noise. It is accepted
+        -- only while db.peerAllRealms is on (settings). The key already carries
+        -- the realm, so two realms never overwrite each other; peerForeign lets
+        -- the export separate "our realm via peer" from "another realm via peer".
+        -- Only an explicit false disables it: a SavedVariables file from an
+        -- older build has no key at all, and that must mean "on" (default).
+        if db.peerAllRealms == false then return Reject("foreign realm disabled") end
+        peerStats.foreign = peerStats.foreign + 1
+    end
     local realm, name, class = fields[3], fields[4], fields[5]
     if not PeerField(name, 60) or not PeerField(realm, 100)
-        or not class:match("^[A-Z]+$") or #class > 32 then return Reject() end
+        or not class:match("^[A-Z]+$") or #class > 32 then return Reject("bad name/class") end
     local level = tonumber(fields[6])
-    if not level or level < 1 or level > 80 or level % 1 ~= 0 then return Reject() end
+    if not level or level < 1 or level > 80 or level % 1 ~= 0 then return Reject("bad level") end
     local race = fields[7]
-    if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return Reject() end
+    if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return Reject("bad race") end
     local faction = fields[8]
-    if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject() end
-    peerStats.valid = peerStats.valid + 1
-    if UpsertPlayer(db, {key = name .. "-" .. realm, name = name, realm = realm,
-        class = class, level = level, race = race ~= "?" and race or nil,
-        faction = faction ~= "?" and faction or nil, source = "peer", silent = true}) then
-        peerStats.received = peerStats.received + 1
+    if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject("bad faction") end
+
+    -- Place (N3 only). Every part is optional: "-"/"?" means "the peer did not
+    -- know". Coordinates outside 0..1 are rejected as a whole pair, never
+    -- clamped — a clamped point would put a marker where nobody ever stood.
+    local zoneId, zoneName, px, py
+    if proto == "N3" then
+        zoneId = tonumber(fields[9])
+        if not zoneId or zoneId < 0 or zoneId % 1 ~= 0 or zoneId > 100000 then
+            return Reject("bad zone id")
+        end
+        zoneName = fields[10]
+        if zoneName ~= "?" and not PeerField(zoneName, 60) then return Reject("bad zone") end
+        if fields[11] ~= "-" and fields[12] ~= "-" then
+            px, py = tonumber(fields[11]), tonumber(fields[12])
+            if not px or not py or px < 0 or px > 1 or py < 0 or py > 1 then
+                return Reject("bad coords")
+            end
+        else
+            px, py = nil, nil
+        end
     end
+    peerStats.valid = peerStats.valid + 1
+    local foreign = realm ~= PlayerRealm()
+    local isNew = UpsertPlayer(db, {key = name .. "-" .. realm, name = name, realm = realm,
+        class = class, level = level, race = race ~= "?" and race or nil,
+        faction = faction ~= "?" and faction or nil, source = "peer", silent = true,
+        peerRealm = realm, peerForeign = foreign,
+        zone = (zoneName and zoneName ~= "?") and zoneName or nil,
+        zoneId = (zoneId and zoneId > 0) and zoneId or nil,
+        x = px, y = py})
+    if isNew then
+        peerStats.received = peerStats.received + 1
+    else
+        -- A valid record that only refreshed a known player is the real proof
+        -- the channel is alive: source="peer" never appears for those rows.
+        peerStats.merged = peerStats.merged + 1
+    end
+    D(("Peer in: %s %s %d (%s) %s%s"):format(
+        PeerEsc(name), PeerEsc(class, 20), level, PeerEsc(faction, 10),
+        isNew and "new" or "merged",
+        foreign and (" [realm=" .. PeerEsc(realm, 40) .. "]") or ""))
+    PeerSync()
 end
 
 local function JoinPeerChannel()
@@ -791,6 +1836,16 @@ local function JoinPeerChannel()
             if chat then ChatFrame_RemoveChannel(chat, PEER_CHANNEL) end
         end
     end
+end
+
+-- Channel state as the client sees it: id, joined or not, and the display
+-- name ("N. nearbyspydata"). Logged after every join attempt — a nil/0 here
+-- is the first thing to check when inbound traffic looks absent.
+-- Global on purpose — a local function would cost a slot in the main chunk.
+function PeerLogChannel(what)
+    local ch = GetChannelName(PEER_CHANNEL)
+    D(("Peer %s: channel=%s"):format(what, tostring(ch)))
+    PeerSync()
 end
 
 local function SetPeerChatVisible(visible)
@@ -817,9 +1872,42 @@ local RACE_LOCALE = {
     ["Тролль"] = "Troll", ["Troll"] = "Troll",
 }
 
+-- LearnedFactions — НАБОР фракций, в которых наблюдалась раса.
+--
+-- Раньше хранилась ОДНА фракция на расу (db.learn.raceFaction), и это ломало
+-- кастомные расы: Skyborne есть и у Альянса, и у Орды (в базе сайта
+-- Skyborne/Alliance 698 + Skyborne/Horde 1, то есть раса не одноместная).
+-- Одна фракция в мапе означала, что фильтр выкидывает половину запросов:
+-- скан Орды вообще не спрашивал р-"Небеснорожденный", потому что последним
+-- наблюдением там оказался Альянс. Хуже: в ответе /who фракция ВЫВОДИЛАСЬ из
+-- расы, поэтому ордынский Skyborne записывался как альянсовый — данные на
+-- сайте тоже кривились.
+--
+-- Возвращает set {Alliance=true, Horde=true} или nil (раса не наблюдалась).
+-- Старую мапу raceFaction читаем как набор из одного элемента — миграция без
+-- правки SavedVariables.
+local function LearnedFactions(db, raceFile)
+    if not raceFile or raceFile == "" then return nil end
+    local learn = db and db.learn
+    if not learn then return nil end
+    local set = learn.raceFactions and learn.raceFactions[raceFile]
+    if set then return set end
+    local one = learn.raceFaction and learn.raceFaction[raceFile]
+    if one and one ~= "" and one ~= "Unknown" then return { [one] = true } end
+    return nil
+end
+
+-- CountSet — сколько элементов в set-таблице.
+local function CountSet(set)
+    local n = 0
+    for _ in pairs(set) do n = n + 1 end
+    return n
+end
+
 -- Self-learning of races/factions (server custom races):
--- from unit detections we learn "localized race → file key" and "race → faction",
--- then apply them to /who entries. Stored in SavedVariables (db.learn).
+-- from unit detections we learn "localized race → file key" and the SET of
+-- factions the race was seen in, then apply them to /who entries.
+-- Stored in SavedVariables (db.learn).
 local function LearnRace(db, raceLoc, raceFile, faction)
     db.learn = db.learn or {}
     if raceLoc and raceLoc ~= "" and raceFile and raceFile ~= "" then
@@ -827,8 +1915,17 @@ local function LearnRace(db, raceLoc, raceFile, faction)
         db.learn.raceLoc2File[raceLoc] = raceFile
     end
     if raceFile and raceFile ~= "" and faction and faction ~= "Unknown" and faction ~= "" then
+        db.learn.raceFactions = db.learn.raceFactions or {}
+        local set = db.learn.raceFactions[raceFile]
+        if not set then set = {} db.learn.raceFactions[raceFile] = set end
+        set[faction] = true
+        -- старую мапу держим согласованной: другие места и прошлые SV её читают
         db.learn.raceFaction = db.learn.raceFaction or {}
-        db.learn.raceFaction[raceFile] = faction
+        if CountSet(set) == 1 then
+            db.learn.raceFaction[raceFile] = faction
+        else
+            db.learn.raceFaction[raceFile] = nil  -- кросс-фракционная: одной фракции нет
+        end
     end
 end
 
@@ -854,6 +1951,13 @@ local function Record(unit)
 
     local name, surname = UnitName(unit)
     if not name or name == "" then return end
+    -- Клиент отдаёт ЛОКАЛИЗОВАННУЮ заглушку («Неизвестно» / «Unknown») для
+    -- юнита, чьё имя недоступно. Такая запись — мусор: на сайте появлялся
+    -- «игрок» по имени Неизвестно (нашёлся в БД 09.11.2026 как Skyborne/Horde,
+    -- и именно из-за него казалось, что Skyborne есть у Орды). UNKNOWNOBJECT —
+    -- стандартный глобал клиента, поэтому проверка работает на любом языке.
+    local unknown = _G.UNKNOWNOBJECT
+    if unknown and name == unknown then return end
     -- Camelot: the "realm" from UnitName is the surname of a two-word name — join them
     if surname and surname ~= "" then
         name = name .. " " .. surname
@@ -871,7 +1975,8 @@ local function Record(unit)
     if okR then raceFile = raceFileRet end
     local faction = GetFaction(unit)
     if (not faction or faction == "Unknown") and raceFile then
-        local learned = db.learn and db.learn.raceFaction and db.learn.raceFaction[raceFile]
+        local set = LearnedFactions(db, raceFile)
+        local learned = (set and CountSet(set) == 1) and next(set) or nil
         faction = learned or RACE_FACTION[raceFile] or faction
     end
     LearnRace(db, raceLoc, raceFile, faction)
@@ -970,32 +2075,32 @@ local function RequestGuildRoster()
 end
 
 -- ============ /who zone scan ============
--- The server returns at most 50 rows per query. Workaround (CensusPlus approach):
--- scan in level ranges (1-10, 11-20, ...), split any range with 50 results
--- in half down to a single level (1-1, 2-2, ...).
+-- The server returns at most 50 rows per query, so a wide reply must be split.
+-- Two tiers: (1) by CLASS — the filter that works on every client;
+-- (2) by LEVEL RANGE — a class slice that still overflows is halved
+-- recursively until each part fits under the cap (down to a single level).
+-- Levels do filter (measured: at most 41 players per class per level, so
+-- level+class always fits), but the guard below keeps the scan honest if a
+-- future build stops honouring ranges.
+
+-- Level ceiling for /who scans, per game.
+-- Do NOT derive this from the database: a ceiling computed as "max level seen,
+-- rounded up to 10" can never grow past what the scan itself collected — to
+-- find the first level-31 player you must already scan to 31. That deadlock is
+-- exactly why the ceiling sat at 30 (05.11.2026). It is also why
+-- GetMaxPlayerLevel is not the source of truth: on the Forever client it
+-- reports the engine ceiling, which does not track the realm cap.
+-- Fixed cap per game instead (user decision 05.11.2026: "no restriction now,
+-- the ceiling is level 60").
+local LEVEL_CAP = { forever = 60, classic_era = 60, retail = 80 }
 
 local function MaxLevel()
-    -- The real ceiling = max level seen in the database, rounded up to a
-    -- multiple of 10 (user decision 09.10.2026: "use the maximum level
-    -- available, right now it's 30"). GetMaxPlayerLevel returns the engine's
-    -- 60 and lies about the beta server cap (30), so we rely on actual data;
-    -- as players level higher, the ceiling grows on its own, no code edits.
-    local m = 0
-    local d = GetDB()
-    if d and d.players then
-        for _, p in pairs(d.players) do
-            local l = tonumber(p.level) or 0
-            if l > m then m = l end
-        end
+    local game = "forever"
+    local okDb, d = pcall(GetDB)
+    if okDb and type(d) == "table" and type(d.game) == "string" and d.game ~= "" then
+        game = d.game
     end
-    if m > 0 then
-        return math.ceil(m / 10) * 10
-    end
-    if GetMaxPlayerLevel then
-        local ok, ml = pcall(GetMaxPlayerLevel)
-        if ok and type(ml) == "number" and ml > 0 then return ml end
-    end
-    return 60
+    return LEVEL_CAP[game] or 60
 end
 
 local whoShownByMe = {}    -- frames we showed to send /who
@@ -1067,6 +2172,334 @@ local function HideWhoFrame()
     if WhoFrame and WhoFrame:IsShown() then WhoFrame:Hide() end
 end
 
+-- ============ /nspy whotest — is programmatic /who still possible? ============
+-- The client blocks programmatic who since build 70291: SendWho is gated to a
+-- hardware click, and the click path stopped producing replies. Builds change,
+-- so this probe measures the CURRENT build instead of trusting the note. It is
+-- diagnostic only and never runs on its own.
+--
+-- Three paths, deliberately without SetFocus: focusing an EditBox
+-- programmatically has crashed this client (CSimpleEditBox code=11).
+-- The query is configurable: /nspy whotest 10-15, /nspy whotest gap 120 5 10-15
+-- three paths; with a range given all three use it, so the paths are compared
+-- on the same query
+local WHO_TEST_DEFAULT_RANGES = { "1-10", "11-20", "21-30" }
+local function WhoTestStepsFor(range, reopen)
+    if range then
+        return {
+            { key = "button",  query = range, reopen = reopen },
+            { key = "handler", query = range },
+            { key = "api",     query = range },
+        }
+    end
+    return {
+        { key = "button",  query = WHO_TEST_DEFAULT_RANGES[1], reopen = reopen },  -- Click("LeftButton") on the magnifier
+        { key = "handler", query = WHO_TEST_DEFAULT_RANGES[2] },  -- the button's own OnClick script
+        { key = "api",     query = WHO_TEST_DEFAULT_RANGES[3] },  -- C_FriendList.SendWho
+    }
+end
+local WHO_TEST_WAIT = 15   -- seconds to wait for a reply before the next step
+
+local function WhoTestSay(line)
+    P("whotest: " .. line)
+    R("whotest: " .. line)   -- also into the SV ring: readable after logout
+end
+
+local WhoTestFinish, FinishWhoTestCleanup   -- forward: used before their definitions
+
+-- Force the who window through a real Hide→Show cycle and report what moved.
+-- Needed because the client only accepts a programmatic search right after the
+-- window has actually been shown: measured 06.11.2026, the first click after a
+-- show goes through and every next one is refused, while the box still takes
+-- the text (so it looks like "typed but the search never ran").
+local function WhoTestForceReopen()
+    local hid, shown, chainLen = 0, 0, 0
+    pcall(function()
+        local f = WhoFrame or (WhoFrameEditBox and WhoFrameEditBox:GetParent())
+        local chain = {}
+        while f and f.Hide do
+            chain[#chain + 1] = f
+            f = f:GetParent()
+        end
+        chainLen = #chain
+        for i = 1, #chain do
+            if chain[i]:IsShown() then
+                chain[i]:Hide()
+                hid = hid + 1
+            end
+        end
+        for i = #chain, 1, -1 do
+            local fr = chain[i]
+            if fr.Show and not fr:IsShown() then
+                fr:Show()
+                shown = shown + 1
+            end
+        end
+    end)
+    return hid, shown, chainLen
+end
+
+local function WhoTestSend(step)
+    local q = step.query
+    if step.key == "button" then
+        local btn = LFGWhoListFrame and LFGWhoListFrame.WhoSearch
+        if not (btn and btn.Click) then return false, "WhoSearch button not found" end
+        pcall(function()
+            if C_FriendList and C_FriendList.SetWhoToUi then C_FriendList.SetWhoToUi(true) end
+        end)
+        WHO_TEST_BOX_TEXT = nil
+        WHO_TEST_REOPEN_LOG = nil
+        if step.reopen then
+            local hid, shown, chain = WhoTestForceReopen()
+            WHO_TEST_REOPEN_LOG = ("reopen: %d frame(s) in chain, hid %d, showed %d")
+                :format(chain or 0, hid or 0, shown or 0)
+        end
+        pcall(function() if WhoFrameEditBox then WhoFrameEditBox:SetText(q) end end)
+        -- read the box back: if SetText silently fails, the click searches the
+        -- PREVIOUS text and every "reply" is the old result shown again
+        pcall(function()
+            if WhoFrameEditBox and WhoFrameEditBox.GetText then
+                WHO_TEST_BOX_TEXT = WhoFrameEditBox:GetText()
+            end
+        end)
+        local ok, err = pcall(btn.Click, btn, "LeftButton")
+        if not ok then return false, "Click raised: " .. tostring(err) end
+        return true
+    elseif step.key == "handler" then
+        local btn = LFGWhoListFrame and LFGWhoListFrame.WhoSearch
+        local h = btn and btn.GetScript and btn:GetScript("OnClick")
+        if type(h) ~= "function" then return false, "the button has no OnClick script" end
+        pcall(function() if WhoFrameEditBox then WhoFrameEditBox:SetText(q) end end)
+        local ok, err = pcall(h, btn, "LeftButton")
+        if not ok then return false, "OnClick raised: " .. tostring(err) end
+        return true
+    elseif step.key == "api" then
+        if not (C_FriendList and C_FriendList.SendWho) then return false, "C_FriendList.SendWho is absent" end
+        local ok, err = pcall(C_FriendList.SendWho, q)
+        if not ok then return false, "SendWho raised: " .. tostring(err) end
+        return true
+    end
+    return false, "unknown path"
+end
+
+function WhoTestFinish()
+    local t = whoTest
+    whoTest = nil
+    if not t then return end
+    local hits = 0
+    for _, r in ipairs(t.log or {}) do
+        if r.reply then hits = hits + 1 end
+    end
+    WhoTestSay(("done — %d of %d path(s) got a reply"):format(hits, #(t.log or {})))
+    if hits == 0 then
+        WhoTestSay("verdict: programmatic who is dead on this build; keep the assisted mode")
+    else
+        WhoTestSay("verdict: programmatic who WORKS on this build — an automatic scan is possible again")
+    end
+    local db = GetDB()
+    db.debug.whoTest = t.log
+    FinishWhoTestCleanup()
+end
+
+-- separate so the cleanup is visible and cannot be skipped by an early return
+function FinishWhoTestCleanup()
+    pcall(function()
+        if WhoFrameEditBox then WhoFrameEditBox:SetText("") end
+    end)
+    pcall(HideWhoFrame)
+end
+
+local function WhoTestNext()
+    local t = whoTest
+    if not t then return end
+    -- close out the step we were waiting on
+    local prev = t.log[#t.log]
+    if prev and prev.reply == nil then
+        prev.reply = (t.replies > t.repliesBefore)
+        prev.num = t.lastNum
+        prev.sig = t.lastSig
+        prev.box = prev.box or t.boxAtSend
+        if prev.reply then
+            -- identical player sets for two different queries = the client
+            -- redrew a cached list; such a "reply" proves nothing
+            local cached = false
+            if prev.sig and prev.sig ~= "" then
+                for i = #t.log - 1, 1, -1 do
+                    local earlier = t.log[i]
+                    if earlier.sig == prev.sig then cached = true break end
+                end
+            end
+            prev.cached = cached
+            WhoTestSay(("[%s] %s → REPLY %d rows%s"):format(
+                prev.key, prev.query, prev.num or 0,
+                cached and " (SAME players as an earlier step — cached redraw, not a real reply)" or ""))
+        else
+            WhoTestSay(("[%s] %s → no reply"):format(prev.key, prev.query))
+        end
+        -- the read-back only exists on the button path (that is where SetText
+        -- matters): an empty or different box means the click searched old text
+        if prev.key == "button" and tostring(prev.box or "") ~= prev.query then
+            local shown = tostring(prev.box or "")
+            if shown == "" then shown = "<empty>" end
+            WhoTestSay(("[%s] WARNING: box contained \"%s\" but the query was \"%s\" — SetText did not land")
+                :format(prev.key, shown, prev.query))
+        end
+        t.lastSig = nil
+    end
+    t.step = t.step + 1
+    local step = t.steps[t.step]
+    if not step then WhoTestFinish() return end
+    t.repliesBefore = t.replies
+    local entry = { key = step.key, query = step.query, reply = nil }
+    t.log[#t.log + 1] = entry
+    WHO_TEST_BOX_TEXT = nil
+    EnsureWhoVisible()
+    local ok, why = WhoTestSend(step)
+    local wait = t.wait or WHO_TEST_WAIT
+    if not ok then
+        entry.reply = false
+        WhoTestSay(("[%s] %s → send failed: %s"):format(step.key, step.query, tostring(why)))
+        -- keep going: a missing path says nothing about the others
+        t.boxAtSend = WHO_TEST_BOX_TEXT
+        t.log[#t.log].box = WHO_TEST_BOX_TEXT
+    else
+        t.boxAtSend = WHO_TEST_BOX_TEXT
+        t.log[#t.log].box = WHO_TEST_BOX_TEXT
+        WhoTestSay(("sent [%s] \"%s\" (box: \"%s\"%s), waiting %ds")
+            :format(step.key, step.query, tostring(WHO_TEST_BOX_TEXT or "?"),
+                WHO_TEST_REOPEN_LOG and ("; " .. WHO_TEST_REOPEN_LOG) or "", wait))
+    end
+    C_Timer.After(wait, function() WhoTestNext() end)
+end
+
+local WHO_TEST_GAP_QUERIES = { "1-10", "11-20", "21-30", "31-40", "41-50", "51-60" }
+
+-- Distinct queries for a cooldown run. Repeating one query is useless here:
+-- an unchanged search box may just redraw the cached list, and then a "reply"
+-- proves nothing about the gate. With a range given, split it into different
+-- sub-windows; without one, cycle the six decades.
+local function WhoTestDistinctQueries(range, count)
+    local out = {}
+    local lo, hi = (range or ""):match("^(%d+)%-(%d+)$")
+    lo, hi = tonumber(lo), tonumber(hi)
+    if lo and hi and hi > lo then
+        local span = hi - lo + 1
+        if count >= span then
+            -- more steps than levels: fall back to a single level each, then
+            -- wrap around with a shifted window so no two are identical
+            for i = 1, count do
+                local lvl = lo + ((i - 1) % span)
+                out[i] = ("%d-%d"):format(lvl, math.min(lvl + 1, hi))
+            end
+        else
+            -- even slices of the window, each non-empty and distinct
+            local size = math.max(1, math.floor(span / count))
+            for i = 1, count do
+                local a = lo + (i - 1) * size
+                local b = (i == count) and hi or math.min(a + size - 1, hi)
+                out[i] = ("%d-%d"):format(a, b)
+            end
+        end
+    else
+        for i = 1, count do
+            out[i] = WHO_TEST_GAP_QUERIES[(i - 1) % #WHO_TEST_GAP_QUERIES + 1]
+        end
+    end
+    -- guard: if the slicing produced repeats, shift the tail (cannot happen
+    -- with the math above, but a silent duplicate would poison the measurement)
+    for i = 2, #out do
+        if out[i] == out[i - 1] then
+            local lvl = lo and (lo + ((i - 1) % math.max(1, (hi or lo) - lo + 1))) or nil
+            if lvl then out[i] = ("%d-%d"):format(lvl, math.min(lvl + 1, hi)) end
+        end
+    end
+    return out
+end
+local WHO_TEST_GAP_MAX = 6        -- queries in a cooldown run
+local WHO_TEST_GAP_MAXWAIT = 600  -- s: cap on the gap, so the probe cannot hang
+local WHO_TEST_GAP_DEFAULT = 120  -- s: gap when only a range/count is given
+
+-- arg grammar (all parts optional):
+--   [gap] [<seconds>] [<count>] [<lo>-<hi>]
+--   ""                 → three paths, default ranges
+--   "10-15"            → three paths, each with 10-15
+--   "gap 120 5 10-15"  → five button clicks, 120 s apart, all 10-15
+local function ParseWhoTestArg(arg)
+    local res, gapMode = {}, false
+    local words = {}
+    for w in tostring(arg or ""):gmatch("%S+") do words[#words + 1] = w end
+    local i = 1
+    while i <= #words do
+        local w = words[i]
+        local lo, hi = w:match("^(%d+)%-(%d+)$")
+        if w == "reopen" then
+            res.reopen = true
+        elseif w == "gap" then
+            gapMode = true
+            local n = tonumber(words[i + 1])
+            if n then res.gap = n i = i + 1 end
+        elseif lo then
+            lo, hi = tonumber(lo), tonumber(hi)
+            if lo and hi and lo >= 1 and hi <= 80 and hi > lo then
+                res.range = ("%d-%d"):format(lo, hi)
+            end
+        else
+            local n = tonumber(w)
+            if n then
+                if res.gap then res.count = n else res.gap = n end
+            end
+        end
+        i = i + 1
+    end
+    res.gapMode = gapMode
+    return res
+end
+
+local function StartWhoTest(arg)
+    if whoTest then
+        whoTest = nil
+        FinishWhoTestCleanup()
+        P("whotest: cancelled")
+        return
+    end
+    if whoScan then
+        P("whotest: stop the running scan first (/nspy who)")
+        return
+    end
+    local btn = LFGWhoListFrame and LFGWhoListFrame.WhoSearch
+    P(("whotest: build check — button=%s, OnClick=%s, SendWho=%s")
+        :format(tostring(btn ~= nil and btn.Click ~= nil),
+            tostring(btn ~= nil and btn.GetScript ~= nil and type(btn:GetScript("OnClick")) == "function"),
+            tostring(C_FriendList ~= nil and C_FriendList.SendWho ~= nil)))
+
+    -- "gap <seconds> [count] [range]": repeated BUTTON clicks with a fixed
+    -- pause, to find out whether the block is a cooldown that expires
+    -- (measured 06.11.2026: a click worked again 141 s after a blocked one).
+    local a = ParseWhoTestArg(arg)
+    if a.gapMode then
+        local gap = math.min(math.max(a.gap or WHO_TEST_GAP_DEFAULT, 10), WHO_TEST_GAP_MAXWAIT)
+        local count = math.min(math.max(a.count or 5, 2), WHO_TEST_GAP_MAX)
+        local queries = WhoTestDistinctQueries(a.range, count)
+        local steps = {}
+        for i = 1, count do
+            steps[i] = { key = "button", query = queries[i], reopen = a.reopen }
+        end
+        P(("whotest: cooldown run — %d button clicks, %ds apart, reopen=%s (total ~%d min)")
+            :format(count, gap, tostring(a.reopen and true or false), math.floor(count * gap / 60 + 0.5)))
+        P(("whotest: distinct queries — %s"):format(table.concat(queries, ", ")))
+        whoTest = { step = 0, replies = 0, repliesBefore = 0, lastNum = nil, log = {},
+                    steps = steps, wait = gap }
+    else
+        local steps = WhoTestStepsFor(a.range, a.reopen)
+        if a.range then
+            P(("whotest: three paths on the same query \"%s\""):format(a.range))
+        end
+        whoTest = { step = 0, replies = 0, repliesBefore = 0, lastNum = nil, log = {},
+                    steps = steps }
+    end
+    WhoTestNext()
+end
+
 -- The /who zone filter token depends on the client locale:
 -- enUS — z-"Zone", ruRU — з-"Зона" (Cyrillic!). With a Latin z on an RU client
 -- the server silently drops the query — that's exactly why zone scans failed.
@@ -1114,30 +2547,130 @@ local function PlayerFaction()
     return nil
 end
 
--- Localized race names for the r-"race" filter: standard + learned custom
--- ones (Skyborne etc.) from db.learn
+-- NameFitsLocale — написано ли имя в алфавите текущего клиента.
+--
+-- Зачем: db.learn.raceLoc2File — НАКОПИТЕЛЬНАЯ таблица, она собиралась и
+-- русским, и английским клиентом, поэтому рядом с «Таурен» лежит «Tauren».
+-- Запрос /who на русском клиенте принимает только локализованное имя, на
+-- английское сервер отвечает пустым списком. Без фильтра половина расовых
+-- запросов (а в плотных срезах — весь tier) уходила впустую и жгла троттлинг.
+--
+-- Проверка по ведущим байтам UTF-8, а не по списку слов: локализованных
+-- названий рас десятки, и захардкоженный список сломался бы на первой
+-- кастомной расе сервера.
+-- IsFeminine — женская форма названия расы («Орчиха», «Гномка», «Ночная
+-- эльфийка», «Небеснорожденная»). Нужна только как подсказка при выборе одной
+-- формы кастомной расы из db.learn: канон сервера — мужская форма, как у
+-- стандартных рас (raceStr=Human в ответе /who). Ошибиться здесь безопасно:
+-- худший случай — одна лишняя попытка запроса, а не потеря данных.
+local function IsFeminine(name)
+    if type(name) ~= "string" then return false end
+    local low = name:lower()
+    -- окончание может быть не в конце строки: «НебеснорожденнАЯ из Высшего
+    -- ордена» — прилагательное стоит первым словом. Поэтому проверяем и
+    -- конец слова (перед пробелом), а не только конец строки.
+    local function ends(tail)
+        return low:match(tail .. "$") ~= nil or low:match(tail .. "%s") ~= nil
+    end
+    return ends("ая") or ends("яя") or ends("иха") or ends("ка")
+        or ends("ица") or ends("ница")
+end
+
+local function NameFitsLocale(name, loc)
+    if type(name) ~= "string" or name == "" then return false end
+    loc = loc or (GetLocale and GetLocale()) or ""
+    if loc == "enUS" or loc == "enGB" or loc == "enTW" then
+        return name:find("[\128-\255]") == nil  -- только ASCII
+    elseif loc == "ruRU" then
+        return name:find("[\208\209]") ~= nil   -- кириллица: D0/D1 + 80..BF
+    elseif loc == "zhCN" or loc == "zhTW" or loc == "koKR" then
+        return name:find("[\227-\237]") ~= nil  -- CJK/хангыль: 3-байтные E3..ED
+    end
+    return true  -- неизвестная локаль: не судим, лучше лишний запрос чем пропуск
+end
+
+-- Localized race names for the r-"race" filter.
+--
+-- Два источника, и они НЕ равноправны:
+--   1) RACE_BY_LOCALE[локаль] — каноническое (мужское) название расы. Именно
+--      его сервер понимает в /who, и именно в этой форме приходит raceStr в
+--      ответе (проверено по SV: raceStr=Human для любой записи).
+--   2) db.learn.raceLoc2File — самообучение из UnitRace. Ценно ТОЛЬКО для
+--      рас, которых нет в эталонной таблице (кастомные, напр. Skyborne).
+--
+-- Ловушка, стоившая половины расовых запросов: UnitRace отдаёт название расы
+-- С УЧЁТОМ ПОЛА юнита, поэтому в learn рядом с «Орк» лежат «Орчиха», «Гномка»,
+-- «Дворфийка», «Ночная эльфийка». Это не отдельные расы: /who на них отвечает
+-- пустым списком, а каждый такой запрос жжёт троттлинг /who (в SV видны
+-- сообщения «Для повторного использования команды /кто необходимо немного
+-- подождать»). Поэтому для известных рас берём ТОЛЬКО канон, а из learn — не
+-- больше одной формы на расу.
+--
 -- faction ~= nil → cut races of the other faction: /who on Camelot returns
 -- only the querying character's faction, queries for enemy races are always empty
 local function RaceFilterNames(db, faction)
     local names = {}
+    local loc = (GetLocale and GetLocale()) or ""
     local function want(raceFile)
         if not faction then return true end
-        local rf = (db and db.learn and db.learn.raceFaction and db.learn.raceFaction[raceFile])
-            or RACE_FACTION[raceFile]
-        return rf == nil or rf == faction
+        -- стандартные расы: фракция детерминирована, справочник не устаревает
+        local known = RACE_FACTION[raceFile]
+        if known then return known == faction end
+        -- кастомные: смотрим НАБОР наблюдённых фракций
+        local set = LearnedFactions(db, raceFile)
+        if not set then return true end       -- не знаем — не судим, лучше лишний запрос
+        if CountSet(set) > 1 then return true end  -- кросс-фракционная раса: нужна обеим сторонам
+        return set[faction] == true
     end
-    -- the table exists only for ru/en; on other locales (zhCN etc.)
-    -- only learned races work (self-learning from targets)
-    local locTable = RACE_BY_LOCALE[GetLocale()]
+
+    -- 1) канон: сначала написание, которое сервер сам вернул в ответе /who
+    --    (learn.whoName), затем эталонная таблица локали. Для известных рас
+    --    learn.raceLoc2File не нужен вовсе — там лежат ещё и женские формы.
+    local canonical = {}
+    local whoName = (db and db.learn and db.learn.whoName) or nil
+    local locTable = RACE_BY_LOCALE[loc]
     if locTable then
         for raceFile, locName in pairs(locTable) do
-            if want(raceFile) then names[locName] = true end
+            if want(raceFile) then
+                local canon = (whoName and whoName[raceFile]) or locName
+                names[canon] = true
+                canonical[raceFile] = true
+            end
         end
     end
-    if db and db.learn and db.learn.raceLoc2File then
-        for locName, raceFile in pairs(db.learn.raceLoc2File) do
-            if want(raceFile) then names[locName] = true end
+    -- расы вне эталона (кастомные), для которых сервер уже вернул написание
+    if whoName then
+        for raceFile, locName in pairs(whoName) do
+            if not canonical[raceFile] and want(raceFile) and NameFitsLocale(locName, loc) then
+                names[locName] = true
+                canonical[raceFile] = true
+            end
         end
+    end
+
+    -- 2) learn: только расы вне эталона. Женские формы («Орчиха») и чужая
+    -- локаль отсекаются, на одну расу — одна форма, иначе запросы дублируются.
+    if db and db.learn and db.learn.raceLoc2File then
+        local chosen = {}
+        for locName, raceFile in pairs(db.learn.raceLoc2File) do
+            if not canonical[raceFile] and want(raceFile) and NameFitsLocale(locName, loc) then
+                local cur = chosen[raceFile]
+                if not cur then
+                    chosen[raceFile] = locName
+                else
+                    -- несколько написаний одной кастомной расы: берём ту, что
+                    -- больше похожа на канон — без женского окончания
+                    if IsFeminine(locName) and not IsFeminine(cur) then
+                        -- оставляем cur
+                    elseif IsFeminine(cur) and not IsFeminine(locName) then
+                        chosen[raceFile] = locName
+                    elseif locName < cur then
+                        chosen[raceFile] = locName
+                    end
+                end
+            end
+        end
+        for _, locName in pairs(chosen) do names[locName] = true end
     end
     return names
 end
@@ -1150,14 +2683,18 @@ local function FinishZoneScan(reason)
     local s = whoScan
     whoScan = nil
     whoQueue = {}
+    GetDB().scan = nil   -- finished: nothing left to resume
     -- clean up after ourselves: the Who window remembers the last query in the
     -- input box — clear it so the user doesn't see the scan's "alien" values
     pcall(function()
         if WhoFrameEditBox then WhoFrameEditBox:SetText("") end
     end)
     HideWhoFrame()
-    D(("/who %s: scan done%s — queries %d, found %d, new %d"):format(
-        s.zone, reason and (" (" .. reason .. ")") or "", s.sent, s.results, s.added))
+    D(("/who %s: scan done%s — queries %d, found %d, new %d, splits %d, race splits %d%s"):format(
+        s.zone, reason and (" (" .. reason .. ")") or "", s.sent, s.results, s.added,
+        s.splits or 0, s.raceSplits or 0,
+        (s.deadFilter and s.deadFilter > 0)
+            and ("; level filter ignored on " .. s.deadFilter .. " slice(s)") or ""))
 end
 
 -- catch the server's anti-bot message ("Интересная операция, связанная с модификацией"):
@@ -1218,10 +2755,22 @@ local function PumpWhoQueue()
             return
         end
         whoScan.current = q
+        whoScan.sent = (whoScan.sent or 0) + 1
+        -- mirror the remaining queue into SV right away: a /reload or relog
+        -- writes SavedVariables at that moment, which is exactly the resume point
+        if SaveScanState then SaveScanState() end
         -- query WITHOUT the zone filter (the server drops z-…), but with an
         -- optional slice filter (class/race token, localized) + level range
-        local query = q.base and ("%s %d-%d"):format(q.base, q.lo, q.hi)
-            or ("%d-%d"):format(q.lo, q.hi)
+        -- filters: class slice and/or race slice, then the level range. Both
+        -- tokens are localized (к-/р- on RU, c-/r- on EN).
+        local filter = ""
+        if q.base then filter = q.base end
+        if q.race then
+            filter = (filter ~= "" and (filter .. " ") or "")
+                .. WHO_TOKEN_RACE .. '"' .. q.race .. '"'
+        end
+        if filter ~= "" then filter = filter .. " " end
+        local query = filter .. ("%d-%d"):format(q.lo, q.hi)
         if whoScan.suggest then
             -- assisted mode (70291: programmatic who is dead): the addon types
             -- the query into the box, the user clicks the magnifier — a hardware
@@ -1246,7 +2795,322 @@ local function PumpWhoQueue()
     end)
 end
 
-local function StartZoneScan(zone, manual, mode, suggest)
+-- Level-first scan plan: the OUTER loop is the level, classes are the inner
+-- one. Counts come from our own database, so the plan is an estimate — a reply
+-- that comes back full is split further at reply time (classes, then races).
+--
+-- Packing rules (measured against the server population, 06.11.2026):
+--   * the walk is TOP-DOWN (level 60 first): if the run is interrupted, the
+--     endgame part is already covered;
+--   * a whole level is queried WITHOUT a class filter when it fits the 50 cap,
+--     and consecutive such levels are merged into one range;
+--   * an overfull level is queried class by class, and each class keeps its
+--     range open while the running total stays under the cap — this is what
+--     turns 204 single-level queries into ~93 for the same coverage;
+--   * a class+level pair that alone overflows is left as is: it gets split by
+--     race when the reply comes back full.
+-- SCAN — построители плана скана. Таблица, а не отдельные local function:
+-- в Lua 5.1 на главный чанк приходится не больше 200 локалов, и каждый
+-- отдельный построитель съедает слот (ловили дважды).
+local SCAN = {}
+
+function SCAN.Level(db, ml)
+    local counts, loc = {}, {}
+    for _, pl in pairs((db and db.players) or {}) do
+        local cls, lvl = pl.class, pl.level
+        if cls and lvl and lvl >= 1 and lvl <= ml then
+            local byLevel = counts[cls]
+            if not byLevel then byLevel = {} counts[cls] = byLevel end
+            byLevel[lvl] = (byLevel[lvl] or 0) + 1
+            if not loc[cls] then loc[cls] = (LOCALIZED_CLASS_NAMES_MALE or {})[cls] end
+        end
+    end
+
+    local classes = {}
+    for cls in pairs(counts) do classes[#classes + 1] = cls end
+    table.sort(classes)   -- stable plan between runs
+
+    local queue, openRange, wholeIdx = {}, {}, nil
+    local function levelTotal(lvl)
+        local t = 0
+        for _, cls in ipairs(classes) do t = t + (counts[cls][lvl] or 0) end
+        return t
+    end
+
+    -- top-down: the highest levels are scanned first, so an interrupted run
+    -- still covers the endgame part of the server (that is where the players
+    -- people actually look for are). Ranges therefore grow DOWNWARD: a level
+    -- joins the open range when it sits directly below its current bottom.
+    for lvl = ml, 1, -1 do
+        local total = levelTotal(lvl)
+        if total <= WHO_CAP then
+            local idx = wholeIdx
+            if idx and queue[idx].lo == lvl + 1 and ((queue[idx].n or 0) + total) <= WHO_CAP then
+                queue[idx].lo = lvl
+                queue[idx].n = (queue[idx].n or 0) + total
+            else
+                queue[#queue + 1] = { lo = lvl, hi = lvl, n = total }
+                wholeIdx = #queue
+            end
+        else
+            wholeIdx = nil
+            for _, cls in ipairs(classes) do
+                local n = counts[cls][lvl] or 0
+                if n > 0 then
+                    local idx = openRange[cls]
+                    if idx and queue[idx].lo == lvl + 1 and ((queue[idx].n or 0) + n) <= WHO_CAP then
+                        queue[idx].lo = lvl
+                        queue[idx].n = (queue[idx].n or 0) + n
+                    else
+                        queue[#queue + 1] = {
+                            base = WHO_TOKEN_CLASS .. '"' .. (loc[cls] or cls) .. '"',
+                            lo = lvl, hi = lvl, n = n, cls = cls,
+                        }
+                        openRange[cls] = #queue
+                    end
+                else
+                    local idx = openRange[cls]
+                    if idx and queue[idx].lo > lvl + 1 then openRange[cls] = nil end
+                end
+            end
+        end
+    end
+    return queue
+end
+
+-- SCAN.Speed — поверхностный слой трёхступенчатой воронкой сверху вниз.
+--
+-- Ступени (решение пользователя 09.11.2026):
+--   tier 1 — полоса уровней шириной 10, от капа вниз: 51-60, 41-50, 31-40 …
+--   tier 2 — если полоса упёрлась в лимит 50 строк, она раскрывается ПО КЛАССАМ,
+--            и снова полосами по 10 от верха (к-"Воин" 51-60, 41-50 …)
+--   tier 3 — если и срез класса упёрся в лимит, к нему добавляется РАСА,
+--            тоже полосой по 10 от верха
+--
+-- Раскрытие адаптивное: в разреженной полосе оно не происходит вовсе, поэтому
+-- на живом сервере это десятки запросов, а не сотни. Сверху вниз — потому что
+-- интерес к эндгейму выше, и прерванный прогон всё равно покрывает верх.
+--
+-- SCAN.SPEED_MAX — жёсткий потолок раскрытия. Без него «поверхностный
+-- слой» на плотном сервере мог бы развернуться в большее число запросов, чем
+-- полная перепись (~110). Потолок считается по числу ДОБАВЛЕННЫХ срезов, а не
+-- по позиции в очереди: после /reload счётчик восстанавливается из SV.
+SCAN.SPEED_BAND = 10    -- ширина полосы уровней на каждой ступени
+SCAN.RACE_MIN_OBS = 30  -- минимум наблюдений расы, чтобы судить о её классах
+SCAN.SPEED_MAX = 60     -- потолок раскрытия: surface layer не должен стать переписью
+
+function SCAN.Speed(db, ml, band)
+    band = band or SCAN.SPEED_BAND
+    local queue = {}
+    -- от капа вниз: hi = ml, ml-band, …; lo не меньше 1
+    for hi = ml, 1, -band do
+        local lo = math.max(1, hi - band + 1)
+        queue[#queue + 1] = { lo = lo, hi = hi, tier = 1, kind = "level" }
+    end
+    return queue
+end
+
+-- SCAN.SpeedClasses — ступень 2: классы для одной полосы уровней.
+-- Порядок фиксирован сортировкой: сохранённая очередь после /reload должна
+-- совпадать с исходной, иначе прогон каждый раз идёт по-новому.
+function SCAN.SpeedClasses(q)
+    local names = {}
+    -- cls (файловый ключ, напр. DRUID) нужен ступени 3: расы фильтруются по
+    -- реально наблюдаемым комбинациям «класс × раса»
+    for cls, locName in pairs(LOCALIZED_CLASS_NAMES_MALE or {}) do
+        names[#names + 1] = { loc = locName, cls = cls }
+    end
+    table.sort(names, function(a, b) return a.loc < b.loc end)
+    local out = {}
+    for _, e in ipairs(names) do
+        out[#out + 1] = { base = WHO_TOKEN_CLASS .. '"' .. e.loc .. '"',
+            cls = e.cls,
+            lo = q.lo, hi = q.hi, tier = 2, kind = "class", parentSet = q.parentSet }
+    end
+    return out
+end
+
+-- SCAN.RaceName — локализованное имя расы по файловому ключу.
+-- Приоритет: написание, которое вернул сам сервер (learn.whoName), затем
+-- эталонная таблица локали, затем выученные написания (только те, что в
+-- алфавите клиента).
+function SCAN.RaceName(db, raceFile)
+    if not raceFile or raceFile == "" then return nil end
+    local loc = (GetLocale and GetLocale()) or ""
+    local learn = db and db.learn
+    if learn and learn.whoName and learn.whoName[raceFile] then
+        return learn.whoName[raceFile]
+    end
+    local locTable = RACE_BY_LOCALE[loc]
+    if locTable then
+        local name = locTable[raceFile]
+        if name then return name end
+    end
+    if learn and learn.raceLoc2File then
+        -- несколько написаний одной расы: предпочитаем НЕ женскую форму
+        -- («Небеснорожденный», а не «Небеснорожденная»), затем — по алфавиту.
+        -- Иначе выбор зависел бы от случайного порядка и не совпадал с тем
+        -- именем, которое RaceFilterNames кладёт в очередь запросов.
+        local best, bestFem
+        for locName, rf in pairs(learn.raceLoc2File) do
+            if rf == raceFile and NameFitsLocale(locName, loc) then
+                local fem = IsFeminine(locName)
+                if not best then
+                    best, bestFem = locName, fem
+                elseif bestFem and not fem then
+                    best, bestFem = locName, fem
+                elseif bestFem == fem and locName < best then
+                    best = locName
+                end
+            end
+        end
+        return best
+    end
+    return nil
+end
+
+-- SCAN.ClassRaces — какие расы реально бывают у класса, по данным игроков.
+-- Возвращает set локализованных имён. Пустой set = комбинации ещё не
+-- наблюдались (тогда вызывающий берёт все расы фракции).
+--
+-- Зачем: на этом сервере комбинации НЕ классические (у Дворфа шаман и паладин,
+-- у Нежити паладин, у Skyborne друид), поэтому статическая таблица «класс ×
+-- раса» была бы неверной в обе стороны — и теряла бы существующие пары, и
+-- генерировала заведомо пустые запросы.
+function SCAN.ClassRaces(db, cls)
+    local out = {}
+    if not cls then return out end
+    for _, pl in pairs((db and db.players) or {}) do
+        if pl.class == cls and pl.race and pl.race ~= "" then
+            local locName = SCAN.RaceName(db, pl.race)
+            if locName then out[locName] = true end
+        end
+    end
+    return out
+end
+
+-- SCAN.RaceObs — сколько раз раса вообще наблюдалась (любым классом).
+-- Нужно, чтобы сужать список рас только по ДОСТАТОЧНОЙ выборке: иначе
+-- получается замкнутый круг — пару не спросили, потому что не видели, а не
+-- увидели, потому что не спросили. Для редкой/новой расы фильтр не применяем.
+function SCAN.RaceObs(db)
+    local out = {}
+    for _, pl in pairs((db and db.players) or {}) do
+        if pl.race and pl.race ~= "" then
+            local locName = SCAN.RaceName(db, pl.race)
+            if locName then out[locName] = (out[locName] or 0) + 1 end
+        end
+    end
+    return out
+end
+
+-- SCAN.SpeedRaces — ступень 3: расы для одного среза класса и полосы уровней.
+-- Раса-фильтр тот же, что у whorace: фракция + локаль клиента.
+function SCAN.SpeedRaces(db, q)
+    -- расы, разрешённые фракцией и локалью
+    local allowed = RaceFilterNames(db, PlayerFaction())
+    -- и только те, что реально встречались с ЭТИМ классом
+    local observed = SCAN.ClassRaces(db, q.cls)
+    local obsCount = SCAN.RaceObs(db)
+    local names = {}
+    for locName in pairs(allowed) do
+        -- Раса попадает в срез, если пара «класс × раса» уже наблюдалась ИЛИ
+        -- выборка по расе слишком мала, чтобы судить (тогда лишний запрос
+        -- дешевле пропущенной расы).
+        if next(observed) == nil or observed[locName]
+            or (obsCount[locName] or 0) < SCAN.RACE_MIN_OBS then
+            names[#names + 1] = locName
+        end
+    end
+    table.sort(names)
+    local out = {}
+    for _, locName in ipairs(names) do
+        out[#out + 1] = { base = q.base, race = locName,
+            lo = q.lo, hi = q.hi, tier = 3, kind = "race", parentSet = q.parentSet }
+    end
+    return out
+end
+
+-- SCAN.SpeedExpand — какие срезы добавить, когда срез упёрся в лимит.
+-- Возвращает массив (возможно урезанный по бюджету) или nil, если раскрывать
+-- нечего. Вынесено из обработчика ответа: воронку надо проверять тестом, а не
+-- глазами по логу в игре.
+function SCAN.SpeedExpand(db, q, left)
+    if not q or not q.tier then return nil end
+    if q.tier == 1 then return SCAN.SpeedClasses(q) end
+    if q.tier == 2 then return SCAN.SpeedRaces(db, q) end
+    return nil  -- tier 3 — предел детализации
+end
+
+-- SCAN.SpeedTrim — урезать список срезов по остатку бюджета (left).
+-- nil, если бюджета нет вовсе.
+function SCAN.SpeedTrim(slices, left)
+    if not slices or #slices == 0 or not left or left <= 0 then return nil end
+    if #slices <= left then return slices end
+    for i = #slices, left + 1, -1 do table.remove(slices, i) end
+    return slices
+end
+
+-- ============ scan persistence ============
+-- A full level-first plan is ~110 queries, so one scan inevitably spans a
+-- /reload or a relog. The queue therefore lives in SavedVariables: the next
+-- /nspy who continues where the previous one stopped instead of starting from
+-- the top level again. Only the remaining queue is stored; parentSet (the
+-- name list used by the dead-filter guard) is dropped — it is per-branch
+-- bookkeeping, up to 50 names per entry, and would bloat the SV file.
+local SCAN_RESUME_MAX_AGE = 12 * 3600   -- s: older plans are stale, start fresh
+
+local function CompactQueue(queue)
+    local out = {}
+    for i = 1, #queue do
+        local q = queue[i]
+        out[i] = { lo = q.lo, hi = q.hi, base = q.base, race = q.race,
+            noSplit = q.noSplit, tier = q.tier, kind = q.kind, cls = q.cls }
+    end
+    return out
+end
+
+-- called on every queue change: SavedVariables are written on /reload and
+-- logout, so whatever is here at that moment is what the next session resumes
+function SaveScanState()
+    local db = GetDB()
+    if not whoScan then
+        db.scan = nil
+        return
+    end
+    db.scan = {
+        zone = whoScan.zone,
+        mode = whoScan.mode,
+        suggest = whoScan.suggest or nil,
+        sent = whoScan.sent or 0,
+        results = whoScan.results or 0,
+        added = whoScan.added or 0,
+        splits = whoScan.splits or 0,
+        raceSplits = whoScan.raceSplits or 0,
+        speedSlices = whoScan.speedSlices or 0,
+        started = whoScan.started,
+        total = whoScan.total or #whoQueue,
+        queue = CompactQueue(whoQueue),
+        updated = time(),
+    }
+end
+
+-- returns the stored plan if it is still worth resuming
+local function LoadScanState()
+    local db = GetDB()
+    local s = db.scan
+    if type(s) ~= "table" or type(s.queue) ~= "table" or #s.queue == 0 then
+        return nil
+    end
+    local age = time() - (tonumber(s.updated) or 0)
+    if age > SCAN_RESUME_MAX_AGE or age < 0 then
+        db.scan = nil
+        return nil
+    end
+    return s
+end
+
+local function StartZoneScan(zone, manual, mode, suggest, forceNew)
     local db = GetDB()
     mode = mode or "level"
     if whoScan then
@@ -1255,6 +3119,38 @@ local function StartZoneScan(zone, manual, mode, suggest)
     if WhoPauseLeft() > 0 then
         return false, L("ERR_THROTTLE_PAUSE"):format(WhoPauseLeft())
     end
+
+    -- resume the unfinished plan before building a new one: a full level-first
+    -- scan is ~110 queries, so it almost never fits into one game session
+    if not forceNew then
+        local saved = LoadScanState()
+        -- only resume a plan of the SAME kind: a saved "who" plan must not
+        -- hijack "/nspy whoclass" (different mode, different slices)
+        if saved and (saved.mode or "level") ~= (mode or "level") then
+            saved = nil
+        end
+        if saved then
+            whoQueue = saved.queue
+            whoScan = {
+                zone = saved.zone or zone,
+                mode = saved.mode or mode,
+                sent = saved.sent or 0,
+                results = saved.results or 0,
+                added = saved.added or 0,
+                splits = saved.splits or 0,
+                raceSplits = saved.raceSplits or 0,
+                speedSlices = saved.speedSlices or 0,
+                started = saved.started,
+                total = saved.total or #whoQueue,
+                suggest = saved.suggest or suggest or nil,
+                resumed = true,
+            }
+            P(L("SCAN_RESUMED"):format(#whoQueue, whoScan.total))
+            PumpWhoQueue()
+            return true, L("QUERIES_FMT"):format(#whoQueue)
+        end
+    end
+
     whoQueue = {}
     local ml = MaxLevel()
     if mode == "class" then
@@ -1264,19 +3160,28 @@ local function StartZoneScan(zone, manual, mode, suggest)
         end
     elseif mode == "race" then
         -- race slice: r-"orc" 1-80; custom races — from the learned table
-        for locName in pairs(RaceFilterNames(db, PlayerFaction())) do
+        local races = {}
+        for locName in pairs(RaceFilterNames(db, PlayerFaction())) do races[#races + 1] = locName end
+        table.sort(races)  -- стабильный план: очередь переживает /reload
+        for _, locName in ipairs(races) do
             table.insert(whoQueue, { base = WHO_TOKEN_RACE .. "\"" .. locName .. "\"", lo = 1, hi = ml })
         end
+    elseif mode == "speed" then
+        whoQueue = SCAN.Speed(db, ml)
     else
-        -- initial wide query from level 1: on Camelot even 1-1 is overfull,
-        -- narrow level grids don't save you from the 50 cap anyway
-        table.insert(whoQueue, { lo = 1, hi = ml })
+        -- level-first plan (see SCAN.Level): levels from 1 up, classes
+        -- inside each overfull level, races inside an overfull class+level
+        whoQueue = SCAN.Level(db, ml)
+        if #whoQueue == 0 then
+            whoQueue = { { lo = 1, hi = ml } }
+        end
     end
     if #whoQueue == 0 then
         return false, L("ERR_QUEUE_EMPTY")
     end
     whoScan = { zone = zone, mode = mode, sent = 0, results = 0, added = 0, started = time(),
-        suggest = suggest or nil }
+        suggest = suggest or nil, total = #whoQueue }
+    SaveScanState()
     local fac = PlayerFaction()
     if fac then
         P(L("WHO_FACTION_COVER"):format(fac == "Alliance" and L("ALLIANCE") or L("HORDE")))
@@ -1285,13 +3190,34 @@ local function StartZoneScan(zone, manual, mode, suggest)
     return true, L("QUERIES_FMT"):format(#whoQueue)
 end
 
+-- sameNameSet: do two replies contain exactly the same players?
+-- Used to detect a server that ignores level ranges: a narrower query that
+-- returns the parent's players verbatim proves the filter was not applied.
+local function sameNameSet(a, b)
+    if type(a) ~= "table" or type(b) ~= "table" or #a ~= #b or #a == 0 then return false end
+    local left = {}
+    for i = 1, #a do left[a[i]] = (left[a[i]] or 0) + 1 end
+    for i = 1, #b do
+        local n = left[b[i]]
+        if not n or n < 1 then return false end
+        left[b[i]] = n - 1
+    end
+    return true
+end
+
 local function HandleWhoList()
     local db = GetDB()
     if not C_FriendList or not C_FriendList.GetNumWhoResults then return end
     local okN, num = pcall(C_FriendList.GetNumWhoResults)
     if not okN or not num then return end
     db.debug.whoResults = num
+    if whoTest then
+        -- a reply arrived while the probe waits — this is what the probe measures
+        whoTest.replies = whoTest.replies + 1
+        whoTest.lastNum = num
+    end
     local added = 0
+    local names = {}   -- reply contents, for the dead-level-filter guard
     local x, y = PlayerXY()
     local ownZone = PlayerZone()
     local ownZoneId = PlayerZoneId()
@@ -1306,6 +3232,7 @@ local function HandleWhoList()
                 db.debug.whoSample = table.concat(parts, "; ")
             end
             local name = info.fullName:match("^([^%-]+)%-") or info.fullName
+            names[#names + 1] = name
             local realm = PlayerRealm()  -- the suffix after the dash is unreliable; realm = current
             -- class: the beta has a ready filename field (MAGE); fallback — locale mapping
             local classFile = info.filename or ClassFileFromLocalized(info.classStr)
@@ -1313,11 +3240,53 @@ local function HandleWhoList()
             local raceLoc = info.raceStr
             local raceFile = (db.learn and db.learn.raceLoc2File and db.learn.raceLoc2File[raceLoc or ""])
                 or RACE_LOCALE[raceLoc or ""]
-            local faction = nil
-            if raceFile then
-                faction = (db.learn and db.learn.raceFaction and db.learn.raceFaction[raceFile])
-                    or RACE_FACTION[raceFile]
+            -- каноническое написание расы: сервер только что вернул его сам в
+            -- ответе на /who, значит именно эту форму он понимает в фильтре
+            -- р-"…". Для стандартных рас это мужская форма (Human), для
+            -- кастомных — единственный способ узнать канон, не угадывая между
+            -- «Небеснорожденный» и «Небеснорожденная». Используется в
+            -- RaceFilterNames с высшим приоритетом.
+            if raceFile and raceLoc and raceLoc ~= "" then
+                db.learn = db.learn or {}
+                db.learn.whoName = db.learn.whoName or {}
+                db.learn.whoName[raceFile] = raceLoc
+            elseif raceLoc and raceLoc ~= "" then
+                -- Раса пришла, но в наших таблицах её нет: без диагностики такие
+                -- записи молча теряют расу И фракцию (/who отдаёт до 10% таких),
+                -- а вместе с ними теряются комбинации «класс × раса» для
+                -- фильтра /nspy who speed. Складываем написания в debug.
+                db.debug.raceUnresolved = (db.debug.raceUnresolved or 0) + 1
+                db.debug.raceSamples = db.debug.raceSamples or {}
+                local samples = db.debug.raceSamples
+                if not samples[raceLoc] then samples[raceLoc] = true end
+            else
+                -- сервер не прислал расу вовсе (raceStr пуст) — это другое:
+                -- имя не выучить, пока клиент его не отдаст
+                db.debug.raceEmpty = (db.debug.raceEmpty or 0) + 1
             end
+            -- Один раз снимаем ВСЕ поля такой записи: нужно понять, приходит ли
+            -- раса под другим ключом, чем raceStr, или её правда нет.
+            if not raceFile and not db.debug.whoSampleNoRace then
+                local parts = {}
+                for k, v in pairs(info) do parts[#parts + 1] = tostring(k) .. "=" .. tostring(v) end
+                db.debug.whoSampleNoRace = table.concat(parts, "; ")
+            end
+            -- фракция: у стандартных рас она детерминирована справочником, у
+            -- кастомных — только если раса наблюдалась ровно в одной фракции.
+            -- Кросс-фракционной расе (Skyborne: есть и у Альянса, и у Орды)
+            -- фракцию НЕ приписываем: раньше здесь выводилось «что запомнили
+            -- последним», и ордынский Skyborne уезжал в базу как альянсовый.
+            local faction = RACE_FACTION[raceFile or ""]
+            if raceFile and not faction then
+                local set = LearnedFactions(db, raceFile)
+                if set and CountSet(set) == 1 then
+                    faction = next(set)
+                end
+            end
+            -- /who ВСЕГДА отдаёт только свою фракцию (проверено по данным: все
+            -- who-записи однозначны по фракции). Если раса не распозналась,
+            -- фракция всё равно известна — иначе игрок уезжает в базу без неё.
+            faction = faction or PlayerFaction()
             -- player zone — from the /who reply (info.area), not our current one!
             -- zoneId is known only if the zone matches ours (the API gives no id for foreign zones)
             local zone = info.area or ownZone
@@ -1345,6 +3314,16 @@ local function HandleWhoList()
         if not okRow then DbgErr("whoRow", errRow) end
     end
     db.debug.whoAdded = (db.debug.whoAdded or 0) + added
+    if whoTest then
+        -- signature of THIS reply's player set: two different queries must
+        -- never return the same players, so an identical signature means the
+        -- client redrew a cached list instead of sending a new request
+        local copy = {}
+        for i = 1, #names do copy[i] = names[i] end
+        table.sort(copy)
+        whoTest.lastSig = (#copy > 0) and table.concat(copy, ",") or ""
+        whoTest.lastCount = num
+    end
     -- hide the Who window only after our own scan, with a human-like delay
     -- (instant hiding after every reply is a bot pattern for the anti-cheat);
     -- in suggest mode we don't touch the window — the user clicks the magnifier on it
@@ -1361,22 +3340,83 @@ local function HandleWhoList()
         whoScan.results = whoScan.results + num
         whoScan.added = whoScan.added + added
         if num >= WHO_CAP and q then
-            -- 50 cap: split a wide reply by CLASS (per the user's decision:
-            -- level splitting is useless — even 1-1 is overfull); a class
-            -- slice is taken as is, not split further
-            if not (q.base and q.base:find(WHO_TOKEN_CLASS, 1, true)) then
+            if q.tier then
+                -- трехступенчатая воронка speed: полоса уровней → классы →
+                -- расы. Раскрывается ТОЛЬКО переполненный срез и только пока
+                -- не выбран потолок SCAN.SPEED_MAX.
+                local left = SCAN.SPEED_MAX - (whoScan.speedSlices or 0)
+                local slices = SCAN.SpeedTrim(SCAN.SpeedExpand(db, q, left), left)
+                if slices then
+                    for i = #slices, 1, -1 do table.insert(whoQueue, 1, slices[i]) end
+                    whoScan.speedSlices = (whoScan.speedSlices or 0) + #slices
+                    D(("/who: %d (cap) — speed tier %d → %d slices (%s %d-%d)"):format(
+                        num, q.tier, #slices, q.kind or "?", q.lo, q.hi))
+                elseif q.tier == 3 then
+                    D(("/who: %d (cap) — speed race slice %s %d-%d taken as is"):format(
+                        num, q.race or "?", q.lo, q.hi))
+                else
+                    D(("/who: %d (cap) — speed budget spent, %s %d-%d taken as is"):format(
+                        num, q.base or "level", q.lo, q.hi))
+                end
+            elseif q.noSplit then
+                -- старый план из прошлого SV: обрезанный срез не дробим
+                D(("/who: %d (cap) — surface slice %s %d-%d taken as is"):format(
+                    num, q.base or "level", q.lo, q.hi))
+            elseif not (q.base and q.base:find(WHO_TOKEN_CLASS, 1, true)) then
+                -- wide reply: split by CLASS first (a class is the smallest
+                -- filter that is known to work everywhere)
                 local sub = 0
                 for _, locName in pairs(LOCALIZED_CLASS_NAMES_MALE or {}) do
-                    table.insert(whoQueue, 1, { base = WHO_TOKEN_CLASS .. "\"" .. locName .. "\"", lo = q.lo, hi = q.hi })
+                    table.insert(whoQueue, 1, { base = WHO_TOKEN_CLASS .. "\"" .. locName .. "\"",
+                        lo = q.lo, hi = q.hi, parentSet = names })
                     sub = sub + 1
                 end
                 D(("/who: %d (cap) — splitting %d-%d into %d class slices"):format(num, q.lo, q.hi, sub))
+            elseif q.lo < q.hi then
+                -- class slice overflowed: split its level range in half. The
+                -- split is recursive, so a dense class narrows down to single
+                -- levels (level+class always fits the 50 cap: measured max is
+                -- 41 players per class per level) while a sparse one stays wide
+                -- and costs no extra clicks.
+                --
+                -- Guard: a child that returns the very same players as its
+                -- parent means the server did not apply the range at all
+                -- (10.10.2026 a beta build behaved like that). Then there is
+                -- nothing to narrow — stop the branch instead of burning
+                -- clicks on identical replies.
+                if q.parentSet and sameNameSet(names, q.parentSet) then
+                    whoScan.deadFilter = (whoScan.deadFilter or 0) + 1
+                    D(("/who: %d (cap) — %s %d-%d returned the parent's players; level filter is not applied, branch stopped")
+                        :format(num, q.base or "?", q.lo, q.hi))
+                else
+                    local mid = math.floor((q.lo + q.hi) / 2)
+                    -- depth-first: the lower half goes first, so a partial run
+                    -- still covers the levels most players actually occupy
+                    table.insert(whoQueue, 1, { base = q.base, lo = mid + 1, hi = q.hi, parentSet = names })
+                    table.insert(whoQueue, 1, { base = q.base, lo = q.lo, hi = mid, parentSet = names })
+                    whoScan.splits = (whoScan.splits or 0) + 1
+                    D(("/who: %d (cap) — %s %d-%d → %d-%d + %d-%d")
+                        :format(num, q.base or "?", q.lo, q.hi, q.lo, mid, mid + 1, q.hi))
+                end
+            elseif not q.race and q.base then
+                -- class + single level still overflows: split by RACE. Only a
+                -- handful of pairs are that dense (measured max 78 players for
+                -- one class on one level), so this tier costs ~10 extra queries
+                -- and closes the last gap in coverage.
+                local races = RaceFilterNames(db, PlayerFaction())
+                local sub = 0
+                for locName in pairs(races) do
+                    table.insert(whoQueue, 1, { base = q.base, race = locName,
+                        lo = q.lo, hi = q.hi, parentSet = names })
+                    sub = sub + 1
+                end
+                whoScan.raceSplits = (whoScan.raceSplits or 0) + 1
+                D(("/who: %d (cap) — %s level %d → %d race slices")
+                    :format(num, q.base, q.lo, sub))
             else
-                -- 10.10.2026: the server IGNORES level ranges in /who
-                -- (c-"Druid" 51-60 returned 50 with cap 30 and zero players >30
-                -- in an 8800-strong database) — level splitting is pointless,
-                -- class is the last working filter. Don't split further.
-                D(("/who: %d (cap) — %s overflowed; server ignores level ranges, taking what we get"):format(num, q.base or "?"))
+                -- race slice overflowed too: nothing narrower exists
+                D(("/who: %d (cap) — %s level %d alone is overfull, taking what we get")
+                    :format(num, q.race or q.base or "?", q.lo))
             end
         end
         PumpWhoQueue()
@@ -1560,24 +3600,24 @@ local HELP_COMMANDS = {
     "/nspy [show]", "/nspy help", "/nspy suggest",
     "/nspy who", "/nspy whostop",
     "/nspy count", "/nspy announce", "/nspy debug",
-    "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy reset",
+    "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy peer new", "/nspy reset",
     "/nspy server", "/nspy menu", "/nspy minimap", "/nspy settings",
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered (persisted, survives relog)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道收到的记录（持久保存，重登后仍在）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала (хранится в базе, видно после релога)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat (gespeichert, überlebt Relog)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré (conservé, survit au relog)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 기록 (저장되어 재접속 후에도 유지)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
 }
 local helpWin
 local EffectiveLocale -- forward: defined with the settings selectors below
 local function ShowHelpWindow()
     if not helpWin then
         helpWin = CreateFrame("Frame", "NearbySpyHelpWindow", UIParent)
-        helpWin:SetSize(670, 445)
+        helpWin:SetSize(670, 480)
         helpWin:SetPoint("CENTER")
         helpWin:SetFrameStrata("DIALOG")
         -- window stacking (18.10.2026): guarded — cosmetic, must not abort build
@@ -1683,11 +3723,52 @@ local function TacticalClassIcon(texture, classFile)
     end
 end
 
+-- Compact realm tag for the list: the channel is cluster-wide, so a row can come
+-- from another realm. Its full name ("CAMWOW EU4 Realm 6 PvP") does not fit into
+-- a 142px name column, so the part shared with OUR realm is dropped and the rest
+-- is shown ("EU4 Realm 6 PvP"). Derived from the two names — nothing invented.
+-- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
+function PeerRealmTag(realm, mine)
+    if type(realm) ~= "string" or realm == "" then return nil end
+    mine = mine or PlayerRealm()
+    if realm == mine then return nil end
+    local function Tokens(s)
+        local t = {}
+        for w in tostring(s):gmatch("%S+") do t[#t + 1] = w end
+        return t
+    end
+    local mineT, theirs = Tokens(mine), Tokens(realm)
+    -- Drop only the CLUSTER prefix ("CAMWOW"), i.e. shared tokens that carry no
+    -- digits: a shared "Realm" or "EU5" is exactly what tells the realms apart
+    -- ("CAMWOW EU5 Realm 2 PvE" must shrink to "EU5 Realm 2 PvE", not to
+    -- "2 PvE").
+    local i = 1
+    while mineT[i] and theirs[i] and mineT[i] == theirs[i] and i < #theirs
+        and not theirs[i]:find("%d") do
+        i = i + 1
+    end
+    local tag = table.concat(theirs, " ", i)
+    if tag == "" then tag = realm end
+    -- 24 chars + ellipsis: past that it collides with the profile column
+    if #tag > 24 then tag = tag:sub(1, 24) .. "..." end
+    return tag
+end
+
 local function TacticalVisible(p, now)
+    -- Foreign peer rows are hidden as soon as the "all realms" flag is off:
+    -- they were accepted while it was on, and a list that keeps showing them
+    -- would contradict the setting the user just changed. Nothing is deleted —
+    -- turning the flag back on brings them back.
+    if p.peerForeign and GetDB().peerAllRealms == false then return false end
     if tactical.filter == "fresh" then
         return now - (p.lastSeen or 0) <= TACTICAL_FRESH
     elseif tactical.filter == "new" then
         return (p.firstSeen or 0) >= tactical.started
+    elseif tactical.filter == "peer" then
+        -- Rows that arrived over the nearbyspydata channel. peerAt is written
+        -- on receipt (new row) or on refresh of a known one, so this is the
+        -- only list that shows what the channel actually delivered.
+        return (p.peerAt or 0) > 0
     end
     return true
 end
@@ -1742,6 +3823,13 @@ local function TacticalRow(parent, index)
         GameTooltip:AddLine(p.name or "?", r, g, b)
         GameTooltip:AddLine((p.classLoc or p.class or "?") .. "; " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
         GameTooltip:AddLine(L("UI_ZONE") .. ": " .. tostring(p.zone or "?"), 0.65, 0.72, 0.72)
+        if p.peerForeign and p.realm and p.realm ~= "" then
+            -- A peer record from another realm: someone else in the channel met
+            -- this player, we did not. The full realm has no room in the list,
+            -- so the row carries a short tag next to the name and the truth is
+            -- here.
+            GameTooltip:AddLine(L("UI_REALM") .. ": " .. tostring(p.realm), 0.7, 0.62, 0.45)
+        end
         GameTooltip:AddLine(L("UI_FIRST") .. ": " .. (p.firstSeen and date("%d.%m.%Y %H:%M", p.firstSeen) or "?"), 0.58, 0.65, 0.65)
         GameTooltip:AddLine(L("UI_CONTACT") .. ": " .. (p.lastSeen and date("%d.%m.%Y %H:%M", p.lastSeen) or "?"), 0.58, 0.65, 0.65)
         GameTooltip:AddLine(L("UI_SOURCE") .. ": " .. tostring(p.source or "?"), 0.45, 0.72, 0.62)
@@ -1759,7 +3847,13 @@ end
 local function TacticalRows()
     for _, row in ipairs(tactical.rows) do row:Hide() end
     local now, shown = time(), 0
-    for _, p in ipairs(SortedPlayers(GetDB())) do
+    local list = SortedPlayers(GetDB())
+    if tactical.filter == "peer" then
+        -- The peer list is ordered by arrival of the packet, not by our own
+        -- sighting: for a player someone else met, lastSeen may be long stale.
+        table.sort(list, function(a, b) return (a.peerAt or 0) > (b.peerAt or 0) end)
+    end
+    for _, p in ipairs(list) do
         if TacticalVisible(p, now) then
             -- check the limit BEFORE counting: incrementing first returned 501
             -- and sized the scroll list for 501 rows while only 500 were drawn
@@ -1770,12 +3864,22 @@ local function TacticalRows()
             row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
             row.player = p
             TacticalClassIcon(row.icon, p.class)
-            row.name:SetText(p.name or "?")
+            -- Foreign realm: the tag rides with the NAME (dim), never with the
+            -- ZONE column — that column is for locations and stays honest.
+            local realmTag = p.peerForeign and PeerRealmTag(p.realm) or nil
+            row.name:SetText(realmTag
+                and (tostring(p.name or "?") .. " |cff9a8f78" .. realmTag .. "|r")
+                or (p.name or "?"))
             row.name:SetTextColor(ClassColorRGB(p.class))
             row.profile:SetText(("%s; %s%s"):format(p.classLoc or p.class or "?", L("LVL_PREFIX"), tostring(p.level or "?")))
+            -- Peer records carry no position or zone at all (the packet has
+            -- neither), so a peer row honestly has no zone.
             row.zone:SetText(p.zone or "?")
-            local age = now - (p.lastSeen or 0)
-            row.seen:SetText(TimeAgo(p.lastSeen))
+            -- In the peer list the CONTACT column answers "when did this arrive
+            -- over the channel", which is the only timestamp a peer row has.
+            local stamp = (tactical.filter == "peer" and p.peerAt) or p.lastSeen
+            local age = now - (stamp or 0)
+            row.seen:SetText(TimeAgo(stamp))
             if age <= 300 then row.seen:SetTextColor(0.3, 0.9, 0.62)
             elseif age <= 3600 then row.seen:SetTextColor(0.88, 0.72, 0.32)
             else row.seen:SetTextColor(0.45, 0.5, 0.5) end
@@ -1787,7 +3891,7 @@ local function TacticalRows()
 end
 
 local function TacticalStats()
-    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
+    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
     local now = time()
     for _, p in pairs(GetDB().players) do
         st.total = st.total + 1
@@ -1796,6 +3900,10 @@ local function TacticalStats()
         if age <= 900 then st.f15 = st.f15 + 1 end
         if age <= 3600 then st.f60 = st.f60 + 1 end
         if (p.firstSeen or 0) >= tactical.started then st.newN = st.newN + 1 end
+        if (p.peerAt or 0) > 0 and not (p.peerForeign and GetDB().peerAllRealms == false) then
+            st.peerN = st.peerN + 1
+            if p.peerNew then st.peerNewN = st.peerNewN + 1 end
+        end
         if p.faction == "Alliance" then st.alliance = st.alliance + 1
         elseif p.faction == "Horde" then st.horde = st.horde + 1
         else st.unknown = st.unknown + 1 end
@@ -1919,6 +4027,7 @@ TacticalUpdate = function()
         tactical.filters.all.label:SetText(L("UI_ALL") .. " " .. st.total)
         tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. st.f5)
         tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. st.newN)
+        tactical.filters.peer.label:SetText(L("UI_PEER") .. " " .. st.peerN)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
         tactical.status:SetText("|cff45dc9b+|r " .. L("UI_LIVE") .. " ; " .. TacticalSources())
@@ -2042,6 +4151,8 @@ local function BuildWindow()
     local toolbar = TacticalPanel(win)
     toolbar:SetPoint("TOPLEFT", 16, -224); toolbar:SetSize(668, 31)
     TacticalFilter(toolbar, "all", 6); TacticalFilter(toolbar, "fresh", 122); TacticalFilter(toolbar, "new", 238)
+    -- 4th tile: rows that arrived over the nearbyspydata channel (peerAt)
+    TacticalFilter(toolbar, "peer", 354)
     tactical.count = NewText(toolbar, 9, 0.6, 0.53, 0.4); tactical.count:SetPoint("RIGHT", -9, 0)
 
     local tableHeader = CreateFrame("Frame", nil, win)
@@ -2158,6 +4269,10 @@ local function BuildServerWindow()
     -- heat grid: 7 days x 24 hours, amber on a log scale (same curve as the site)
     local heatPanel = Panel(-108, 170)
     local ht = NewText(heatPanel, 9, 0.62, 0.55, 0.42); ht:SetPoint("TOPLEFT", 8, -7); ht:SetText(L("SVR_PRIME"))
+    -- the heat title carries its scope: prime time is a per-realm number, and a
+    -- title that says "PRIME TIME" over an all-realms aggregate reads as if it
+    -- described this realm
+    svr.heatTitle = ht
     svr.heatCells = {}
     for d = 1, 7 do
         local dl = NewText(heatPanel, 8, 0.55, 0.47, 0.32)
@@ -2222,18 +4337,35 @@ local function FillServerWindow()
         g = data.games[db.game] or data.games.forever
     end
     -- datapack format 2: предпочитаем срез текущего мира (мегасерверы
-    -- Forever разделены по realm), иначе — общий агрегат игры
-    local scope = nil
+    -- Forever разделены по realm), иначе — общий агрегат игры.
+    -- Prime time is a per-realm number: two realms of one cluster peak at
+    -- different hours, so an aggregate heat map is a different statistic, not a
+    -- coarser one. It is still shown as a fallback, but always labelled with its
+    -- scope and, when the datapack has per-realm slices but not ours, said out
+    -- loud instead of quietly mixing realms.
+    local scope, realmNote = nil, nil
     local realm = PlayerRealm()
     if g and type(g.realms) == "table" and realm and realm ~= "?" and type(g.realms[realm]) == "table" then
         g = g.realms[realm]
         scope = realm
+    elseif g and type(g.realms) == "table" and realm and realm ~= "?" then
+        realmNote = L("SVR_NO_REALM"):format(realm)
+    elseif g and realm and realm ~= "?" then
+        -- format 1 snapshot: it has no realms at all, so this is a stale data
+        -- module rather than a missing realm
+        realmNote = L("SVR_NO_REALM"):format(realm)
     end
     if serverWin and serverWin.TitleText then
         serverWin.TitleText:SetText(L("SVR_TITLE") .. " — " .. (scope or L("SVR_SCOPE_ALL")))
     end
+    if svr.heatTitle then
+        svr.heatTitle:SetText(L("SVR_PRIME") .. " — " .. (scope or L("SVR_SCOPE_ALL")))
+    end
     if not g then
         svr.nodata:SetText(L("SVR_NODATA")); svr.nodata:Show()
+        -- drop the previous scope too: a stale "— <realm>" over an empty grid
+        -- would claim data the module does not have
+        if svr.heatTitle then svr.heatTitle:SetText(L("SVR_PRIME")) end
         svr.date:SetText(""); svr.stale:SetText(""); svr.total:SetText(""); svr.factions:SetText("")
         svr.peak:SetText(""); svr.zones:SetText("")
         for d = 1, 7 do for h = 0, 23 do svr.heatCells[d][h]:SetColorTexture(0.94, 0.73, 0.04, 0.04) end end
@@ -2249,7 +4381,11 @@ local function FillServerWindow()
     local gen = tonumber(data.generated) or 0
     svr.date:SetText(L("SVR_SNAPSHOT"):format(gen > 0 and date("%d.%m.%Y", gen) or "?"))
     local ageDays = gen > 0 and math.floor((time() - gen) / 86400) or 0
-    if ageDays > 10 then svr.stale:SetText(L("SVR_STALE"):format(ageDays)) else svr.stale:SetText("") end
+    local staleText = ageDays > 10 and L("SVR_STALE"):format(ageDays) or ""
+    if realmNote then
+        staleText = staleText ~= "" and (staleText .. " ; " .. realmNote) or realmNote
+    end
+    svr.stale:SetText(staleText)
 
     svr.total:SetText(fmt(tonumber(g.total) or 0))
     local f = g.factions or {}
@@ -2360,6 +4496,8 @@ local hubWin
 local hub = {}
 local miniBtn
 local ShowSettingsWindow -- forward: hub tile 4 opens the settings window (defined below)
+local MinimapButton_Update   -- forward: the settings checkbox toggles the icon (defined below)
+local BuildMinimapButton     -- forward: showing the icon builds it if it never existed
 local Atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 
 local function Utf8First(s)
@@ -2379,17 +4517,25 @@ local function AddonVersion()
     return v or "?"
 end
 
-local function HubRefreshStatus()
+function hub.Refresh()
     if not hubWin then return end
     local db = GetDB()
     hub.status:SetText(L("HUB_STATUS"):format(CountPlayers(),
         db.peerEnabled and L("ON") or L("OFF"), AddonVersion()))
 end
 
+-- Размеры сетки хаба: подписи на кириллице шире латиницы, и в прежних
+-- 96x78 они не влезали — текст вылезал за ячейку и наезжал на соседнюю.
+-- Размеры сетки хаба одной таблицей: в Lua 5.1 на главный чанк приходится
+-- не больше 200 локалов, а четыре отдельные константы съедают четыре слота.
+-- Высота с запасом на худший случай: при переносе и подписи, и описания на две
+-- строки содержимое занимает ~94px (плитка 32 + 2×13 + 2×11 + отступы).
+local HUBG = { w = 110, h = 96, col = 122, row = 104 }
+
 local function HubCell(parent, col, row, labelKey, descKey, lr, lg, lb, onClick)
     local cell = CreateFrame("Button", nil, parent)
-    cell:SetSize(96, 78)
-    cell:SetPoint("TOPLEFT", 14 + col * 104, -56 - row * 86)
+    cell:SetSize(HUBG.w, HUBG.h)
+    cell:SetPoint("TOPLEFT", 14 + col * HUBG.col, -58 - row * HUBG.row)
     local bg = cell:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0.11, 0.085, 0.045, 1)
@@ -2405,9 +4551,13 @@ local function HubCell(parent, col, row, labelKey, descKey, lr, lg, lb, onClick)
     letter:SetText(Utf8First(L(labelKey)))
     local label = NewText(cell, 10, 0.9, 0.88, 0.8)
     label:SetPoint("TOP", tile, "BOTTOM", 0, -3)
+    -- SetWidth включает перенос: без него длинная подпись просто вылезает
+    -- за границы ячейки (клиппинга у FontString нет)
+    label:SetWidth(HUBG.w - 10)
     label:SetText(L(labelKey))
     local desc = NewText(cell, 8, 0.55, 0.47, 0.32)
     desc:SetPoint("TOP", label, "BOTTOM", 0, -1)
+    desc:SetWidth(HUBG.w - 10)
     desc:SetText(L(descKey))
     cell:SetScript("OnClick", onClick)
     return cell, desc
@@ -2433,7 +4583,7 @@ local function BuildHubWindow()
         x:SetText("x")
         hubWin.CloseButton = btn
     end
-    hubWin:SetSize(228, 252)
+    hubWin:SetSize(260, 274)
     hubWin:SetPoint("CENTER")
     SolidUnderlay(hubWin)
     hubWin:SetFrameStrata("DIALOG")
@@ -2459,6 +4609,9 @@ local function BuildHubWindow()
 
     hub.status = NewText(hubWin, 8, 0.62, 0.55, 0.42)
     hub.status:SetPoint("TOPLEFT", 15, -36)
+    -- ширина с переносом: русский статус («42 записей — обмен вкл — v1.3.0»)
+    -- длиннее английского и вылезал за окно
+    hub.status:SetWidth(230)
 
     HubCell(hubWin, 0, 0, "HUB_PLAYERS", "HUB_PLAYERS_D", 0.55, 0.75, 1.0,
         function() ShowWindow() end)
@@ -2471,13 +4624,13 @@ local function BuildHubWindow()
         end)
     HubCell(hubWin, 1, 1, "HUB_SETTINGS", "HUB_SETTINGS_D", 0.75, 0.75, 0.78,
         function() ShowSettingsWindow() end)
-    HubRefreshStatus()
+    hub.Refresh()
 end
 
 local function ShowHubWindow()
     local ok, err = pcall(function()
         if not hubWin then BuildHubWindow() end
-        HubRefreshStatus()
+        hub.Refresh()
         hubWin:Show()
     end)
     if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
@@ -2761,7 +4914,7 @@ local function BuildSettingsWindow()
             closeBtn:SetScript("OnClick", function() win:Hide() end)
         end
     end
-    win:SetSize(380, 300)
+    win:SetSize(380, 412)
     win:SetPoint("CENTER")
     SolidUnderlay(win)
     win:SetFrameStrata("DIALOG")
@@ -2795,10 +4948,36 @@ local function BuildSettingsWindow()
                 peerQueue, peerQueued = {}, {}
                 if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
             end
-            HubRefreshStatus()
+            hub.Refresh()
         end)
 
-    opt.lang = OptSelect(win, -104, "NearbySpyLangDD", "SET_LANG", "SET_LANG_D", 190,
+    opt.allRealms, opt.allRealmsLabel, opt.allRealmsDesc = OptCheck(win, 16, -104,
+        "SET_PEER_ALL", "SET_PEER_ALL_D",
+        function() return GetDB().peerAllRealms and true or false end,
+        function(v)
+            local db = GetDB()
+            db.peerAllRealms = v
+            -- Both directions change what the list shows, so repaint it right
+            -- away: with the flag off stored foreign rows disappear, with it on
+            -- they come back (nothing is deleted either way).
+            if win and win.IsShown and win:IsShown() then pcall(TacticalUpdate) end
+            if hub and hub.Refresh then pcall(hub.Refresh) end
+        end)
+
+    opt.minimap, opt.minimapLabel, opt.minimapDesc = OptCheck(win, 16, -156, "SET_MINIMAP", "SET_MINIMAP_D",
+        function() return not GetDB().minimapHide end,
+        function(v)
+            local db = GetDB()
+            -- stored inverted: minimapHide keeps old saved variables working
+            db.minimapHide = not v
+            -- the icon is created lazily; if the user shows it before it was
+            -- ever built, build it first — then the update places it (hiding
+            -- then showing must leave a button on screen, not nothing)
+            if v and not miniBtn and BuildMinimapButton then pcall(BuildMinimapButton) end
+            if MinimapButton_Update then MinimapButton_Update() end
+        end)
+
+    opt.lang = OptSelect(win, -208, "NearbySpyLangDD", "SET_LANG", "SET_LANG_D", 190,
         LangEntries,
         function() return GetDB().locale or "AUTO" end,
         function(v)
@@ -2808,7 +4987,7 @@ local function BuildSettingsWindow()
             P(L("SET_RELOAD"))
         end)
 
-    opt.tz = OptSelect(win, -186, "NearbySpyTzDD", "SET_TZ", "SET_TZ_D", 190,
+    opt.tz = OptSelect(win, -290, "NearbySpyTzDD", "SET_TZ", "SET_TZ_D", 190,
         TzEntries,
         function()
             local off = GetDB().tzOffset
@@ -2829,6 +5008,10 @@ RefreshSettingsText = function()
     if tt and tt.SetText then tt:SetText(L("HUB_SETTINGS")) end
     if opt.peerLabel then opt.peerLabel:SetText(L("SET_PEER")) end
     if opt.peerDesc then opt.peerDesc:SetText(L("SET_PEER_D")) end
+    if opt.allRealmsLabel then opt.allRealmsLabel:SetText(L("SET_PEER_ALL")) end
+    if opt.allRealmsDesc then opt.allRealmsDesc:SetText(L("SET_PEER_ALL_D")) end
+    if opt.minimapLabel then opt.minimapLabel:SetText(L("SET_MINIMAP")) end
+    if opt.minimapDesc then opt.minimapDesc:SetText(L("SET_MINIMAP_D")) end
     if opt.lang then
         opt.lang.label:SetText(L("SET_LANG"))
         opt.lang.desc:SetText(L("SET_LANG_D"))
@@ -2845,6 +5028,7 @@ ShowSettingsWindow = function()
     local ok, err = pcall(function()
         if not optWin then BuildSettingsWindow() end
         if opt.peer then opt.peer:SetChecked(GetDB().peerEnabled and true or false) end
+        if opt.allRealms then opt.allRealms:SetChecked(GetDB().peerAllRealms and true or false) end
         if opt.lang then opt.lang.Refresh() end
         if opt.tz then opt.tz.Refresh() end
         optWin:Show()
@@ -2852,7 +5036,7 @@ ShowSettingsWindow = function()
     if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
 end
 
-local function MinimapButton_Update()
+function MinimapButton_Update()
     if not miniBtn or not Minimap then return end
     local db = GetDB()
     if db.minimapHide then
@@ -2867,22 +5051,101 @@ local function MinimapButton_Update()
     miniBtn:Show()
 end
 
-local function BuildMinimapButton()
+function BuildMinimapButton()
     if miniBtn or not Minimap then return end
+    -- 31x31 как в Mastercraft/LibDBIcon: при этом размере центр кнопки
+    -- (15.5) точно совпадает с центром нарисованного кольца (15.5)
+    local BTN_SIZE = 31
+    -- Иконка крупная и КРУГЛАЯ: исходник — непрозрачный квадрат 64x64, поэтому
+    -- при увеличении его углы вылезали бы за обод, а собственные светлые края
+    -- картинки читались как «рамка по бокам». Круглая маска
+    -- TempPortraitAlphaMask (подтверждена в исходниках билда: её используют ~80
+    -- мест FrameXML, есть и Texture:SetMask, и MaskTexture) срезает углы, а
+    -- края картинки уходят под золотой обод.
+    local ICON_SIZE = 27      -- с маской: чуть отступает от обода кольца
+    local ICON_SIZE_SAFE = 24 -- без маски: крупный квадрат вылез бы из кольца
     miniBtn = CreateFrame("Button", "NearbySpyMinimapButton", Minimap)
-    miniBtn:SetSize(28, 28)
+    miniBtn:SetSize(BTN_SIZE, BTN_SIZE)
     miniBtn:SetFrameStrata("MEDIUM")
+    -- уровень как у Mastercraft: иначе кнопка прячется под соседними элементами
+    -- миникарты (лупа, календарь рисуются выше)
+    miniBtn:SetFrameLevel(8)
     miniBtn:SetMovable(true)
     miniBtn:RegisterForDrag("LeftButton")
     miniBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    local disc = miniBtn:CreateTexture(nil, "BACKGROUND")
-    disc:SetSize(26, 26)
-    disc:SetPoint("CENTER")
-    disc:SetColorTexture(0.06, 0.05, 0.03, 0.9)
+    -- штатная подсветка кнопок миникарты (как в Mastercraft): WHITE8x8 с
+    -- вершинным цветом выглядела как прямоугольная заливка
+    pcall(function()
+        miniBtn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    end)
+
+    -- Схема кнопки взята из Mastercraft (Interface/AddOns/Mastercraft/Core.lua)
+    -- — эта кнопка у пользователя выглядит правильно, и она же повторяет
+    -- LibDBIcon, на котором висят кнопки тысяч аддонов:
+    --     кнопка 31x31, frameLevel 8
+    --     подложка 24x24 по CENTER  (UI-Minimap-Background)
+    --     иконка   18x18 по CENTER
+    --     кольцо   50-53 по TOPLEFT БЕЗ офсета (MiniMap-TrackingBorder)
+    --
+    -- Почему это работает, хотя кольцо прижато к углу: видимое кольцо в
+    -- текстуре НЕ центрировано. Blizzard сама ставит эту текстуру с офсетом
+    -- CENTER (11,-12), то есть у текстуры 53x53 центр нарисованного кольца
+    -- лежит в (53/2-11, 53/2-12) = (15.5, 14.5) от угла. У кнопки 31x31 центр
+    -- как раз (15.5, 15.5) — совпадает. Мой прежний расчёт принимал офсет за
+    -- 10px, из-за чего кольцо уезжало на 6px: это и было «смещена от иконки».
+    -- Иконка строится ПЕРВОЙ: её итоговый размер зависит от того, есть ли в
+    -- клиенте круглая маска, и подложка должна получить размер уже после этого
+    -- (иначе фон торчит из-под маленькой иконки). Порядок создания не влияет на
+    -- порядок отрисовки — он задаётся слоями BACKGROUND/ARTWORK/OVERLAY.
     local icon = miniBtn:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(22, 22)
-    icon:SetPoint("CENTER")
+    -- Маска ставится ДО текстуры: в клиенте отмечено, что маска перезаписывает
+    -- tex coords, поэтому порядок «маска → текстура», как в самом Blizzard.
+    local masked = pcall(function()
+        icon:SetMask("Interface\\CharacterFrame\\TempPortraitAlphaMask")
+    end)
+    local iconSize = ICON_SIZE
+    if not masked then
+        -- маски нет (чужой клиент): крупный квадрат вылез бы за обод, поэтому
+        -- возвращаемся к размеру, который целиком помещается в отверстие
+        iconSize = ICON_SIZE_SAFE
+    end
+    icon:SetSize(iconSize, iconSize)
+    -- 1px вправо: обод нарисован неравномерно по толщине, и математический
+    -- центр читается как «иконка чуть левее». Подложка остаётся по центру.
+    icon:SetPoint("CENTER", 1, 0)
     icon:SetTexture("Interface\\AddOns\\NearbySpy\\NearbySpyIcon")
+    -- Подложка — тоже КРУГ и того же размера, что иконка. Квадратную подложку
+    -- оставлять нельзя: её углы торчали бы из-под круглой иконки тёмными
+    -- клиньями за ободом (ровно тот «квадрат», с которого всё началось).
+    -- Без маски в клиенте подложку делаем на 1px меньше — тогда она целиком
+    -- прячется за квадратной же иконкой.
+    local disc = miniBtn:CreateTexture(nil, "BACKGROUND")
+    local bgSize = masked and iconSize or (iconSize - 1)
+    disc:SetSize(bgSize, bgSize)
+    disc:SetPoint("CENTER")
+    if masked then
+        pcall(function()
+            disc:SetMask("Interface\\CharacterFrame\\TempPortraitAlphaMask")
+        end)
+    end
+    -- именно == false: часть версий API возвращает nil при успехе, и проверка
+    -- на ложность вернула бы квадрат поверх круга
+    if disc:SetTexture("Interface\\Minimap\\UI-Minimap-Background") == false then
+        -- текстуры нет (чужой клиент/пережатые ресурсы) — остаётся плоский фон:
+        -- кнопка некрасивая, зато видимая и кликабельная
+        disc:SetColorTexture(0.06, 0.05, 0.03, 0.9)
+    end
+
+    -- Полупрозрачность: иконка читается как «под стеклом» кольца, и её
+    -- квадратные углы меньше спорят с круглой формой кнопки.
+    icon:SetAlpha(0.85)
+
+    -- Кольцо по TOPLEFT без офсета — так же, как в Mastercraft и LibDBIcon.
+    -- Кладём в OVERLAY, чтобы перекрывало края иконки.
+    local ring = miniBtn:CreateTexture(nil, "OVERLAY")
+    ring:SetSize(53, 53)
+    ring:SetPoint("TOPLEFT")
+    ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
     local function onDragUpdate()
         local okC, mx, my = pcall(Minimap.GetCenter, Minimap)
         if not okC or not mx then return end
@@ -2941,26 +5204,43 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         P(db.minimapHide and L("MM_OFF") or L("MM_ON"))
     elseif msg == "settings" or msg == "options" then
         ShowSettingsWindow()
+    elseif msg == "whotest" or msg:match("^whotest%s") then
+        -- diagnostic: probe the programmatic /who gate on this build
+        --   /nspy whotest              three send paths, 15 s each
+        --   /nspy whotest gap 150 4    four button clicks, 150 s apart
+        StartWhoTest(msg:match("^whotest%s+(.*)$"))
     elseif msg == "whostop" then
         if whoScan then
             FinishZoneScan("stopped manually")
         else
             P(L("SCAN_NOT_RUNNING"))
         end
-    elseif msg == "suggest" or msg == "who" or msg == "whoclass" or msg == "whorace" then
+    elseif msg == "suggest" or msg == "who" or msg == "whoclass" or msg == "whorace"
+        or msg == "who new" or msg == "whospeed" or msg == "who speed"
+        or msg == "who speed new" then
         -- assisted /who (70291): programmatic sends are hardware-gated by the
         -- server — only the user's click on the magnifier gets a reply. All
         -- scan commands are assisted; repeating a command stops the scan.
+        local forceNew = (msg == "who new" or msg == "who speed new")
+        if msg == "who new" then msg = "who" end
+        if msg == "who speed new" then msg = "who speed" end
         if whoScan then
             FinishZoneScan("stopped manually")
+            if forceNew then
+                -- "who new" doubles as "stop and forget", so the next run is fresh
+                GetDB().scan = nil
+                P(L("SCAN_FORGOTTEN"))
+            end
         else
             -- suggest/whoclass go straight to class slices: a wide 1-60 is
             -- pointless — on this server even 1-1 is overfull, the first click
             -- always hits the 50 cap
-            local mode = ({ suggest = "class", who = "level", whoclass = "class", whorace = "race" })[msg]
-            local ok, info = StartZoneScan(PlayerZone() or "?", true, mode, true)
+            local mode = ({ suggest = "class", who = "level", whoclass = "class",
+                whorace = "race", whospeed = "speed", ["who speed"] = "speed" })[msg]
+            local ok, info = StartZoneScan(PlayerZone() or "?", true, mode, true, forceNew)
             if ok then
                 P(L("SUGGEST_STARTED"))
+                if mode == "speed" then P(L("WHO_SPEED_ON")) end
             else
                 P(L("SUGGEST_FAILED") .. tostring(info))
             end
@@ -2983,12 +5263,15 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         local ok, err = pcall(JoinPeerChannel)
         if not ok then DbgErr("peerJoin", err) end
         P(L("PEER_ON"):format(PEER_CHANNEL))
+        D(("Peer join attempt: channel=%s"):format(tostring(GetChannelName(PEER_CHANNEL))))
+        if PeerSync then pcall(PeerSync) end
     elseif msg == "peer off" then
         db.peerEnabled = false
         peerQueue, peerQueued = {}, {}
         if peerChatVisible then pcall(SetPeerChatVisible, false) end
         if LeaveChannelByName then pcall(LeaveChannelByName, PEER_CHANNEL) end
         P(L("PEER_OFF"))
+        if PeerSync then pcall(PeerSync) end
     elseif msg == "peer chat on" or msg == "peer chat off" then
         local visible = msg == "peer chat on"
         local ok, result = pcall(SetPeerChatVisible, visible)
@@ -2997,15 +5280,76 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         else
             P("Peer channel visibility unavailable: " .. tostring(result))
         end
+    elseif msg == "peer new" or msg == "peer list" then
+        -- Everything the channel actually delivered, straight from the database:
+        -- peerAt/peerNew are persisted, so this list survives a relog, unlike
+        -- the in-memory counters printed by plain /nspy peer.
+        local list, fresh, foreign = {}, 0, 0
+        for _, p in pairs(db.players) do
+            if (p.peerAt or 0) > 0 then
+                list[#list + 1] = p
+                if p.peerNew then fresh = fresh + 1 end
+                if p.peerForeign then foreign = foreign + 1 end
+            end
+        end
+        if #list == 0 then
+            P(L("PEER_LIST_EMPTY"):format(PEER_CHANNEL))
+        else
+            table.sort(list, function(a, b) return (a.peerAt or 0) > (b.peerAt or 0) end)
+            local shown = #list > 20 and 20 or #list
+            P(L("PEER_LIST_HEAD"):format(#list, fresh, shown))
+            if foreign > 0 then P(L("PEER_LIST_FOREIGN"):format(foreign)) end
+            for i = 1, shown do
+                local p = list[i]
+                P(("%d. %s (%s %s, %s) - %s, %s%s"):format(i, p.name or "?",
+                    p.class or "?", tostring(p.level or "?"), p.faction or "?",
+                    p.peerNew and L("PEER_TAG_NEW") or L("PEER_TAG_UPD"),
+                    TimeAgo(p.peerAt),
+                    p.peerForeign and (" [" .. PeerEsc(p.realm or "?", 40) .. "]") or ""))
+            end
+        end
     elseif msg == "peer" then
         P(L("PEER_STATUS"):format(
             db.peerEnabled and L("ON") or L("OFF"), tostring(GetChannelName(PEER_CHANNEL)),
             #peerQueue, peerStats.sent, peerStats.received, peerStats.dropped,
             db.debug.peerSendError and (", error=" .. db.debug.peerSendError) or ""))
-        P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, chat=%s, lastSender=%s")
+        P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, merged=%d, foreign=%d, selfEcho=%d, chat=%s, lastSender=%s")
             :format(peerStats.seen, peerStats.valid, peerStats.rejected,
-                peerStats.valid - peerStats.received, peerChatVisible and "ON" or "OFF",
+                peerStats.valid - peerStats.received - peerStats.merged, peerStats.merged,
+                peerStats.foreign, peerStats.selfEcho, peerChatVisible and "ON" or "OFF",
                 peerStats.lastSender or "-"))
+        -- counters of the LAST logged session: the only cross-session proof that
+        -- the channel carries anything at all (memory-only stats die on logout)
+        local last = type(db.debug) == "table" and db.debug.peer or nil
+        if type(last) == "table" then
+            P(("Peer last session: sent=%d received=%d merged=%d foreign=%d selfEcho=%d seen=%d valid=%d rejected=%d channel=%s lastSender=%s")
+                :format(last.sent or 0, last.received or 0, last.merged or 0, last.foreign or 0,
+                    last.selfEcho or 0, last.seen or 0, last.valid or 0, last.rejected or 0,
+                    tostring(last.channel), PeerEsc(last.lastSender or "-", 40)))
+        else
+            P("Peer last session: no saved counters yet (written on logout)")
+        end
+    elseif msg == "world" then
+        local vendors, items, fish = WR.Counts()
+        P(L("WORLD_STATUS"):format(vendors, items, fish))
+    elseif msg == "probe" then
+        -- этап 0 сбора данных мира: снять в SV состав API и пробу окон
+        local api = ProbeRun()
+        local have, miss, absent = 0, 0, {}
+        for _, name in ipairs(PROBE_API) do
+            if api[name] == 1 then
+                have = have + 1
+            else
+                miss = miss + 1
+                absent[#absent + 1] = name
+            end
+        end
+        P(L("PROBE_ON"):format(have, miss))
+        if #absent > 0 then P("no API: " .. table.concat(absent, ", ")) end
+        P(L("PROBE_HINT"))
+    elseif msg == "probe off" then
+        db.probeOn = false
+        P(L("PROBE_OFF"))
     elseif msg == "reset" then
         db.players = {}
         newThisSession = 0
@@ -3050,6 +5394,7 @@ end
 chatFrame:RegisterEvent("CHAT_MSG_SAY")
 chatFrame:RegisterEvent("CHAT_MSG_YELL")
 chatFrame:RegisterEvent("CHAT_MSG_CHANNEL")
+chatFrame:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
 chatFrame:SetScript("OnEvent", function(self, event, ...)
     -- all parsing under pcall: if the beta returns the name as a secret string
     -- (such were caught in combat via canaccessvalue), string operations would
@@ -3059,6 +5404,24 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
     -- function can't see the outer `...` — Lua 5.1 (client) raises the compile
     -- error "cannot use '...' outside a vararg function", luaparser missed that.
     local okP, errP = pcall(function(ev, ...)
+        if ev == "CHAT_MSG_CHANNEL_NOTICE" then
+            -- Ground truth about the channel population: JOIN/LEAVE notices name
+            -- the addon users actually sitting in nearbyspydata. The event fires
+            -- for EVERY channel we are in (Trade/General flood it), so only
+            -- notices that mention our channel are kept. Raw arg dump is
+            -- debug-mode only (stealth mode keeps the chat clean); the SV ring
+            -- gets it in both modes through D().
+            local okN, errN = pcall(function(...)
+                local parts = {}
+                for i = 1, 9 do parts[i] = PeerEsc(select(i, ...), 40) end
+                local line = table.concat(parts, " | ")
+                if line:lower():find(PEER_CHANNEL, 1, true) then
+                    D("Channel notice: " .. line)
+                end
+            end, ...)
+            if not okN then DbgErr("channelNotice", errN) end
+            return
+        end
         if ev == "CHAT_MSG_CHANNEL" and
             (IsPeerChannel(select(9, ...)) or IsPeerChannel(select(4, ...))) then
             ReceivePeerMessage(select(1, ...), select(2, ...))
@@ -3111,6 +5474,10 @@ frame:RegisterEvent("ADDON_ACTION_FORBIDDEN")
 frame:RegisterEvent("MACRO_ACTION_BLOCKED")
 frame:RegisterEvent("MACRO_ACTION_FORBIDDEN")
 frame:RegisterEvent("LUA_WARNING")
+-- этап 0 сбора данных мира: окна торговца и улова (обработчики выходят сразу,
+-- если проба не включена — регистрация ничего не стоит)
+frame:RegisterEvent("MERCHANT_SHOW")
+frame:RegisterEvent("LOOT_OPENED")
 
 frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
@@ -3124,6 +5491,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         if db.peerEnabled then
             local ok, err = pcall(JoinPeerChannel)
             if not ok then DbgErr("peerJoin", err) end
+            pcall(PeerLogChannel, "join")
             -- channels may not be ready at PLAYER_LOGIN (GetChannelName = nil):
             -- one retry after 30s if the channel is still not up
             if C_Timer and C_Timer.After then
@@ -3134,6 +5502,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
                         local okR, errR = pcall(JoinPeerChannel)
                         if not okR then DbgErr("peerJoinRetry", errR) end
                     end
+                    pcall(PeerLogChannel, "join retry")
                 end)
             end
         end
@@ -3197,6 +5566,16 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     elseif event == "HARDCORE_DEATHS" then
         local okE, errE = pcall(RecordHardcoreDeath, arg1)
         if not okE then DbgErr("hardcoreDeaths", errE) end
+    elseif event == "MERCHANT_SHOW" then
+        local okC, errC = pcall(WR.CollectVendor)
+        if not okC then DbgErr("vendor", errC) end
+        local okE, errE = pcall(ProbeMerchant)
+        if not okE then DbgErr("probeMerchant", errE) end
+    elseif event == "LOOT_OPENED" then
+        local okC, errC = pcall(WR.CollectFishing)
+        if not okC then DbgErr("fishing", errC) end
+        local okE, errE = pcall(ProbeLoot)
+        if not okE then DbgErr("probeLoot", errE) end
     elseif event == "CHAT_MSG_SYSTEM" then
         -- custom server messages ("Интересная операция…") arrive via system chat
         local okE, errE = pcall(function()

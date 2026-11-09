@@ -91,6 +91,29 @@ class PeerPriorityTests(unittest.TestCase):
         player = self.db["players"]["Alice-Home"]
         self.assertEqual("Horde", player["faction"])
 
+    # --- peer provenance for the list filter (1.5.1) -------------------
+    def test_row_first_learned_from_peer_is_tagged_new(self):
+        self.upsert("peer", level=20, **{"class": "MAGE"})
+        player = self.db["players"]["Alice-Home"]
+        self.assertEqual(1000, player["peerAt"])
+        self.assertTrue(player["peerNew"])
+
+    def test_peer_refresh_of_known_row_keeps_provenance_without_new_tag(self):
+        self.upsert("unit", level=20, **{"class": "MAGE"})
+        self.assertIsNone(self.db["players"]["Alice-Home"]["peerAt"])
+        self.upsert("peer", level=20, **{"class": "MAGE"})
+        player = self.db["players"]["Alice-Home"]
+        self.assertEqual(1000, player["peerAt"])
+        # the player was first known from a real sighting, not from the channel
+        self.assertIsNone(player["peerNew"])
+
+    def test_local_sighting_does_not_clear_peer_provenance(self):
+        self.upsert("peer", level=20, **{"class": "MAGE"})
+        self.upsert("unit", level=20, **{"class": "MAGE"})
+        player = self.db["players"]["Alice-Home"]
+        self.assertEqual(1000, player["peerAt"])
+        self.assertTrue(player["peerNew"])
+
 
 if __name__ == "__main__":
     unittest.main()

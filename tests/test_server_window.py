@@ -82,6 +82,7 @@ local LOCALE_EN = {
     SVR_NODATA = "No data module found. Install NearbySpy_Data (datapack-latest release) next to NearbySpy.",
     SVR_STALE = "snapshot %d days old - update NearbySpy_Data",
     SVR_SCOPE_ALL = "All realms",
+    SVR_NO_REALM = "no per-realm slice for %s - stale data module",
     SVR_D1 = "Mon", SVR_D2 = "Tue", SVR_D3 = "Wed", SVR_D4 = "Thu", SVR_D5 = "Fri", SVR_D6 = "Sat", SVR_D7 = "Sun",
     ALLIANCE = "Alliance", HORDE = "Horde",
     ERR_WINDOW = "window ERROR: ",
@@ -230,6 +231,10 @@ def main():
     assert t4.svr.total["__text"] == "150", f'realm total: {t4.svr.total["__text"]}'
     title4 = t4.win()["TitleText"]["__text"] or ""
     assert "Forever PvE EU" in title4, f"realm title: {title4}"
+    # prime time is a per-realm number: its title must name the realm, otherwise
+    # a realm slice reads as "the server" while it is one realm of the cluster
+    heat_title = t4.svr.heatTitle["__text"] or ""
+    assert "Forever PvE EU" in heat_title, f"heat title: {heat_title}"
     row1 = t4.svr.classRows[1]
     assert "80" in (row1.value["__text"] or ""), f'realm row1: {row1.value["__text"]}'
 
@@ -242,6 +247,24 @@ def main():
     assert t5.svr.total["__text"] == "200", f'fallback total: {t5.svr.total["__text"]}'
     title5 = t5.win()["TitleText"]["__text"] or ""
     assert "All realms" in title5, f"fallback title: {title5}"
+    # ...and it is not silent about it: the prime block names its scope, and the
+    # line under the snapshot names the realm that has no slice
+    assert "All realms" in (t5.svr.heatTitle["__text"] or ""), \
+        f'heat title without slice: {t5.svr.heatTitle["__text"]}'
+    note5 = t5.svr.stale["__text"] or ""
+    assert "Forever PvE US" in note5, f"missing note about the realm: {note5!r}"
+
+    # ---- format 1 snapshot (no realms block at all): same honest note ----
+    lua6 = LuaRuntime()
+    lua6.execute(DATAPACK.read_text(encoding="utf-8"))
+    lua6.execute("NearbySpyData.games.forever.realms = nil")
+    load_block(lua6, realm="CAMWOW EU5 Realm 1 PvE")
+    t6 = lua6.globals().__TEST
+    t6.Show()
+    assert t6.svr.nodata["__shown"] is False
+    assert "CAMWOW EU5 Realm 1 PvE" in (t6.svr.stale["__text"] or ""), \
+        f"stale data module must be named: {t6.svr.stale['__text']!r}"
+    assert "All realms" in (t6.svr.heatTitle["__text"] or "")
 
     print("SERVER WINDOW TEST OK")
 
