@@ -99,11 +99,18 @@ class PeerJoinTests(unittest.TestCase):
         self.assertIn("nearbyspydata_h", joined)
 
     def test_no_join_when_already_in_channel(self):
-        # уже в канале: своего имени в JOIN не должно быть.
-        # Базовый (слушающий) канал при этом пробуется один раз — это норма:
-        # если сервер его откроет, получим и данные второй фракции.
+        # Уже в своём канале — повторного Join нет. Базовый канал НЕ пробуется
+        # вообще: сервер отвечает NOT_ALLOWED_IN_CHANNEL и это печаталось
+        # игроку ошибкой в чат (10.11.2026).
         joined = self.join_with_channel_state(5)
-        self.assertNotIn("nearbyspydata_h", joined)
+        self.assertEqual([], joined)
+
+    def test_base_channel_is_never_attempted(self):
+        # Канал чужой фракции недоступен по определению: попытка входа только
+        # шумит ошибкой в чате и ничего не даёт.
+        joined = self.join_with_channel_state(None)
+        self.assertNotIn("nearbyspydata", joined)
+        self.assertEqual(["nearbyspydata_h"], joined)
 
 
 if __name__ == "__main__":

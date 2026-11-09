@@ -1522,25 +1522,17 @@ local function JoinPeerChannel()
             at = time(),
         }
     end
-    -- Слушающий вход в базовый канал: если сервер когда-нибудь пустит (или
-    -- канал создан нашим же персонажем в другой фракции), получим и его данные.
-    -- Отправка идёт ТОЛЬКО в свой фракционный канал — иначе дубли у тех, кто
-    -- сидит в обоих.
-    if own ~= PEER_CHANNEL_BASE then
-        local baseCh = GetChannelName(PEER_CHANNEL_BASE)
-        if not baseCh or baseCh == 0 then
-            pcall(JoinChannelByName, PEER_CHANNEL_BASE, nil, nil, false)
-        end
-    end
+    -- ВАЖНО: базовый канал здесь НЕ пробуется. Он создан фракцией-соперником,
+    -- и сервер отвечает NOT_ALLOWED_IN_CHANNEL — эта попытка печатала игроку
+    -- ошибку в чат при каждом входе и на 30-секундном ретрае, из-за чего
+    -- казалось, что разделение каналов не работает (наблюдалось 10.11.2026:
+    -- "Channel notice: NOT_ALLOWED_IN_CHANNEL | 6. nearbyspydata"). Приём из
+    -- чужого канала всё равно невозможен, пока сервер не пускает: слать запрос
+    -- туда незачем.
     if not peerChatVisible and ChatFrame_RemoveChannel then
         for i = 1, 10 do
             local chat = _G["ChatFrame" .. i]
-            if chat then
-                ChatFrame_RemoveChannel(chat, own)
-                if own ~= PEER_CHANNEL_BASE then
-                    ChatFrame_RemoveChannel(chat, PEER_CHANNEL_BASE)
-                end
-            end
+            if chat then ChatFrame_RemoveChannel(chat, own) end
         end
     end
 end
@@ -5536,9 +5528,13 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             db.debug.peerSendError and (", error=" .. db.debug.peerSendError) or ""))
         -- Имя канала и результат последнего входа: канал привязан к фракции
         -- (_a/_h), и отказ сервера виден только здесь — штатный вход молчит.
+        -- Номера обоих каналов печатаются рядом: свой должен быть ненулевым, а
+        -- базовый у чужой фракции законно остаётся 0 — попытки входа в него
+        -- больше не делаются (сервер отвечает NOT_ALLOWED_IN_CHANNEL).
         local joinInfo = type(db.debug) == "table" and db.debug.peerJoin or nil
-        P(("Peer channel: %s (base %s)%s")
-            :format(PeerChannelName(), PEER_CHANNEL_BASE,
+        P(("Peer channel: %s=%s (base %s=%s)%s")
+            :format(PeerChannelName(), tostring(GetChannelName(PeerChannelName())),
+                PEER_CHANNEL_BASE, tostring(GetChannelName(PEER_CHANNEL_BASE)),
                 joinInfo and (("; last join: %s ok=%s"):format(
                     tostring(joinInfo.channel), tostring(joinInfo.ok))) or "; last join: -"))
         P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, merged=%d, foreign=%d, selfEcho=%d, chat=%s, lastSender=%s")
