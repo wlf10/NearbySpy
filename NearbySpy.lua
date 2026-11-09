@@ -65,6 +65,7 @@ local LOCALE = {
         UI_DETECTED = "DETECTED", UI_ACTIVE5 = "ACTIVE < 5 MIN", UI_FACTIONS = "FACTIONS",
         UI_CLASSES = "CLASSES", UI_ALL = "All", UI_FRESH = "Fresh", UI_NEW = "New", UI_NEW_SHORT = "new",
         UI_PEER = "Peer",
+        UI_PEER_NEW = "Peer new",
         PEER_LIST_HEAD = "Peer channel: %d records, %d of them new. Latest %d:",
         PEER_LIST_EMPTY = "Peer channel: no records yet - nothing has arrived over %s.",
         PEER_TAG_NEW = "new", PEER_TAG_UPD = "upd",
@@ -136,6 +137,7 @@ local LOCALE = {
         UI_DETECTED = "已发现", UI_ACTIVE5 = "5分钟内活跃", UI_FACTIONS = "阵营",
         UI_CLASSES = "职业", UI_ALL = "全部", UI_FRESH = "最近", UI_NEW = "新增", UI_NEW_SHORT = "新增",
         UI_PEER = "共享",
+        UI_PEER_NEW = "共享新增",
         PEER_LIST_HEAD = "共享频道：共 %d 条，其中新增 %d 条。最近 %d 条：",
         PEER_LIST_EMPTY = "共享频道：暂无记录 —— %s 上还没有收到数据。",
         PEER_TAG_NEW = "新增", PEER_TAG_UPD = "更新",
@@ -207,6 +209,7 @@ local LOCALE = {
         UI_DETECTED = "ОБНАРУЖЕНО", UI_ACTIVE5 = "АКТИВНЫ < 5 МИН", UI_FACTIONS = "ФРАКЦИИ",
         UI_CLASSES = "КЛАССЫ", UI_ALL = "Все", UI_FRESH = "Свежие", UI_NEW = "Новые", UI_NEW_SHORT = "новых",
         UI_PEER = "Обмен",
+        UI_PEER_NEW = "Обмен новые",
         PEER_LIST_HEAD = "Канал обмена: %d записей, из них новых %d. Последние %d:",
         PEER_LIST_EMPTY = "Канал обмена: записей пока нет — по %s ничего не приходило.",
         PEER_TAG_NEW = "новый", PEER_TAG_UPD = "обновл",
@@ -278,6 +281,7 @@ local LOCALE = {
         UI_DETECTED = "ENTDECKT", UI_ACTIVE5 = "AKTIV < 5 MIN", UI_FACTIONS = "FRAKTIONEN",
         UI_CLASSES = "KLASSEN", UI_ALL = "Alle", UI_FRESH = "Aktuell", UI_NEW = "Neu", UI_NEW_SHORT = "neu",
         UI_PEER = "Austausch",
+        UI_PEER_NEW = "Austausch neu",
         PEER_LIST_HEAD = "Austauschkanal: %d Einträge, davon %d neu. Letzte %d:",
         PEER_LIST_EMPTY = "Austauschkanal: noch keine Einträge — über %s kam nichts an.",
         PEER_TAG_NEW = "neu", PEER_TAG_UPD = "akt.",
@@ -349,6 +353,7 @@ local LOCALE = {
         UI_DETECTED = "DÉTECTÉS", UI_ACTIVE5 = "ACTIFS < 5 MIN", UI_FACTIONS = "FACTIONS",
         UI_CLASSES = "CLASSES", UI_ALL = "Tous", UI_FRESH = "Récents", UI_NEW = "Nouveaux", UI_NEW_SHORT = "nouveaux",
         UI_PEER = "Partage",
+        UI_PEER_NEW = "Partage nouveaux",
         PEER_LIST_HEAD = "Canal de partage : %d entrées, dont %d nouvelles. Les %d dernières :",
         PEER_LIST_EMPTY = "Canal de partage : aucune entrée — rien reçu via %s.",
         PEER_TAG_NEW = "nouveau", PEER_TAG_UPD = "maj",
@@ -420,6 +425,7 @@ local LOCALE = {
         UI_DETECTED = "발견", UI_ACTIVE5 = "5분 내 활동", UI_FACTIONS = "진영",
         UI_CLASSES = "직업", UI_ALL = "전체", UI_FRESH = "최근", UI_NEW = "신규", UI_NEW_SHORT = "신규",
         UI_PEER = "공유",
+        UI_PEER_NEW = "공유 신규",
         PEER_LIST_HEAD = "공유 채널: 총 %d개, 그중 신규 %d개. 최근 %d개:",
         PEER_LIST_EMPTY = "공유 채널: 아직 기록이 없습니다 — %s 에서 받은 데이터가 없습니다.",
         PEER_TAG_NEW = "신규", PEER_TAG_UPD = "갱신",
@@ -3690,17 +3696,17 @@ local HELP_COMMANDS = {
     "/nspy [show]", "/nspy help", "/nspy suggest",
     "/nspy who", "/nspy whostop",
     "/nspy count", "/nspy announce", "/nspy debug",
-    "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy peer new", "/nspy reset",
+    "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy peer new", "/nspy peer list", "/nspy reset",
     "/nspy server", "/nspy menu", "/nspy minimap", "/nspy settings",
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered (persisted, survives relog)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道收到的记录（持久保存，重登后仍在）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала (хранится в базе, видно после релога)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat (gespeichert, überlebt Relog)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré (conservé, survit au relog)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 기록 (저장되어 재접속 후에도 유지)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
 }
 local helpWin
 local EffectiveLocale -- forward: defined with the settings selectors below
@@ -3879,10 +3885,17 @@ local function TacticalVisible(p, now)
         -- their own filter.
         return (p.firstSeen or 0) >= tactical.started and p.source ~= "peer"
     elseif tactical.filter == "peer" then
-        -- Rows that arrived over the nearbyspydata channel. peerAt is written
+        -- Rows that arrived over the nearspydata channel. peerAt is written
         -- on receipt (new row) or on refresh of a known one, so this is the
         -- only list that shows what the channel actually delivered.
         return (p.peerAt or 0) > 0
+    elseif tactical.filter == "peern" then
+        -- Only the channel records that were NEW to us: a peer packet that merely
+        -- refreshed a player we already knew sets peerAt alone (peerNew stays nil).
+        -- "New" is our own finds, "Peer" is everything from the channel, and this
+        -- is the intersection people actually ask about — players I learned about
+        -- from others and had never seen myself.
+        return (p.peerAt or 0) > 0 and p.peerNew == true
     end
     return true
 end
@@ -4264,6 +4277,7 @@ TacticalUpdate = function()
         tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. st.f5)
         tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. st.newN)
         tactical.filters.peer.label:SetText(L("UI_PEER") .. " " .. st.peerN)
+        tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. st.peerNewN)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
         TacticalRealmCyclerState()
@@ -4390,6 +4404,8 @@ local function BuildWindow()
     TacticalFilter(toolbar, "all", 6); TacticalFilter(toolbar, "fresh", 122); TacticalFilter(toolbar, "new", 238)
     -- 4th tile: rows that arrived over the nearbyspydata channel (peerAt)
     TacticalFilter(toolbar, "peer", 354)
+    -- 5th tile: the subset of channel rows that were new to us (peerNew)
+    TacticalFilter(toolbar, "peern", 470)
     tactical.count = NewText(toolbar, 9, 0.6, 0.53, 0.4); tactical.count:SetPoint("RIGHT", -9, 0)
 
     -- Realm row: the database can hold players from other realms of the cluster
@@ -5569,12 +5585,17 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         -- Everything the channel actually delivered, straight from the database:
         -- peerAt/peerNew are persisted, so this list survives a relog, unlike
         -- the in-memory counters printed by plain /nspy peer.
+        -- "peer new" = only records the channel taught us (the same subset as the
+        -- Peer new tab); "peer list" = everything the channel delivered, updates
+        -- included. Both were identical before, which read as a bug next to the
+        -- two separate tabs.
+        local onlyNew = (msg == "peer new")
         local list, fresh, foreign = {}, 0, 0
         for _, p in pairs(db.players) do
             if (p.peerAt or 0) > 0 then
-                list[#list + 1] = p
                 if p.peerNew then fresh = fresh + 1 end
                 if p.peerForeign then foreign = foreign + 1 end
+                if not onlyNew or p.peerNew then list[#list + 1] = p end
             end
         end
         if #list == 0 then
