@@ -1184,7 +1184,8 @@ local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- of this file sits at the Lua 5.1 ceiling of 200 locals, so every new
 -- top-level local breaks the whole addon at compile time.
 local peerStats = {sent = 0, received = 0, merged = 0, dropped = 0, seen = 0, valid = 0, rejected = 0,
-    foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, lastSend = 0, rejectLogged = {}, lastNoChannel = 0}
+    foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, lastSend = 0, rejectLogged = {}, lastNoChannel = 0,
+    leftBase = false}
 local peerChatVisible = false -- session-only diagnostic; never persist raw traffic
 
 -- Snapshot of peer counters into SavedVariables.
@@ -1206,10 +1207,9 @@ PeerSync = function()
     db.debug.peer = {
         enabled = db.peerEnabled and true or false,
         channel = tonumber(channelId) or 0,
-        -- Имя своего канала (фракционное, с 10.11.2026) и базовое: по SV видно,
-        -- в каком именно канале сидел персонаж, не заходя в игру.
+        -- Имя своего канала (фракционное, с 10.11.2026): по SV видно, в каком
+        -- именно канале сидел персонаж, не заходя в игру.
         channelName = PeerChannelName(),
-        channelBase = PEER_CHANNEL_BASE,
         queued = #peerQueue,
         sent = peerStats.sent, received = peerStats.received,
         merged = peerStats.merged, dropped = peerStats.dropped,
@@ -1522,13 +1522,17 @@ local function JoinPeerChannel()
             at = time(),
         }
     end
-    -- ВАЖНО: базовый канал здесь НЕ пробуется. Он создан фракцией-соперником,
-    -- и сервер отвечает NOT_ALLOWED_IN_CHANNEL — эта попытка печатала игроку
-    -- ошибку в чат при каждом входе и на 30-секундном ретрае, из-за чего
-    -- казалось, что разделение каналов не работает (наблюдалось 10.11.2026:
-    -- "Channel notice: NOT_ALLOWED_IN_CHANNEL | 6. nearbyspydata"). Приём из
-    -- чужого канала всё равно невозможен, пока сервер не пускает: слать запрос
-    -- туда незачем.
+    -- Выходим из устаревшего БАЗОВОГО канала, если персонаж в нём остался с
+    -- прошлых сессий (он создан фракцией-соперником): сервер на любой повторный
+    -- запрос отвечает NOT_ALLOWED_IN_CHANNEL и печатает это игроку в чат.
+    -- Один раз за сессию, чтобы не дёргать клиент на каждом ретрае.
+    if own ~= PEER_CHANNEL_BASE and not peerStats.leftBase and LeaveChannelByName then
+        local staleBase = GetChannelName(PEER_CHANNEL_BASE)
+        if staleBase and staleBase ~= 0 then
+            peerStats.leftBase = true
+            pcall(LeaveChannelByName, PEER_CHANNEL_BASE)
+        end
+    end
     if not peerChatVisible and ChatFrame_RemoveChannel then
         for i = 1, 10 do
             local chat = _G["ChatFrame" .. i]
@@ -5526,17 +5530,16 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             db.peerEnabled and L("ON") or L("OFF"), tostring(GetChannelName(PeerChannelName())),
             #peerQueue, peerStats.sent, peerStats.received, peerStats.dropped,
             db.debug.peerSendError and (", error=" .. db.debug.peerSendError) or ""))
-        -- Имя канала и результат последнего входа: канал привязан к фракции
-        -- (_a/_h), и отказ сервера виден только здесь — штатный вход молчит.
-        -- Номера обоих каналов печатаются рядом: свой должен быть ненулевым, а
-        -- базовый у чужой фракции законно остаётся 0 — попытки входа в него
-        -- больше не делаются (сервер отвечает NOT_ALLOWED_IN_CHANNEL).
+        -- Показываем ТОЛЬКО свой фракционный канал: базовое имя в выводе путало
+        -- (казалось, что аддон всё ещё сидит в общем канале). Номер 0 = вход не
+        -- состоялся, это единственное, что здесь важно.
         local joinInfo = type(db.debug) == "table" and db.debug.peerJoin or nil
-        P(("Peer channel: %s=%s (base %s=%s)%s")
-            :format(PeerChannelName(), tostring(GetChannelName(PeerChannelName())),
-                PEER_CHANNEL_BASE, tostring(GetChannelName(PEER_CHANNEL_BASE)),
-                joinInfo and (("; last join: %s ok=%s"):format(
-                    tostring(joinInfo.channel), tostring(joinInfo.ok))) or "; last join: -"))
+        local ownName = PeerChannelName()
+        local ownId = GetChannelName(ownName)
+        P(("Peer channel: %s (id=%s)%s")
+            :format(ownName, tostring(ownId),
+                joinInfo and (("; last join: %s") :format(
+                    joinInfo.ok and "ok" or ("FAILED " .. tostring(joinInfo.result)))) or ""))
         P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, merged=%d, foreign=%d, selfEcho=%d, chat=%s, lastSender=%s")
             :format(peerStats.seen, peerStats.valid, peerStats.rejected,
                 peerStats.valid - peerStats.received - peerStats.merged, peerStats.merged,

@@ -76,6 +76,9 @@ class PeerJoinTests(unittest.TestCase):
         lua.execute(
             "GetDB = function() return { peerEnabled = true } end\n"
             "PEER_CHANNEL_BASE = 'nearbyspydata'\n"
+            "peerStats = { leftBase = false }\n"
+            "LeaveChannelByName = function(n) LEAVES[#LEAVES + 1] = n end\n"
+            "LEAVES = {}\n"
             "function PeerChannelName() return CHANNEL_NAME end\n"
             "CHANNEL_NAME = '" + channel_name + "'\n"
             "CHANNEL = " + ("nil" if channel is None else str(channel)) + "\n"
@@ -111,6 +114,48 @@ class PeerJoinTests(unittest.TestCase):
         joined = self.join_with_channel_state(None)
         self.assertNotIn("nearbyspydata", joined)
         self.assertEqual(["nearbyspydata_h"], joined)
+
+    def test_stale_base_membership_is_left(self):
+        # Персонаж мог остаться в общем канале с прошлых сессий. Пока он там,
+        # сервер на любой повторный запрос отвечает NOT_ALLOWED_IN_CHANNEL и
+        # печатает это в чат игрока, поэтому аддон выходит сам.
+        lua = self._join_lua(channel=5, base_channel=6)
+        lua.globals()["TestJoin"]()
+        leaves = lua.globals()["LEAVES"]
+        self.assertEqual(["nearbyspydata"], [leaves[i] for i in range(1, len(leaves) + 1)])
+        self.assertTrue(lua.globals()["peerStats"]["leftBase"])
+
+    def test_no_leave_when_not_member_of_base(self):
+        lua = self._join_lua(channel=5, base_channel=0)
+        lua.globals()["TestJoin"]()
+        leaves = lua.globals()["LEAVES"]
+        self.assertEqual([], [leaves[i] for i in range(1, len(leaves) + 1)])
+
+    def _join_lua(self, channel, base_channel, channel_name="nearbyspydata_h"):
+        source = SOURCE.read_text(encoding="utf-8")
+        block = source[
+            source.index("local function JoinPeerChannel"):
+            source.index("-- Race -> faction")
+        ]
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute(
+            "GetDB = function() return { peerEnabled = true } end\n"
+            "PEER_CHANNEL_BASE = 'nearbyspydata'\n"
+            "peerStats = { leftBase = false }\n"
+            "LEAVES = {}\n"
+            "LeaveChannelByName = function(n) LEAVES[#LEAVES + 1] = n end\n"
+            "CHANNEL_NAME = '" + channel_name + "'\n"
+            "function PeerChannelName() return CHANNEL_NAME end\n"
+            "CHANNELS = { ['" + channel_name + "'] = " + str(channel)
+            + ", ['nearbyspydata'] = " + str(base_channel) + " }\n"
+            "GetChannelName = function(n) return CHANNELS[n] end\n"
+            "JOINS = {}\n"
+            "JoinChannelByName = function(n) JOINS[#JOINS + 1] = n end\n"
+            "ChatFrame_RemoveChannel = nil\n"
+            "time = function() return 1000 end\n"
+            + block + "\nTestJoin = JoinPeerChannel\n"
+        )
+        return lua
 
 
 if __name__ == "__main__":
