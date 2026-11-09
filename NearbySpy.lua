@@ -3573,7 +3573,10 @@ end
 -- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
 function FontObjectFor(size)
     local n = tonumber(size) or 12
-    if n <= 9 then
+    -- Threshold 7, not 9: sizes 8 and 9 are used by the column headers, metric
+    -- cards, class bars and counters, and mapping them to the small object shrank
+    -- the whole window. Only genuinely secondary text (7) is small.
+    if n <= 7 then
         return _G.GameFontNormalSmall or _G.GameFontHighlightSmall or GameFontNormal
     elseif n >= 14 then
         return _G.GameFontNormalLarge or _G.GameFontHighlightLarge or GameFontNormal
