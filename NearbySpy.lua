@@ -3819,10 +3819,20 @@ local function TacticalRow(parent, index)
     row.icon = row:CreateTexture(nil, "OVERLAY")
     row.icon:SetSize(20, 20)
     row.icon:SetPoint("LEFT", 6, 0)
+    -- The name sits a bit higher than the row centre so the realm tag fits
+    -- underneath it: 12pt + 8pt + gap is ~26px in a 30px row. The tag is a
+    -- SEPARATE FontString, not a colour code appended to the name — one string
+    -- cannot carry two sizes, and appending it to the name pushed the name
+    -- itself off the 142px column.
     row.name = NewText(row, 12)
-    row.name:SetPoint("LEFT", 34, 0)
+    row.name:SetPoint("LEFT", 34, 4)
     row.name:SetWidth(142)
     row.name:SetJustifyH("LEFT")
+    row.realm = NewText(row, 8, 0.55, 0.5, 0.4)
+    row.realm:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, 1)
+    row.realm:SetWidth(142)
+    row.realm:SetJustifyH("LEFT")
+    row.realm:Hide()
     row.profile = NewText(row, 11, 0.82, 0.79, 0.72)
     row.profile:SetPoint("LEFT", 180, 0)
     row.profile:SetWidth(150)
@@ -3885,13 +3895,18 @@ local function TacticalRows()
             row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
             row.player = p
             TacticalClassIcon(row.icon, p.class)
-            -- Foreign realm: the tag rides with the NAME (dim), never with the
-            -- ZONE column — that column is for locations and stays honest.
+            -- Foreign realm goes UNDER the name in a smaller font. Never into
+            -- the ZONE column — that column is for locations and stays honest.
             local realmTag = p.peerForeign and PeerRealmTag(p.realm) or nil
-            row.name:SetText(realmTag
-                and (tostring(p.name or "?") .. " |cff9a8f78" .. realmTag .. "|r")
-                or (p.name or "?"))
+            row.name:SetText(p.name or "?")
             row.name:SetTextColor(ClassColorRGB(p.class))
+            if realmTag then
+                row.realm:SetText(realmTag)
+                row.realm:Show()
+            else
+                row.realm:SetText("")
+                row.realm:Hide()
+            end
             row.profile:SetText(("%s; %s%s"):format(p.classLoc or p.class or "?", L("LVL_PREFIX"), tostring(p.level or "?")))
             -- Peer records carry no position or zone at all (the packet has
             -- neither), so a peer row honestly has no zone.

@@ -33,15 +33,19 @@ local function TacticalVisible() return true end
 
 -- минимальный мок строки: методы-заглушки + наблюдаемые FontString'ы
 local function FontString()
-    local fs = {text = nil}
+    local fs = {text = nil, shown = true}
     function fs:SetText(t) self.text = t end
     function fs:SetTextColor(...) self.color = {...} end
+    function fs:Show() self.shown = true end
+    function fs:Hide() self.shown = false end
     return fs
 end
 local function MockRow(parent, index)
+    -- realm — отдельная строка под именем (с 09.11.2026); мок обязан её иметь,
+    -- иначе TacticalRows падает на row.realm:SetText
     local row = {index = index, icon = {}, name = FontString(),
-        profile = FontString(), zone = FontString(), seen = FontString(),
-        hover = {Hide = function() end}}
+        realm = FontString(), profile = FontString(), zone = FontString(),
+        seen = FontString(), hover = {Hide = function() end}}
     function row:ClearAllPoints() end
     function row:SetPoint(...) end
     function row:Show() self.shown = true end

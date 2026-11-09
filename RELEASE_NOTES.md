@@ -37,7 +37,8 @@ development noise is left out.
 ### Improved: peer sharing
 
 - The player window has a **Peer** filter and `/nspy peer new` lists what arrived
-  over the channel. Both are stored with the player record, so they answer after
+  over the channel; a record from another realm shows that realm on its own line
+  under the player name, in a smaller font. Both are stored with the player record, so they answer after
   a relog as well.
 - Peer messages now carry the zone: zone id (a number, identical in every client
   language) and the localized zone name. Map coordinates travel only when the
