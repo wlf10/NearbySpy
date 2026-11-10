@@ -11,5 +11,6 @@
 ## Version: 1.5.3
 ## SavedVariables: NearbySpy
 
+NearbySpy_MC.lua
 NearbySpy_Locale.lua
 NearbySpy.lua

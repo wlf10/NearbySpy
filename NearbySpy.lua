@@ -22,7 +22,7 @@
               that hits the 50-row cap expands into classes, then into races
               (~20-30 queries instead of ~110; capping is by design),
               count | announce | debug | peer | reset | world (world data
-              counters) | probe (API discovery: /nspy probe, /nspy probe off)
+              counters)
 
 ]]
 
@@ -266,178 +266,9 @@ local function Round4(v)
     return math.floor(v * 10000 + 0.5) / 10000
 end
 
--- ============ world data probe (vendor / fishing API discovery) ============
--- Клиент Forever 1.60.x — кастомная сборка, а FrameXML в клиент не
--- поставляется (только Interface/AddOns), поэтому наличие функций вроде
--- GetMerchantItemLink / IsFishingLoot / UnitGUID("npc") и ПОРЯДОК их возвратов
--- нельзя ни прочитать в файлах клиента, ни взять из документации другой эпохи.
--- Проба снимает это с живой игры: какие функции есть, что вернули реальные
--- окна торговца и улова. Порядок возвратов пишем как есть (v1..vn), чтобы
--- сигнатуру установить по данным, а не по догадке.
--- Включается: /nspy probe. Выключается: /nspy probe off.
-local PROBE_API = {
-    "GetMerchantNumItems", "GetMerchantItemInfo", "GetMerchantItemLink",
-    "GetMerchantItemID", "GetMerchantItemMaxStack", "GetItemInfo",
-    "GetNumLootItems", "GetLootSlotInfo", "GetLootSlotLink", "GetLootSlot",
-    "IsFishingLoot", "LootSlot", "UnitExists", "UnitGUID", "UnitName",
-    "GetRealZoneText", "GetSubZoneText",
-}
-
-
-
--- ProbeCall — безопасный вызов: {v = {"возврат1", "возврат2", ...}} либо
--- {err = "текст"}. Отсутствующая функция — пустая таблица (не ошибка).
-local function ProbeCall(fn, ...)
-    if type(fn) ~= "function" then return {} end
-    local r = { pcall(fn, ...) }
-    if not r[1] then return { err = tostring(r[2]):sub(1, 160) } end
-    local v = {}
-    for i = 2, #r do
-        local x = r[i]
-        if type(x) == "string" then
-            v[#v + 1] = x:sub(1, 120)
-        else
-            v[#v + 1] = tostring(x)
-        end
-    end
-    return { v = v }
-end
-
-local function ProbeFirst(call)
-    if type(call) == "table" and type(call.v) == "table" then return call.v[1] end
-end
-
--- itemID из линка "|Hitem:7073:0:0:0:0:0:0:0|h[...]|h"
-local function ProbeItemID(link)
-    if type(link) ~= "string" then return nil end
-    local id = link:match("item:(%d+)")
-    return tonumber(id)
-end
-
--- ProbeEntry — общая шапка записи: когда, где (зона = локация улова/торговли)
-local function ProbeEntry(kind)
-    local db = GetDB()
-    if not db.probeOn then return nil end
-    local p = db.probe
-    if type(p) ~= "table" then p = {}; db.probe = p end
-    p[kind] = p[kind] or {}
-    if #p[kind] >= NSP_CONST.PROBE_MAX_EVENTS then return nil end
-    local e = { at = time(), zone = PlayerZone(), zoneId = PlayerZoneId() }
-    p[kind][#p[kind] + 1] = e
-    return e
-end
-
-local ProbeGlobals -- forward: определена ниже (перечисление _G)
-
-local function ProbeRun()
-    local db = GetDB()
-    local p = db.probe
-    if type(p) ~= "table" then p = {}; db.probe = p end
-    local api = {}
-    for _, name in ipairs(PROBE_API) do
-        api[name] = (type(_G[name]) == "function") and 1 or 0
-    end
-    p.api = api
-    p.build = (GetBuildInfo and tostring(GetBuildInfo())) or ""
-    p.locale = (GetLocale and GetLocale()) or ""
-    p.realm = PlayerRealm()
-    p.zone = PlayerZone()
-    p.zoneId = PlayerZoneId()
-    p.at = time()
-    -- /nspy probe = свежий снимок: копилки чистим, иначе лимит событий уже
-    -- исчерпан прошлыми прогонами и новые записи молча не добавляются
-    p.merchants = {}
-    p.loots = {}
-    db.probeOn = true
-    pcall(ProbeGlobals)
-    return api
-end
-
-local ProbeTooltip, ProbeItemFuncs, ProbeMerchantFrame -- forward: определены ниже, в блоке probe v2
-local PB                     -- forward: хелперы разбора таблиц (блок probe v2)
-
-local function ProbeMerchant()
-    local e = ProbeEntry("merchants")
-    if not e then return end
-    e.npcName = ProbeCall(UnitName, "npc")
-    e.npcGuid = ProbeCall(UnitGUID, "npc")
-    e.npcExists = ProbeCall(UnitExists, "npc")
-    local num = ProbeCall(GetMerchantNumItems)
-    -- tonumber(nil) в Lua 5.1 бросает ошибку — значение может отсутствовать
-    -- (функции нет или клиент отказал), поэтому приводим с проверкой типа
-    local count = ProbeFirst(num)
-    e.numItems = (count and tonumber(count)) or 0
-    if num.err then e.numItemsErr = num.err end -- клиент отказал: причина в SV
-    e.items = {}
-    for i = 1, math.min(e.numItems, NSP_CONST.PROBE_MAX_ITEMS) do
-        local it = { idx = i }
-        it.info = ProbeCall(GetMerchantItemInfo, i)
-        it.id = ProbeCall(GetMerchantItemID, i)
-        it.link = ProbeCall(GetMerchantItemLink, i)
-        it.stack = ProbeCall(GetMerchantItemMaxStack, i)
-        local link = ProbeFirst(it.link)
-        local itemID = ProbeItemID(link)
-        if itemID then
-            it.itemId = itemID
-            it.item = ProbeCall(GetItemInfo, link)
-        end
-        e.items[#e.items + 1] = it
-    end
-    e.tip = ProbeTooltip(e.numItems)
-    e.merchantFrame = ProbeMerchantFrame(e.numItems)
-    e.merchantInfo = PB.MerchantInfo(e.numItems)
-    e.namesByTip = PB.NamesByTooltip()
-    for _, it in ipairs(e.items) do
-        if it.itemId then
-            e.itemFuncs = ProbeItemFuncs(it.itemId)
-            break
-        end
-    end
-end
-
-local function ProbeLoot()
-    local e = ProbeEntry("loots")
-    if not e then return end
-    e.isFishing = ProbeCall(IsFishingLoot)
-    e.target = ProbeCall(UnitName, "target")
-    e.targetExists = ProbeCall(UnitExists, "target")
-    local num = ProbeCall(GetNumLootItems)
-    local count = ProbeFirst(num)
-    e.numLoot = (count and tonumber(count)) or 0
-    if num.err then e.numLootErr = num.err end
-    e.slots = {}
-    for i = 1, math.min(e.numLoot, NSP_CONST.PROBE_MAX_ITEMS) do
-        local s = { idx = i }
-        s.info = ProbeCall(GetLootSlotInfo, i)
-        s.link = ProbeCall(GetLootSlotLink, i)
-        local link = ProbeFirst(s.link)
-        if link then
-            s.itemId = ProbeItemID(link)
-            s.item = ProbeCall(GetItemInfo, link)
-        end
-        e.slots[#e.slots + 1] = s
-    end
-end
-
--- ============ probe v2 (08.11.2026): что реально есть в клиенте ============
--- Проба v1 на 1.60.1 показала: GetMerchantItemInfo и GetItemInfo ОТСУТСТВУЮТ,
--- а GetMerchantItemLink отдаёт nil для части позиций. Имя, качество и цену
--- этими функциями не получить. Поэтому проба v2 снимает три вещи:
---   1) перечисление _G по темам Item/Merchant/Loot/Tooltip/Container —
---      список реальных имён вместо догадок (FrameXML не поставляется,
---      прочитать UI-код клиента нельзя);
---   2) текст тултипа торговой позиции: там лежат имя и цена, даже когда
---      GetItemInfo нет. Строки читаются через canaccessvalue: в этом клиенте
---      есть secret-значения, сравнение с которыми бросает ошибку;
---   3) гипотеза ленивого кеша: если после GameTooltip:SetMerchantItem(i)
---      GetMerchantItemLink(i) начинает отдавать линк, то имя можно брать
---      оттуда, а не из тултипа.
--- константы пробы v2: сколько позиций/строк читать
-
-
-
--- ProbeText — текст FontString через гейт секретных значений.
--- Возвращает nil (пусто), "[secret]" (читать нельзя) или обрезанный текст.
+-- ============ helpers shared with world collection ============
+-- ProbeText и ProbeTip остались после вырезания probe-блоков: ими
+-- пользуется сбор мира (имя предмета из тултипа, чтение торговой позиции).
 local function ProbeText(fs)
     if not fs or type(fs.GetText) ~= "function" then return nil end
     local ok, txt = pcall(fs.GetText, fs)
@@ -445,184 +276,6 @@ local function ProbeText(fs)
     if type(txt) ~= "string" then return "[secret]" end
     if canaccessvalue and not canaccessvalue(txt) then return "[secret]" end
     return txt:sub(1, 120)
-end
-
--- ProbeGlobals — какие функции и таблицы-пространства имён есть в клиенте.
--- Для таблиц (C_Item, C_MerchantFrame, ...) сохраняются и их ключи.
--- 08.11.2026: перебор _G по шаблонам оказался ненадёжным — pairs() выдаёт
--- произвольный порядок, и срез в 260 имён выкинул C_Item, из-за чего проба
--- v2 показала «C_Item нет». Теперь перечисляются ВСЕ пространства C_*
--- (их немного) — детерминированно и без среза; функции из шаблонов остаются
--- как дополнительный список.
-function ProbeGlobals()
-    local db = GetDB()
-    local p = db.probe
-    if type(p) ~= "table" then p = {}; db.probe = p end
-    local ns, nns = {}, 0
-    for name, val in pairs(_G) do
-        if type(name) == "string" and name:sub(1, 2) == "C_" and type(val) == "table" then
-            local keys = {}
-            for k in pairs(val) do
-                if type(k) == "string" then keys[#keys + 1] = k end
-            end
-            table.sort(keys)
-            ns[name] = table.concat(keys, ",")
-            nns = nns + 1
-        end
-    end
-    p.namespaces = ns
-    p.namespacesCount = nns
-    p.globals = nil -- старый неполный список не нужен
-    p.globalsCount = nil
-end
-
--- ProbeMerchantFrame — API торговца: в современном FrameXML старый
--- GetMerchantItemInfo заменён на C_MerchantFrame.GetItemInfo. Сохраняем
--- ВСЕ возвраты как есть (v1..vn): порядок полей угадывать нельзя, цену
--- определим по данным, сравнив с MoneyFrame окна торговца.
-function ProbeMerchantFrame(numItems)
-    local res = { calls = {} }
-    local cmf = _G.C_MerchantFrame
-    res.hasNamespace = (type(cmf) == "table") and 1 or 0
-    if type(cmf) == "table" then
-        local keys = {}
-        for k in pairs(cmf) do
-            if type(k) == "string" then keys[#keys + 1] = k end
-        end
-        table.sort(keys)
-        res.keys = table.concat(keys, ",")
-    end
-    local pos = math.min(numItems or 0, 3)
-    for i = 1, pos do
-        local one = { idx = i }
-        if type(cmf) == "table" and type(cmf.GetItemInfo) == "function" then
-            one.getInfo = ProbeCall(cmf.GetItemInfo, i)
-        end
-        -- второй источник цены: MoneyFrame окна торговца (то, что видит игрок)
-        local mf = _G["MerchantItem" .. i .. "MoneyFrame"]
-        if mf then
-            one.moneyFrame = 1
-            if type(mf.GetMoney) == "function" then
-                one.money = ProbeCall(mf.GetMoney, mf)
-            end
-            if type(mf.GetAmount) == "function" then
-                one.amount = ProbeCall(mf.GetAmount, mf)
-            end
-        end
-        res.calls[#res.calls + 1] = one
-    end
-    return res
-end
-
--- ProbeTable — разбор таблицы-результата: ключи, типы, скалярные значения.
--- Нужен потому, что C_MerchantFrame.GetItemInfo(i) на 1.60.1 возвращает
--- ТАБЛИЦУ (а не кортеж значений): tostring даёт "table: 0x..." и никакой
--- информации, а поля этой таблицы — единственный путь к цене.
-local ProbeTip -- forward: определена ниже, после блока PB
-PB = {}
-
-function PB.Table(t, depth)
-    if type(t) ~= "table" then return tostring(t) end
-    depth = depth or 0
-    local parts = {}
-    for k, v in pairs(t) do
-        if type(k) == "string" or type(k) == "number" then
-            local tv = type(v)
-            local shown
-            if tv == "table" then
-                shown = (depth < 1) and ("{" .. PB.Table(v, depth + 1) .. "}") or "{...}"
-            elseif tv == "function" then
-                shown = "fn"
-            elseif tv == "string" then
-                if canaccessvalue and not canaccessvalue(v) then
-                    shown = "[secret]"
-                else
-                    shown = '"' .. v:sub(1, 60) .. '"'
-                end
-            else
-                shown = tostring(v)
-            end
-            parts[#parts + 1] = tostring(k) .. "=" .. shown
-        end
-    end
-    table.sort(parts)
-    return table.concat(parts, ", ")
-end
-
--- PB.MoneyFrame — что реально есть у денежного фрейма позиции: методы и
--- поля. MoneyFrame окна торговца — второй кандидат на источник цены.
-function PB.MoneyFrame(idx)
-    local mf = _G["MerchantItem" .. idx .. "MoneyFrame"]
-    if not mf then return { present = 0 } end
-    local out = { present = 1, methods = {}, fields = {} }
-    for k, v in pairs(mf) do
-        if type(k) == "string" then
-            local tv = type(v)
-            if tv == "function" then
-                out.methods[#out.methods + 1] = k
-            elseif tv == "number" or tv == "string" or tv == "boolean" then
-                if type(v) == "string" and canaccessvalue and not canaccessvalue(v) then
-                    out.fields[#out.fields + 1] = k .. "=[secret]"
-                else
-                    out.fields[#out.fields + 1] = k .. "=" .. tostring(v)
-                end
-            end
-        end
-    end
-    table.sort(out.methods)
-    table.sort(out.fields)
-    out.methods = table.concat(out.methods, ",")
-    out.fields = table.concat(out.fields, ",")
-    return out
-end
-
--- PB.MerchantInfo — структура C_MerchantFrame.GetItemInfo для первых позиций.
-function PB.MerchantInfo(numItems)
-    local cmf = _G.C_MerchantFrame
-    if type(cmf) ~= "table" or type(cmf.GetItemInfo) ~= "function" then return { present = 0 } end
-    local out = { present = 1, rows = {} }
-    for i = 1, math.min(numItems or 0, 3) do
-        local ok, res = pcall(cmf.GetItemInfo, i)
-        local row = { idx = i }
-        if not ok then
-            row.err = tostring(res):sub(1, 120)
-        else
-            row.type = type(res)
-            if type(res) == "table" then
-                row.fields = PB.Table(res)
-            else
-                row.value = tostring(res)
-            end
-        end
-        row.money = PB.MoneyFrame(i)
-        out.rows[#out.rows + 1] = row
-    end
-    return out
-end
-
--- PB.NamesByTooltip — имена позиций, у которых C_Item.GetItemNameByID молчит.
--- Путь: SetMerchantItem(i) рисует строку тултипа, оттуда и берём имя.
--- Возвращает { [idx] = "имя" }.
-function PB.NamesByTooltip()
-    local tip = ProbeTip()
-    if not tip then return nil end
-    local out = {}
-    local pos = math.min(tonumber(select(1, GetMerchantNumItems())) or 0, 5)
-    for i = 1, pos do
-        local okID, itemID = pcall(GetMerchantItemID, i)
-        itemID = okID and tonumber(itemID) or nil
-        local known = false
-        if itemID and type(C_Item) == "table" and type(C_Item.GetItemNameByID) == "function" then
-            local ok, name = pcall(C_Item.GetItemNameByID, itemID)
-            known = ok and type(name) == "string" and name ~= ""
-        end
-        if not known then
-            local okSet = pcall(tip.SetMerchantItem, tip, i)
-            local line = okSet and ProbeText(_G[(tip.GetName and tip:GetName() or "GameTooltip") .. "TextLeft1"]) or nil
-            out[#out + 1] = { idx = i, id = itemID, line = line }
-        end
-    end
-    return out
 end
 
 local probeTip
@@ -642,54 +295,6 @@ function ProbeTip()
         return probeTip
     end
     return nil
-end
-
--- ProbeTooltip — читает строки тултипа первых POS-позиций окна торговца.
-function ProbeTooltip(numItems)
-    local tip = ProbeTip()
-    if not tip then return nil end
-    local res = {}
-    local pos = math.min(numItems or 0, NSP_CONST.PROBE_TIP_ITEMS)
-    for i = 1, pos do
-        local one = { idx = i }
-        local okSet = pcall(tip.SetMerchantItem, tip, i)
-        one.setOk = okSet and 1 or 0
-        one.lines = {}
-        for l = 1, NSP_CONST.PROBE_TIP_LINES do
-            local fs = _G[(tip.GetName and tip:GetName() or "GameTooltip") .. "TextLeft" .. l]
-            local txt = ProbeText(fs)
-            if txt and txt ~= "" then one.lines[#one.lines + 1] = txt end
-        end
-        -- гипотеза ленивого кеша: линк после SetMerchantItem
-        one.linkAfter = ProbeCall(GetMerchantItemLink, i)
-        res[#res + 1] = one
-    end
-    return res
-end
-
--- ProbeItemFuncs — как ещё можно получить имя/класс по itemID.
-local PROBE_ITEM_FUNCS = {
-    "GetItemInfo", "GetItemInfoInstant", "GetItemNameByID", "GetItemLink",
-    "GetItemQualityByID", "GetItemClassByID", "GetItemIconByID",
-}
-
-function ProbeItemFuncs(itemID)
-    local out = {}
-    for _, name in ipairs(PROBE_ITEM_FUNCS) do
-        local fn = _G[name]
-        if type(fn) == "function" and itemID then
-            out[name] = ProbeCall(fn, itemID)
-        end
-    end
-    local ci = _G.C_Item
-    if type(ci) == "table" and itemID then
-        for _, name in ipairs({ "GetItemNameByID", "GetItemInfoInstant", "GetItemInfo", "GetItemLink" }) do
-            if type(ci[name]) == "function" then
-                out["C_Item." .. name] = ProbeCall(ci[name], itemID)
-            end
-        end
-    end
-    return out
 end
 
 -- ============ world data: vendors and fishing (сбор, 08.11.2026) ============
@@ -832,6 +437,55 @@ function WR.VendorKey(guid, name, zoneId)
     return tostring(name) .. "@" .. tostring(zoneId or 0)
 end
 
+-- WR.NpcIDFromGUID — id NPC из GUID вида
+-- "Creature-0-7090-2991-2-257008-A222425F2A" -> 257008.
+-- Пятое поле после дефиса и есть npcID; в базе MasterCraft ключи — ровно эти
+-- числа, поэтому сравнивать надо по ним, а не по имени: имена локализованы
+-- (ruRU-клиент отдаёт «Баэланн Быстрый Поток», в базе — английское написание).
+function WR.NpcIDFromGUID(guid)
+    if type(guid) ~= "string" then return nil end
+    local id = guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-")
+    return id and tonumber(id) or nil
+end
+
+-- WR.NoteMastercraftGap — торговец, которого нет в базе MasterCraft.
+--
+-- Зачем: NearbySpy продолжает пассивно записывать торговцев, а MasterCraft
+-- держит статическую базу из Wowhead Forever. Наш интерес — именно разница:
+-- сервер кастомный, и его торговцы в дампе Wowhead отсутствуют. Нотис
+-- превращает это из «данных, которые никто не смотрит» в сигнал.
+--
+-- Один нотис на торговца за сессию (world.mcNotified), счётчик — в /nspy world.
+function WR.NoteMastercraftGap(db, guid, name, zoneId)
+    if type(NSP_MC) ~= "table" then return end          -- снимка нет: молчим
+    local npcID = WR.NpcIDFromGUID(guid)
+    if not npcID then return end                        -- без id сравнить нечем
+    local known = false
+    local list = NSP_MC.vendors
+    if type(list) == "table" then
+        for i = 1, #list do
+            if list[i] == npcID then known = true break end
+        end
+    end
+    if known then return end
+
+    local world = db.world
+    world.mcNotified = world.mcNotified or {}
+    if world.mcNotified[npcID] then return end          -- уже сообщали
+    world.mcNotified[npcID] = true
+    world.mcNewTotal = (world.mcNewTotal or 0) + 1
+
+    db.debug = db.debug or {}
+    db.debug.mcGap = db.debug.mcGap or {}
+    db.debug.mcGap[#db.debug.mcGap + 1] = { id = npcID, name = name or "?", at = time() }
+    if #db.debug.mcGap > 50 then table.remove(db.debug.mcGap, 1) end
+
+    P(L("MC_NEW_VENDOR"):format(
+        name ~= "" and name or ("#" .. npcID),
+        PlayerZone() or "?",
+        tostring(NSP_MC.version or "?")))
+end
+
 -- CollectVendor — снимок окна торговца в db.world.vendors.
 -- Вызывается на MERCHANT_SHOW (сбор пассивный, кликов не требует).
 function WR.CollectVendor()
@@ -857,6 +511,11 @@ function WR.CollectVendor()
         end
         v = { items = {}, first = time() }
         world.vendors[key] = v
+        -- НОВЫЙ торговец: сверяем с базой MasterCraft. У него статическая база
+        -- из Wowhead (331 вендор), но кастомный сервер её не покрывает — на
+        -- живых данных 10.11.2026 из десяти пойманных торговцев семь в его базе
+        -- отсутствовали. Нотис показывает именно такие находки.
+        WR.NoteMastercraftGap(db, guid, name, zoneId)
     end
     v.guid = type(guid) == "string" and guid or nil
     v.n = (name ~= "" and name) or v.n
@@ -991,7 +650,7 @@ function WR.Counts()
         for _ in pairs(v.items or {}) do items = items + 1 end
     end
     for _ in pairs(world.fish or {}) do fish = fish + 1 end
-    return vendors, items, fish
+    return vendors, items, fish, world.mcNewTotal or 0
 end
 
 -- file key -> localized class name, for the window: peer packets carry only the
@@ -5579,26 +5238,13 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             P("Peer last session: no saved counters yet (written on logout)")
         end
     elseif msg == "world" then
-        local vendors, items, fish = WR.Counts()
+        local vendors, items, fish, mcNew = WR.Counts()
         P(L("WORLD_STATUS"):format(vendors, items, fish))
-    elseif msg == "probe" then
-        -- этап 0 сбора данных мира: снять в SV состав API и пробу окон
-        local api = ProbeRun()
-        local have, miss, absent = 0, 0, {}
-        for _, name in ipairs(PROBE_API) do
-            if api[name] == 1 then
-                have = have + 1
-            else
-                miss = miss + 1
-                absent[#absent + 1] = name
-            end
-        end
-        P(L("PROBE_ON"):format(have, miss))
-        if #absent > 0 then P("no API: " .. table.concat(absent, ", ")) end
-        P(L("PROBE_HINT"))
-    elseif msg == "probe off" then
-        db.probeOn = false
-        P(L("PROBE_OFF"))
+        -- Сверка с базой MasterCraft: счётчик находок и версия снимка. Версия
+        -- важна — по ней видно, насколько сравнение свежее (старый снимок даёт
+        -- ложные «новые», если MasterCraft успел обновиться).
+        local mcVer = (type(NSP_MC) == "table" and NSP_MC.version) or "?"
+        P(L("MC_STATUS"):format(mcNew, mcVer))
     elseif msg == "reset" then
         db.players = {}
         newThisSession = 0
@@ -5830,13 +5476,9 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     elseif event == "MERCHANT_SHOW" then
         local okC, errC = pcall(WR.CollectVendor)
         if not okC then DbgErr("vendor", errC) end
-        local okE, errE = pcall(ProbeMerchant)
-        if not okE then DbgErr("probeMerchant", errE) end
     elseif event == "LOOT_OPENED" then
         local okC, errC = pcall(WR.CollectFishing)
         if not okC then DbgErr("fishing", errC) end
-        local okE, errE = pcall(ProbeLoot)
-        if not okE then DbgErr("probeLoot", errE) end
     elseif event == "CHAT_MSG_SYSTEM" then
         -- custom server messages ("Интересная операция…") arrive via system chat
         local okE, errE = pcall(function()
