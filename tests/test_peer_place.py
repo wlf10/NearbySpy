@@ -76,12 +76,18 @@ class PeerPlaceTests(unittest.TestCase):
         sent = [str(p) for p in self.lua.globals()["QUEUED"].values()]
         self.assertEqual(1, len(sent))
         parts = sent[0].split(";")
-        self.assertEqual(12, len(parts))
-        self.assertEqual("N3", parts[0])
+        # N4 = N3 (12 полей) + время наблюдения: получатель должен уметь
+        # отличить свежий пакет от пролежавшего в очереди
+        self.assertEqual(13, len(parts))
+        self.assertEqual("N4", parts[0])
         self.assertEqual("1429", parts[8])
         self.assertEqual("Таверна \"Гордость льва\"", parts[9])
         self.assertEqual("0.5231", parts[10])
         self.assertEqual("0.7113", parts[11])
+        # Время — момент НАБЛЮДЕНИЯ (1000, когда запись попала в очередь), а не
+        # отправки (1100): пакет может пролежать в очереди минуты, и получатель
+        # должен видеть, когда игрока видели, а не когда канал его пропустил.
+        self.assertEqual("1000", parts[12], "время наблюдения в последнем поле")
 
     def test_who_record_never_sends_the_observers_position(self):
         # A /who entry has the player's zone but no coordinates: its x/y is where

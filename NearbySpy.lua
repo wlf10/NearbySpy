@@ -759,6 +759,9 @@ local function UpsertPlayer(db, data)
         if data.source ~= "peer" and observed and QueuePeerNew then QueuePeerNew(db, data) end
         return true
     end
+    -- Значения ДО обновления: по ним видно, изменилось ли что-то, что стоит
+    -- сообщить в канал (/who увидел знакомого с новым уровнем/в новой зоне).
+    local prevLevel, prevZoneId, prevZone = entry.level, entry.zoneId, entry.zone
     if observed then
         if nowT - (entry.lastSeen or 0) > NSP_CONST.REAP_SECONDS then
             entry.count = (entry.count or 1) + 1
@@ -783,7 +786,21 @@ local function UpsertPlayer(db, data)
     end
     -- Identity fields: peer data can only fill gaps, a real observation may
     -- correct it (a peer record is not proof of race/faction).
-    if data.level and (data.source ~= "peer" or not entry.level) then entry.level = data.level end
+    --
+    -- Исключение — пакет N4 со временем: если он СВЕЖЕЕ всего, что мы знаем об
+    -- игроке, то его level/zone достоверны на момент наблюдения и должны
+    -- обновлять запись. Иначе обмен обновлениями бессмысленен: /who увидел
+    -- знакомого с новым уровнем, пакет ушёл, а получатель проигнорировал бы
+    -- его как «peer не доказывает». Раса и фракция остаются как были — их
+    -- пакет по-прежнему не доказывает, они меняются только с нашей встречи.
+    local peerFresh = false
+    if data.source == "peer" and data.peerObservedAt then
+        local known = math.max(entry.lastSeen or 0, entry.peerAt or 0)
+        peerFresh = (data.peerObservedAt > known)
+    end
+    if data.level and (data.source ~= "peer" or not entry.level or peerFresh) then
+        entry.level = data.level
+    end
     if data.class and (data.source ~= "peer" or not entry.class) then entry.class = data.class end
     if data.classLoc then entry.classLoc = data.classLoc end
     if data.faction and data.faction ~= "Unknown"
@@ -804,14 +821,47 @@ local function UpsertPlayer(db, data)
         if data.peerForeign then entry.peerForeign = true end
         -- the latest sender wins: the row is "last corroborated by" this character
         if data.peerFrom then entry.peerFrom = data.peerFrom end
-        -- Place from a peer only fills a gap. It is someone else's snapshot of
-        -- where they saw the player, and our own observation is both closer and
-        -- newer, so it must never lose to a packet.
-        if not entry.zone and data.zone then entry.zone = data.zone end
-        if not entry.zoneId and data.zoneId then entry.zoneId = data.zoneId end
+        -- Place from a peer only fills a gap — unless the packet is FRESHER than
+        -- everything we know (N4 with a time): then it is the newest snapshot
+        -- available and should replace a stale zone. Our own fresh sighting
+        -- still wins, because peerFresh compares against lastSeen too.
+        if peerFresh then
+            if data.zone then entry.zone = data.zone end
+            if data.zoneId and data.zoneId > 0 then entry.zoneId = data.zoneId end
+        else
+            if not entry.zone and data.zone then entry.zone = data.zone end
+            if not entry.zoneId and data.zoneId then entry.zoneId = data.zoneId end
+        end
         if not entry.x and data.x then
             entry.x = Round4(data.x)
             entry.y = Round4(data.y)
+        end
+    end
+    -- Обновление для канала: /who (или другая наша встреча) показала знакомого
+    -- с ДРУГИМ уровнем или в другой зоне. Раньше такие изменения оседали только
+    -- в локальной базе — в канал уходило лишь создание записи, поэтому чужие
+    -- уровни у нас устаревали навсегда.
+    --
+    -- Условия: это наша встреча (не peer — иначе бесконечная ретрансляция),
+    -- и в записи действительно что-то поменялось. Дедуп в QueuePeerNew держит
+    -- ключ с самими значениями, так что одно и то же изменение уйдёт один раз.
+    if observed and data.source ~= "peer" and QueuePeerNew then
+        local changedLevel = data.level and prevLevel and data.level ~= prevLevel
+        local changedZone = data.zone and data.zone ~= "" and data.zone ~= prevZone
+        -- зона сравнивается по id, когда он известен: имя локализовано, а id —
+        -- один и тот же во всех клиентских языках
+        if data.zoneId and data.zoneId > 0 and prevZoneId and data.zoneId ~= prevZoneId then
+            changedZone = true
+        end
+        if changedLevel or changedZone then
+            local upd = {}
+            for k, v in pairs(data) do upd[k] = v end
+            upd.isUpdate = true
+            upd.observedAt = nowT
+            upd.level = data.level or prevLevel
+            upd.zone = data.zone or prevZone
+            upd.zoneId = data.zoneId or prevZoneId
+            QueuePeerNew(db, upd)
         end
     end
     return false
@@ -847,6 +897,9 @@ function PeerChannelName()
     return PEER_CHANNEL_BASE
 end
 local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
+-- Допустимое расхождение часов у отправителя пакета N4. Больше — отказ:
+-- «пакет из будущего» иначе навсегда перебивал бы все обновления.
+local PEER_CLOCK_SKEW = 3600
 local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- Per-session peer counters/state. Kept in ONE table on purpose: the main chunk
 -- of this file sits at the Lua 5.1 ceiling of 200 locals, so every new
@@ -926,12 +979,30 @@ QueuePeerNew = function(db, data)
     if not data.class:match("^[A-Z]+$") then return end
     local race = PeerField(data.race, 32) and data.race:match("^[A-Za-z]+$") and data.race or "?"
     local faction = (data.faction == "Alliance" or data.faction == "Horde") and data.faction or "?"
-    local key = db.game .. "|" .. data.key
-    if peerSent[key] or peerQueued[key] then return end
-
+    local base = db.game .. "|" .. data.key
     local zoneName = PeerField(data.zone, 60) and data.zone or "?"
     local zoneId = (data.zoneId and tonumber(data.zoneId)) or 0
     if zoneId < 0 or zoneId % 1 ~= 0 then zoneId = 0 end
+
+    -- Ключ дедупа. Для НОВОЙ записи — один на игрока за сессию: повторные
+    -- встречи того же человека в канал не идут.
+    --
+    -- Для ОБНОВЛЕНИЯ (isUpdate: /who увидел знакомого с другим уровнем или в
+    -- другой зоне) ключ включает сами значения: без этого запись блокировалась
+    -- бы первой же отправкой создания и новые уровни не уходили никогда.
+    -- Одинаковое обновление дважды не уйдёт, а следующее изменение — уйдёт.
+    local key = base
+    if data.isUpdate then
+        -- Обновления — низкий приоритет: если очередь уже наполовину полна,
+        -- создание новых записей важнее. Иначе /who-скан на 50 человек вытеснит
+        -- из очереди всё остальное (PEER_QUEUE_MAX = 60).
+        if #peerQueue >= PEER_QUEUE_MAX / 2 then
+            peerStats.updateSkipped = (peerStats.updateSkipped or 0) + 1
+            return
+        end
+        key = base .. "|u" .. tostring(level) .. "|" .. tostring(zoneId)
+    end
+    if peerSent[key] or peerQueued[key] then return end
     -- Coordinates are shared ONLY when they belong to the reported player.
     -- A /who entry knows the player's ZONE but has no position, so its x/y is
     -- where WE stood — sending that put a stranger on our own map spot (10 428
@@ -943,9 +1014,14 @@ QueuePeerNew = function(db, data)
     end
 
     local function Build(z, zid, cx, cy)
-        return table.concat({"N3", db.game, data.realm, data.name,
+        -- N4 = N3 + время наблюдения (unix). Без времени получатель не может
+        -- отличить свежую встречу от пакета, который пролежал в очереди:
+        -- теперь обмен несёт и ОБНОВЛЕНИЯ уже известных игроков (новый
+        -- уровень/зона при /who), и «новее/старее» надо сравнивать, а не
+        -- угадывать по порядку прихода.
+        return table.concat({"N4", db.game, data.realm, data.name,
             data.class, tostring(level), race, faction,
-            tostring(zid), z, cx, cy}, ";")
+            tostring(zid), z, cx, cy, tostring(tonumber(data.observedAt) or time())}, ";")
     end
     local payload = Build(zoneName, zoneId, px, py)
     if #payload > PEER_PAYLOAD_MAX then payload = Build("?", zoneId, px, py) end
@@ -1077,13 +1153,12 @@ local function ReceivePeerMessage(message, sender)
     if peerStats.inCount > 120 then return Reject("rate limit") end
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
-    -- N2 = 8 fields (no place), N3 = 12 fields (zone id, zone name, x, y).
-    -- Both are accepted so an older client in the channel is not cut off, and a
-    -- new one is understood by a client that has not been updated yet only for
-    -- its N2 peers — the protocol version is the first field, not a guess.
-    if #fields ~= 8 and #fields ~= 12 then return Reject("field count") end
+    -- N2 = 8 fields (no place), N3 = 12 (zone id, zone name, x, y),
+    -- N4 = 13 (N3 + unix observation time). All are accepted so an older
+    -- client in the channel is not cut off.
+    if #fields ~= 8 and #fields ~= 12 and #fields ~= 13 then return Reject("field count") end
     local proto = fields[1]
-    if proto ~= "N2" and proto ~= "N3" then
+    if proto ~= "N2" and proto ~= "N3" and proto ~= "N4" then
         return Reject("unknown protocol " .. PeerEsc(proto, 8))
     end
     if fields[2] ~= db.game then
@@ -1112,11 +1187,11 @@ local function ReceivePeerMessage(message, sender)
     local faction = fields[8]
     if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject("bad faction") end
 
-    -- Place (N3 only). Every part is optional: "-"/"?" means "the peer did not
+    -- Place (N3/N4). Every part is optional: "-"/"?" means "the peer did not
     -- know". Coordinates outside 0..1 are rejected as a whole pair, never
     -- clamped — a clamped point would put a marker where nobody ever stood.
-    local zoneId, zoneName, px, py
-    if proto == "N3" then
+    local zoneId, zoneName, px, py, observedAt
+    if proto ~= "N2" then
         zoneId = tonumber(fields[9])
         if not zoneId or zoneId < 0 or zoneId % 1 ~= 0 or zoneId > 100000 then
             return Reject("bad zone id")
@@ -1130,6 +1205,14 @@ local function ReceivePeerMessage(message, sender)
             end
         else
             px, py = nil, nil
+        end
+        if proto == "N4" then
+            observedAt = tonumber(fields[13])
+            -- Время наблюдения: отрицательное или абсурдно далёкое будущее —
+            -- отказ. Часы у отправителя могут врать, но не на годы; иначе
+            -- один пакет «из 2030 года» навсегда перебивал бы все обновления.
+            if not observedAt or observedAt <= 0 then return Reject("bad time") end
+            if observedAt > time() + PEER_CLOCK_SKEW then return Reject("time in future") end
         end
     end
     peerStats.valid = peerStats.valid + 1
@@ -1145,6 +1228,10 @@ local function ReceivePeerMessage(message, sender)
     local isNew = UpsertPlayer(db, {key = name .. "-" .. realm, name = name, realm = realm,
         class = class, level = level, race = race ~= "?" and race or nil,
         observe = false,
+        -- Время наблюдения из пакета N4: без него нельзя решить, обновлять ли
+        -- уже известные поля. У N2/N3 времени нет — тогда nil и работает
+        -- старое правило «peer только заполняет пустое».
+        peerObservedAt = observedAt,
         -- the packet has only the file key; translate it once at intake so the
         -- stored record matches what a local observation would have written
         classLoc = ClassLocFromFile(class),
@@ -5316,12 +5403,51 @@ if addMessageFilter then
         return IsPeerChannel(rawChannel) or IsPeerChannel(channelName)
     end)
 end
-if WorldFrame and WorldFrame.HookScript then
-    WorldFrame:HookScript("OnMouseDown", function()
-        local ok, err = pcall(DrainPeerQueue)
-        if not ok then DbgErr("peerSend", err) end
-    end)
+-- Разгрузка очереди обмена. Сервер требует РЕАЛЬНОГО ввода для отправки в
+-- канал (hardware gate беты) — программный SendChatMessage в тишине не
+-- проходит. Обойти это нельзя, но можно ловить БОЛЬШЕ реальных вводов:
+-- раньше триггер был один (клик по 3D-миру), и очередь стояла вечно, пока
+-- игрок специально не кликнет по земле (наблюдалось 10.11.2026: queued=9,
+-- sent=0). Теперь разгрузка пробуется на любом действии, которое физически
+-- делает игрок: движение, каст, смена цели, клик по миру.
+--
+-- DrainPeerQueue сам решает, можно ли отправлять (PEER_GAP, наличие канала,
+-- пустая очередь), поэтому лишние вызовы ничего не стоят.
+-- Диагностика: сколько раз каждый триггер реально пытался отправить. По SV
+-- видно, работают ли hardware-ворота в этом клиенте и какие вводы до них
+-- доходят (peerSendError покажет отказ сервера).
+function PeerDrainStat(why)
+    local okDb, db = pcall(GetDB)
+    if not okDb or type(db) ~= "table" then return end
+    db.debug = db.debug or {}
+    db.debug.peerDrain = db.debug.peerDrain or {}
+    db.debug.peerDrain[why] = (db.debug.peerDrain[why] or 0) + 1
 end
+
+local function PeerTryDrain(why)
+    PeerDrainStat(why)
+    local ok, err = pcall(DrainPeerQueue)
+    if not ok then DbgErr("peerSend:" .. tostring(why), err) end
+end
+
+if WorldFrame and WorldFrame.HookScript then
+    WorldFrame:HookScript("OnMouseDown", function() PeerTryDrain("world") end)
+end
+
+-- События реального ввода: каждое означает, что игрок что-то нажал.
+-- Регистрируются на отдельном фрейме, чтобы не трогать основной обработчик.
+local peerInput = CreateFrame("Frame")
+peerInput:RegisterEvent("PLAYER_STARTED_MOVING")
+peerInput:RegisterEvent("PLAYER_STOPPED_MOVING")
+peerInput:RegisterEvent("UNIT_SPELLCAST_START")
+peerInput:RegisterEvent("PLAYER_TARGET_CHANGED")
+peerInput:RegisterEvent("START_LOOT_ROLL")
+peerInput:SetScript("OnEvent", function(_, event, arg1)
+    -- UNIT_SPELLCAST_START приходит для любого юнита: нас интересует только
+    -- действие самого игрока, иначе чужие касты в группе будут дёргать очередь.
+    if event == "UNIT_SPELLCAST_START" and arg1 ~= "player" then return end
+    PeerTryDrain(event)
+end)
 chatFrame:RegisterEvent("CHAT_MSG_SAY")
 chatFrame:RegisterEvent("CHAT_MSG_YELL")
 chatFrame:RegisterEvent("CHAT_MSG_CHANNEL")
