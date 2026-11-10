@@ -72,26 +72,26 @@ class ZoneDictionaryTests(unittest.TestCase):
     # --- построение --------------------------------------------------------
 
     def test_dictionary_maps_both_directions(self):
-        lua = self.make({12: "Elwynn Forest", 14: "Durotar", 2521: "Zephras Isle"})
-        self.assertEqual(14, lua.globals()["TestByName"]("Durotar"))
-        self.assertEqual("Zephras Isle", lua.globals()["TestById"](2521))
+        lua = self.make({1420: "Elwynn Forest", 1413: "Durotar", 2665: "Zephras Isle"})
+        self.assertEqual(1413, lua.globals()["TestByName"]("Durotar"))
+        self.assertEqual("Zephras Isle", lua.globals()["TestById"](2665))
 
     def test_diagnostic_records_which_ids_were_found(self):
         # именно этой информации не хватало: found=60 без списка — непонятно,
         # покрыт словарь частично или скан прошёл слишком рано
-        lua = self.make({12: "Elwynn Forest", 14: "Durotar"})
+        lua = self.make({1420: "Elwynn Forest", 1413: "Durotar"})
         lua.globals()["TestInit"]()
         dbg = lua.globals()["TestDbg"]["debug"]["zoneMap"]
         self.assertEqual(2, int(dbg["found"]))
         sample = [str(dbg["sample"][i]) for i in range(1, len(dbg["sample"]) + 1)]
-        self.assertTrue(any("12=" in s for s in sample), sample)
+        self.assertTrue(any("1420=" in s for s in sample), sample)
 
     def test_unknown_name_returns_nil(self):
-        lua = self.make({12: "Elwynn Forest"})
+        lua = self.make({1420: "Elwynn Forest"})
         self.assertIsNone(lua.globals()["TestByName"]("Нет такой зоны"))
 
     def test_unknown_id_returns_nil(self):
-        lua = self.make({12: "Elwynn Forest"})
+        lua = self.make({1420: "Elwynn Forest"})
         self.assertIsNone(lua.globals()["TestById"](999999))
 
     def test_missing_api_gives_empty_dictionary_without_crash(self):
@@ -103,7 +103,7 @@ class ZoneDictionaryTests(unittest.TestCase):
 
     def test_incomplete_dictionary_is_refreshed(self):
         # первый скан дал огрызок (2 карты < порога), второй — полный
-        lua = self.make({12: "Elwynn Forest", 14: "Durotar"})
+        lua = self.make({1420: "Elwynn Forest", 1413: "Durotar"})
         lua.globals()["TestInit"]()
         self.assertFalse(bool(lua.globals()["TestReady"]()),
                          "2 карты не должны считаться полным словарём")
@@ -116,7 +116,7 @@ class ZoneDictionaryTests(unittest.TestCase):
 
     def test_refresh_is_rate_limited(self):
         # второй вызов в ту же секунду не пересканирует: 3000 id не бесплатны
-        lua = self.make({12: "Elwynn Forest"})
+        lua = self.make({1420: "Elwynn Forest"})
         lua.globals()["TestInit"]()
         lua.globals()["TestRefresh"]()
         before = int(lua.globals()["TestDbg"]["debug"]["zoneMap"]["found"])

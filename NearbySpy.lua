@@ -274,11 +274,16 @@ end
 NSP_ZONE_BY_NAME = nil      -- имя -> id
 NSP_ZONE_NAME_BY_ID = nil   -- id -> имя
 
-local ZONE_SCAN_MAX = 3000  -- с запасом: живые id доходят до 2521+
--- Порог «словарь полон». Живой скан на 1.60.1 собрал 60 карт из 3000 — это
--- заведомо огрызок (в базе 821 уникальная зона), значит C_Map отдаёт данные
--- не сразу. Ниже порога разрешаем повторный скан.
-local ZONE_MAP_MIN = 200
+-- Диапазон id для скана. Живой прогон 10.11.2026 показал, что C_Map на этом
+-- клиенте НЕ отвечает ниже 1412: минимальный найденный id был 1412, а всё
+-- пространство 1..1411 молчало. Скан 1..3000 собирал лишь 60 карт — не потому
+-- что справочник мал, а потому что диапазон был не тот. Начинаем с 1000 (с
+-- запасом ниже фактической границы) и идём до 6000: id 2665 уже встречается.
+local ZONE_SCAN_FROM, ZONE_SCAN_TO = 1000, 6000
+-- Порог «словарь полон». В базе 821 уникальная зона, живой скан до сдвига
+-- диапазона давал 60 — это огрызок. 400 — середина: заведомо больше огрызка,
+-- но не требует полного идеала от кастомного клиента. Ниже — пересканируем.
+local ZONE_MAP_MIN = 400
 local zoneMapLastScan = 0
 
 -- ZoneMapInit — построить словари. Возвращает карты (пустые, если API нет).
@@ -288,7 +293,7 @@ function ZoneMapInit()
     NSP_ZONE_BY_NAME, NSP_ZONE_NAME_BY_ID = byName, byId
     if not (C_Map and C_Map.GetMapInfo) then return byName, byId end
     local found = 0
-    for id = 1, ZONE_SCAN_MAX do
+    for id = ZONE_SCAN_FROM, ZONE_SCAN_TO do
         local ok, info = pcall(C_Map.GetMapInfo, id)
         if ok and type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
             -- секретные строки (combat) не индексируем: они не читаются
@@ -317,7 +322,10 @@ function ZoneMapInit()
             if shown <= 40 then ids[#ids + 1] = tostring(id) .. "=" .. name end
         end
         table.sort(ids)
-        db.debug.zoneMap = { scanned = ZONE_SCAN_MAX, found = found, sample = ids }
+        db.debug.zoneMap = {
+            from = ZONE_SCAN_FROM, to = ZONE_SCAN_TO,
+            found = found, sample = ids,
+        }
     end
     return byName, byId
 end
