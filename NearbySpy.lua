@@ -896,6 +896,13 @@ function PeerChannelName()
     -- фракция неизвестна (ранний вызов, нестандартный сервер) — общий канал
     return PEER_CHANNEL_BASE
 end
+-- Протокол отправки. N6 кодирует класс/расу/фракцию одним символом (экономия
+-- 19 байт на запись). N5 — переходный: те же пачки, но поля текстом; включается
+-- настройкой, если в канале остались клиенты, которые N6 не понимают.
+-- Приём поддерживает ВСЁ от N2 до N6, поэтому старые клиенты продолжают
+-- работать в обе стороны: мы их слышим, они нас — пока мы в режиме N5.
+local PEER_PROTO = "N6"
+
 local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
 -- Допустимое расхождение часов у отправителя пакета N4. Больше — отказ:
 -- «пакет из будущего» иначе навсегда перебивал бы все обновления.
@@ -960,6 +967,56 @@ local function PeerField(s, maxLen)
         and not s:find("[%c|;]")
 end
 
+-- ── Коды для класса, расы и фракции (протокол N6) ──────────────────────────
+-- Эти три поля — конечные множества, и в текстовом виде они самые дорогие после
+-- имени: "PALADIN;Human;Alliance" = 23 байта, кодами — 5. Экономия 19 байт на
+-- запись поднимает ёмкость сообщения с 2 записей до 3 при длинной зоне.
+--
+-- Код — ОДИН символ латиницы. 'z' = «значение не из таблицы»: тогда настоящее
+-- значение едет текстом в дополнительном поле записи (см. N6). Это нужно,
+-- потому что сервер кастомный: раса Skyborne уже есть (и встречается у ОБЕИХ
+-- фракций — 1506 у Альянса, 26 у Орды, поэтому фракцию нельзя выводить из расы),
+-- а следующая кастомная раса не должна потеряться.
+--
+-- Таблицы глобальные: главный чанк стоит у потолка Lua 5.1 в 200 локалах.
+NSP_PEER_CODES = {
+    class = {
+        a = "WARRIOR", b = "PALADIN", c = "HUNTER", d = "ROGUE", e = "PRIEST",
+        f = "SHAMAN", g = "MAGE", h = "WARLOCK", i = "DRUID",
+    },
+    race = {
+        a = "Human", b = "Dwarf", c = "NightElf", d = "Gnome",
+        e = "Orc", f = "Scourge", g = "Tauren", h = "Troll", i = "Skyborne",
+    },
+    faction = { a = "Alliance", h = "Horde" },
+}
+local PEER_CODE_UNKNOWN = "z"
+
+-- Обратные карты строятся один раз при загрузке.
+NSP_PEER_DECODE = { class = {}, race = {}, faction = {} }
+for kind, map in pairs(NSP_PEER_CODES) do
+    for code, name in pairs(map) do
+        NSP_PEER_DECODE[kind][name] = code
+    end
+end
+
+-- PeerEncode(kind, value) -> code, needsText
+-- needsText=true означает: значение не в таблице, его надо отправить текстом.
+function PeerEncode(kind, value)
+    if type(value) ~= "string" or value == "" then return PEER_CODE_UNKNOWN, false end
+    local code = NSP_PEER_DECODE[kind][value]
+    if code then return code, false end
+    return PEER_CODE_UNKNOWN, true
+end
+
+-- PeerDecode(kind, code, text) -> значение. text используется, когда код 'z'.
+function PeerDecode(kind, code, text)
+    if code == PEER_CODE_UNKNOWN then
+        return (type(text) == "string" and text ~= "") and text or nil
+    end
+    return NSP_PEER_CODES[kind][code or ""]
+end
+
 -- Peers now carry the place as well (protocol N3, fields 9-12). A chat message
 -- is capped by the client at 255 bytes, so the payload is built with a budget and
 -- loses its optional parts in a fixed order instead of being dropped whole:
@@ -1016,19 +1073,30 @@ QueuePeerNew = function(db, data)
         px, py = PeerCoord(data.x), PeerCoord(data.y)
     end
 
-    -- Запись без заголовка: имя;класс;уровень;раса;фракция;зонаId;зона;x;y;время.
-    -- Заголовок (протокол, игра, мир) общий для всей пачки, поэтому в очередь
-    -- кладётся именно эта часть — иначе при отправке пришлось бы разбирать
-    -- готовый пакет обратно.
+    -- Запись N6: имя;класс;уровень;раса;фракция;зонаId;зона;x;y;время[;текст]
+    -- Первые три кодируются ОДНИМ символом. Дополнительное поле в конце
+    -- появляется только когда что-то не вошло в таблицу кодов: тогда 'z' в
+    -- соответствующем слоте, а сами значения — через запятую в хвосте
+    -- (порядок: класс, раса, фракция — только для 'z').
+    local clsCode, clsText = PeerEncode("class", data.class)
+    local raceCode, raceText = PeerEncode("race", race ~= "?" and race or nil)
+    local facCode, facText = PeerEncode("faction", faction ~= "?" and faction or nil)
+    local extra = {}
+    if clsText then extra[#extra + 1] = tostring(data.class or "") end
+    if raceText then extra[#extra + 1] = tostring(race ~= "?" and race or "") end
+    if facText then extra[#extra + 1] = tostring(faction ~= "?" and faction or "") end
+
     local function BuildRec(z, zid, cx, cy)
-        return table.concat({data.name,
-            data.class, tostring(level), race, faction,
+        local rec = table.concat({data.name,
+            clsCode, tostring(level), raceCode, facCode,
             tostring(zid), z, cx, cy, tostring(tonumber(data.observedAt) or time())}, ";")
+        if #extra > 0 then rec = rec .. ";" .. table.concat(extra, ",") end
+        return rec
     end
-    -- Размер проверяется по ОДИНОЧНОМУ пакету N4: запись, которая не влезает
-    -- одна, не влезет и в пачке.
+    -- Размер проверяется по ОДИНОЧНОМУ пакету: запись, которая не влезает одна,
+    -- не влезет и в пачке.
     local function PayloadOf(r)
-        return table.concat({"N4", db.game, data.realm, r}, ";")
+        return table.concat({"N6", db.game, data.realm, r}, ";")
     end
     local rec = BuildRec(zoneName, zoneId, px, py)
     if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("?", zoneId, px, py) end
@@ -1043,6 +1111,12 @@ QueuePeerNew = function(db, data)
     peerQueue[#peerQueue + 1] = {
         key = key, rec = rec, name = data.name, at = time(),
         game = db.game, realm = data.realm,
+        -- Текстовая запись N4 для переходного режима PEER_PROTO == "N5":
+        -- собирается здесь, а не при отправке, чтобы не тащить в очередь
+        -- исходные поля ради редкого случая.
+        legacyRec = table.concat({data.name, data.class, tostring(level), race, faction,
+            tostring(zoneId), zoneName, px, py,
+            tostring(tonumber(data.observedAt) or time())}, ";"),
     }
     peerQueued[key] = true
     -- Only the first detailed encounter is queued: this line is the proof that
@@ -1094,7 +1168,11 @@ local function DrainPeerQueue()
     -- мир — часть заголовка, иначе его пришлось бы повторять в каждой записи,
     -- съев весь выигрыш.
     local head = peerQueue[1]
-    local batch, batchLen = { head }, #head.rec
+    -- Заголовок "N6;game;realm;" входит в лимит сообщения, поэтому считается
+    -- сразу: без него пачка вылезала за PEER_PAYLOAD_MAX (живой прогон теста:
+    -- 252 байта при лимите 240).
+    local headerLen = #PEER_PROTO + 1 + #head.game + 1 + #head.realm + 1
+    local batch, batchLen = { head }, headerLen + #head.rec
     local i = 2
     while i <= #peerQueue and #batch < PEER_BATCH_MAX do
         local it = peerQueue[i]
@@ -1107,13 +1185,16 @@ local function DrainPeerQueue()
     end
 
     local payload
+    -- Запись под текущий протокол: в режиме N5 (переходный) поля идут текстом.
+    local function recFor(it)
+        return (PEER_PROTO == "N5") and (it.legacyRec or it.rec) or it.rec
+    end
     if #batch == 1 then
-        -- Одна запись — шлём прежний N4: старый клиент в канале её поймёт.
-        payload = "N4;" .. head.game .. ";" .. head.realm .. ";" .. head.rec
+        payload = PEER_PROTO .. ";" .. head.game .. ";" .. head.realm .. ";" .. recFor(head)
     else
         local parts = {}
-        for k = 1, #batch do parts[k] = batch[k].rec end
-        payload = "N5;" .. head.game .. ";" .. head.realm .. ";" .. table.concat(parts, "|")
+        for k = 1, #batch do parts[k] = recFor(batch[k]) end
+        payload = PEER_PROTO .. ";" .. head.game .. ";" .. head.realm .. ";" .. table.concat(parts, "|")
     end
 
     local ok, result = pcall(send, payload, "CHANNEL", nil, channel)
@@ -1211,13 +1292,16 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
 
-    -- Пачка N5: N5;game;realm;<rec>|<rec>|…
-    -- Разбирается ЗДЕСЬ и каждая запись уходит в обычную валидацию как N4 —
-    -- так пачка не получает ни одного правила, которого нет у одиночного
-    -- пакета (проверка мира, имени, уровня, зоны, времени).
-    if fields[1] == "N5" then
+    -- Пачка N6/N5: Nx;game;realm;<rec>|<rec>|…
+    -- Признак пачки — символ '|': он ЗАПРЕЩЁН в имени, зоне и мире (PeerField),
+    -- поэтому в одиночном пакете его быть не может. Без этой проверки одиночный
+    -- N5 неотличим от пачки (у обоих 13 полей), и строка уходила в batch-ветку
+    -- заново — рекурсия до лимита частоты.
+    if (fields[1] == "N6" or fields[1] == "N5")
+        and type(message) == "string" and message:find("|", 1, true) then
+        local proto = fields[1]
         if not fields[2] or not fields[3] then return Reject("batch header") end
-        local prefix = "N5;" .. fields[2] .. ";" .. fields[3] .. ";"
+        local prefix = proto .. ";" .. fields[2] .. ";" .. fields[3] .. ";"
         if message:sub(1, #prefix) ~= prefix then return Reject("batch header") end
         local rest = message:sub(#prefix + 1)
         local n = 0
@@ -1225,8 +1309,10 @@ local function ReceivePeerMessage(message, sender, fromBatch)
             if part ~= "" then
                 n = n + 1
                 if n > PEER_BATCH_MAX then break end
+                -- Запись внутри пачки НЕ содержит протокола и мира: они в
+                -- заголовке. Всегда собираем полный пакет заново.
                 ReceivePeerMessage(
-                    "N4;" .. fields[2] .. ";" .. fields[3] .. ";" .. part, sender, true)
+                    proto .. ";" .. fields[2] .. ";" .. fields[3] .. ";" .. part, sender, true)
             end
         end
         if n == 0 then return Reject("empty batch") end
@@ -1236,11 +1322,16 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     end
 
     -- N2 = 8 fields (no place), N3 = 12 (zone id, zone name, x, y),
-    -- N4 = 13 (N3 + unix observation time). All are accepted so an older
-    -- client in the channel is not cut off.
-    if #fields ~= 8 and #fields ~= 12 and #fields ~= 13 then return Reject("field count") end
+    -- N4 = 13 (N3 + unix observation time),
+    -- N5 = 13 (N4 с текстовыми классом/расой/фракцией),
+    -- N6 = 13 или 14 (то же, но класс/раса/фракция — ОДИН символ; 14-е поле
+    -- появляется только когда значение не вошло в таблицу кодов).
+    -- Приём держит ВСЕ версии: старый клиент в канале не должен замолчать.
+    if #fields ~= 8 and #fields ~= 12 and #fields ~= 13 and #fields ~= 14 then
+        return Reject("field count")
+    end
     local proto = fields[1]
-    if proto ~= "N2" and proto ~= "N3" and proto ~= "N4" then
+    if proto ~= "N2" and proto ~= "N3" and proto ~= "N4" and proto ~= "N5" and proto ~= "N6" then
         return Reject("unknown protocol " .. PeerEsc(proto, 8))
     end
     if fields[2] ~= db.game then
@@ -1260,13 +1351,46 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         peerStats.foreign = peerStats.foreign + 1
     end
     local realm, name, class = fields[3], fields[4], fields[5]
-    if not PeerField(name, 60) or not PeerField(realm, 100)
-        or not class:match("^[A-Z]+$") or #class > 32 then return Reject("bad name/class") end
+    local race, faction
+    if proto == "N6" then
+        -- класс/раса/фракция — односимвольные коды; 'z' означает «не из
+        -- таблицы», тогда значения идут текстом в 14-м поле через запятую в
+        -- порядке класс, раса, фракция — только для тех, у кого код 'z'.
+        if not PeerField(name, 60) or not PeerField(realm, 100)
+            or type(class) ~= "string" or #class ~= 1 then return Reject("bad name/class") end
+        local extra = {}
+        if fields[14] and fields[14] ~= "" then
+            for part in (fields[14] .. ","):gmatch("(.-),") do
+                extra[#extra + 1] = part
+            end
+        end
+        local idx = 0
+        local function takeText(code)
+            if code ~= PEER_CODE_UNKNOWN then return nil end
+            idx = idx + 1
+            return extra[idx]
+        end
+        local clsText = takeText(class)
+        local raceCode, facCode = fields[7], fields[8]
+        if type(raceCode) ~= "string" or #raceCode ~= 1
+            or type(facCode) ~= "string" or #facCode ~= 1 then return Reject("bad race/faction code") end
+        local raceText = takeText(raceCode)
+        local facText = takeText(facCode)
+        class = PeerDecode("class", class, clsText) or ""
+        race = PeerDecode("race", raceCode, raceText) or "?"
+        faction = PeerDecode("faction", facCode, facText) or "?"
+        if class == "" then return Reject("unknown class code") end
+    end
+    if proto ~= "N6" then
+        if not PeerField(name, 60) or not PeerField(realm, 100)
+            or not class:match("^[A-Z]+$") or #class > 32 then return Reject("bad name/class") end
+        race = fields[7]
+        faction = fields[8]
+    end
     local level = tonumber(fields[6])
     if not level or level < 1 or level > 80 or level % 1 ~= 0 then return Reject("bad level") end
-    local race = fields[7]
+    if type(race) ~= "string" then race = "?" end
     if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return Reject("bad race") end
-    local faction = fields[8]
     if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject("bad faction") end
 
     -- Place (N3/N4). Every part is optional: "-"/"?" means "the peer did not
@@ -5344,6 +5468,14 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         else
             P("Peer channel visibility unavailable: " .. tostring(result))
         end
+    elseif msg == "peer proto" then
+        -- Переходный режим: N6 экономит 19 байт на запись, но клиент старой
+        -- версии его не поймёт. Команда позволяет вернуться на N5 (те же пачки,
+        -- поля текстом) без переустановки аддона.
+        PEER_PROTO = (PEER_PROTO == "N6") and "N5" or "N6"
+        db.peerProto = PEER_PROTO
+        P(("Peer protocol: %s (приём N2-N6 работает всегда)"):format(PEER_PROTO))
+        if PeerSync then pcall(PeerSync) end
     elseif msg == "peer send" then
         -- Ручная разгрузка очереди. Очередь штатно уходит только по клику в
         -- 3D-мир (hardware gate беты: WorldFrame OnMouseDown). Если этот гейт

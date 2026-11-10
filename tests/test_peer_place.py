@@ -76,10 +76,11 @@ class PeerPlaceTests(unittest.TestCase):
         sent = [str(p) for p in self.lua.globals()["QUEUED"].values()]
         self.assertEqual(1, len(sent))
         parts = sent[0].split(";")
-        # N4 = N3 (12 полей) + время наблюдения: получатель должен уметь
-        # отличить свежий пакет от пролежавшего в очереди
+        # N6 = N3 (12 полей) + время наблюдения; класс/раса/фракция — по одному
+        # символу (коды), поэтому текст в этих слотах заменён кодами.
         self.assertEqual(13, len(parts))
-        self.assertEqual("N4", parts[0])
+        self.assertEqual("N6", parts[0])
+        self.assertEqual(1, len(parts[4]), "класс не закодирован: %r" % parts[4])
         self.assertEqual("1429", parts[8])
         self.assertEqual("Таверна \"Гордость льва\"", parts[9])
         self.assertEqual("0.5231", parts[10])

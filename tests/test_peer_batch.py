@@ -40,6 +40,7 @@ def queue_part() -> str:
 SEND_HARNESS = """
 time = function() return 1000 end
 PEER_CHANNEL_BASE = 'nearbyspy'
+PEER_PROTO = "N6"
 PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 0   -- GAP=0: шлём сразу
 PEER_PAYLOAD_MAX = 240
 PEER_BATCH_MAX = 5
@@ -66,10 +67,18 @@ C_ChatInfo = nil
 """
 
 
+def codes_block() -> str:
+    """Таблицы кодов класса/расы/фракции и функции PeerEncode/PeerDecode."""
+    src = SOURCE.read_text(encoding="utf-8")
+    start = src.index("NSP_PEER_CODES = {")
+    end = src.index("-- Peers now carry the place as well")
+    return src[start:end]
+
+
 class BatchSendTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(CONST_PRELUDE + "\n" + SEND_HARNESS + "\n"
+        self.lua.execute(CONST_PRELUDE + "\n" + SEND_HARNESS + "\n" + codes_block() + "\n"
                          + queue_part() + "\n"
                          "TestQueue = QueuePeerNew\n"
                          "TestDrain = DrainPeerQueue\n")
@@ -89,12 +98,25 @@ class BatchSendTests(unittest.TestCase):
 
     # --- одиночная запись остаётся N4 --------------------------------------
 
-    def test_single_record_is_sent_as_n4(self):
+    def test_single_record_is_sent_as_n6(self):
         self.push("Alice")
         self.g["TestDrain"]()
         sent = self.sent()
         self.assertEqual(1, len(sent))
-        self.assertTrue(sent[0].startswith("N4;"), sent[0][:20])
+        self.assertTrue(sent[0].startswith("N6;"), sent[0][:20])
+        # класс/раса/фракция — односимвольные коды, не текст
+        parts = sent[0].split(";")
+        self.assertEqual(1, len(parts[4]), "класс не закодирован: %r" % parts[4])
+        self.assertEqual(1, len(parts[6]), "раса не закодирована: %r" % parts[6])
+        self.assertEqual(1, len(parts[7]), "фракция не закодирована: %r" % parts[7])
+
+    def test_encoded_fields_are_shorter_than_text(self):
+        # ради этого всё и делалось: текстовые PALADIN/Human/Alliance — 23 байта
+        self.push("Alice")
+        self.g["TestDrain"]()
+        single = self.sent()[0]
+        text_form = single.replace(";g;10;a;a;", ";MAGE;10;Human;Alliance;")
+        self.assertLess(len(single.encode()), len(text_form.encode()))
 
     # --- пачка -------------------------------------------------------------
 
@@ -103,7 +125,7 @@ class BatchSendTests(unittest.TestCase):
         self.g["TestDrain"]()
         sent = self.sent()
         self.assertEqual(1, len(sent), "две записи ушли двумя сообщениями")
-        self.assertTrue(sent[0].startswith("N5;"))
+        self.assertTrue(sent[0].startswith("N6;"))
         body = sent[0].split(";", 3)[3]
         self.assertEqual(2, len(body.split("|")))
 
@@ -126,7 +148,7 @@ class BatchSendTests(unittest.TestCase):
         self.g["TestDrain"]()
         sent = self.sent()
         self.assertEqual(1, len(sent), "за один вызов ушло больше одного сообщения")
-        self.assertTrue(sent[0].startswith("N4;forever;R1;"),
+        self.assertTrue(sent[0].startswith("N6;forever;R1;"),
                         "в пачку попал не тот мир: %s" % sent[0][:30])
         self.assertNotIn("Bob", sent[0], "в чужой мир уехала запись другого мира")
         self.assertEqual(1, len(self.g["peerQueue"]), "второй мир должен ждать своей отправки")
