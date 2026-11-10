@@ -120,6 +120,8 @@ class N6ReceiveTests(unittest.TestCase):
                          "function PeerField(s, n) return type(s) == 'string' and #s > 0 "
                          "and #s <= n and not s:find('[%c|;,]') end\n"
                          "PEER_BATCH_SEP = ','\n"
+                         "ZONE_NAMES = { [12] = 'Elwynn', [14] = 'Durotar', [2521] = 'Zephras Isle' }\n"
+                         "function ZoneNameById(id) return ZONE_NAMES[tonumber(id)] end\n"
                          "function PeerCoord(v) return string.format('%.4f', v) end\n"
                          "function ClassLocFromFile() return nil end\n"
                          "PEER_BATCH_MAX, PEER_CLOCK_SKEW = 5, 3600\n"
@@ -155,7 +157,7 @@ class N6ReceiveTests(unittest.TestCase):
 
     def test_n6_decodes_all_three_codes(self):
         # b = PALADIN, a = Human, a = Alliance
-        self.recv("N6;forever;R;Alice;b;20;a;a;12;Elwynn;-;-;1794300000")
+        self.recv("N6;forever;R;Alice;b;20;a;a;12;-;-;1794300000")
         p = self.player("Alice")
         self.assertIsNotNone(p, "запись N6 не принята")
         self.assertEqual("PALADIN", p["class"])
@@ -164,7 +166,7 @@ class N6ReceiveTests(unittest.TestCase):
 
     def test_n6_custom_race_travels_as_text(self):
         # раса не из таблицы: код 'z' и текст в 14-м поле
-        self.recv("N6;forever;R;Bob;g;30;z;a;12;Elwynn;-;-;1794300000;Pandaren")
+        self.recv("N6;forever;R;Bob;g;30;z;a;12;-;-;1794300000;Pandaren")
         p = self.player("Bob")
         self.assertIsNotNone(p, "запись с кастомной расой потеряна")
         self.assertEqual("Pandaren", p["race"])
@@ -172,7 +174,7 @@ class N6ReceiveTests(unittest.TestCase):
 
     def test_n6_unknown_class_code_is_rejected(self):
         # одиночная 'q' нет в таблице классов и не помечена как 'z' с текстом
-        self.recv("N6;forever;R;Ghost;X;20;a;a;12;Elwynn;-;-;1794300000")
+        self.recv("N6;forever;R;Ghost;X;20;a;a;12;-;-;1794300000")
         self.assertIsNone(self.player("Ghost"))
 
     # --- обратная совместимость -------------------------------------------

@@ -261,6 +261,67 @@ local function PlayerZoneId()
     return nil
 end
 
+-- ── Словарь зон: имя (на языке клиента) <-> UiMap id ───────────────────────
+-- Зачем: /who отдаёт зону ТЕКСТОМ на языке клиента и не даёт её id, поэтому id
+-- был известен только для нашей собственной зоны (23.5% записей). В пакете зона
+-- занимает ~26 байт текста против 4 у числа, и на приёме русский текст не
+-- читается enUS-клиентом.
+--
+-- Клиент умеет C_Map.GetMapInfo(id) -> { name, mapType, mapID, parentMapID }.
+-- Перебираем id один раз (лениво, при первом обращении) и строим обе карты.
+-- Несуществующий id даёт nil — этот контракт использует сам клиент
+-- (Blizzard_SharedMapDataProviders/VehicleDataProvider.lua: "if not mapInfo").
+NSP_ZONE_BY_NAME = nil      -- имя -> id
+NSP_ZONE_NAME_BY_ID = nil   -- id -> имя
+
+local ZONE_SCAN_MAX = 3000  -- с запасом: живые id доходят до 2521+
+
+-- ZoneMapInit — построить словари. Возвращает карты (пустые, если API нет).
+function ZoneMapInit()
+    if NSP_ZONE_BY_NAME then return NSP_ZONE_BY_NAME, NSP_ZONE_NAME_BY_ID end
+    local byName, byId = {}, {}
+    NSP_ZONE_BY_NAME, NSP_ZONE_NAME_BY_ID = byName, byId
+    if not (C_Map and C_Map.GetMapInfo) then return byName, byId end
+    local found = 0
+    for id = 1, ZONE_SCAN_MAX do
+        local ok, info = pcall(C_Map.GetMapInfo, id)
+        if ok and type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+            -- секретные строки (combat) не индексируем: они не читаются
+            if not (canaccessvalue and not canaccessvalue(info.name)) then
+                found = found + 1
+                byId[id] = info.name
+                local prev = byName[info.name]
+                -- при дубле имени оставляем ЗОНУ, а не континент/микро-область
+                if not prev or (info.mapType == 3) then
+                    byName[info.name] = id
+                end
+            end
+        end
+    end
+    local okDb, db = pcall(GetDB)
+    if okDb and type(db) == "table" then
+        db.debug = db.debug or {}
+        db.debug.zoneMap = { scanned = ZONE_SCAN_MAX, found = found }
+    end
+    return byName, byId
+end
+
+-- ZoneIdByName — id по тексту зоны из /who. nil, если зоны нет в словаре
+-- (тогда вызывающий шлёт текст, как раньше, — молча терять зону нельзя).
+function ZoneIdByName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    local byName = ZoneMapInit()
+    return byName[name]
+end
+
+-- ZoneNameById — имя зоны на языке ТЕКУЩЕГО клиента по id из пакета.
+function ZoneNameById(id)
+    local n = tonumber(id)
+    if not n or n <= 0 then return nil end
+    local _, byId = ZoneMapInit()
+    return byId[n]
+end
+
 local function Round4(v)
     if type(v) ~= "number" then return nil end
     return math.floor(v * 10000 + 0.5) / 10000
@@ -1093,11 +1154,12 @@ QueuePeerNew = function(db, data)
         px, py = PeerCoord(data.x), PeerCoord(data.y)
     end
 
-    -- Запись N6: имя;класс;уровень;раса;фракция;зонаId;зона;x;y;время[;текст]
-    -- Первые три кодируются ОДНИМ символом. Дополнительное поле в конце
-    -- появляется только когда что-то не вошло в таблицу кодов: тогда 'z' в
-    -- соответствующем слоте, а сами значения — через запятую в хвосте
-    -- (порядок: класс, раса, фракция — только для 'z').
+    -- Запись N6: имя;класс;уровень;раса;фракция;зонаId;x;y;время[;текст]
+    -- Класс/раса/фракция — ОДИН символ. Текста зоны НЕТ: в N6 обратная
+    -- совместимость не нужна, а id (4 байта) против имени (~26 байт) плюс
+    -- резолв на языке получателя — это и экономия, и корректная локализация.
+    -- Если id неизвестен, шлём 0 и имя в хвостовом поле «z»-механизма: терять
+    -- зону молча нельзя.
     local clsCode, clsText = PeerEncode("class", data.class)
     local raceCode, raceText = PeerEncode("race", race ~= "?" and race or nil)
     local facCode, facText = PeerEncode("faction", faction ~= "?" and faction or nil)
@@ -1122,11 +1184,16 @@ QueuePeerNew = function(db, data)
     if clsText then extra[#extra + 1] = cleanText(data.class) end
     if raceText then extra[#extra + 1] = cleanText(race ~= "?" and race or "") end
     if facText then extra[#extra + 1] = cleanText(faction ~= "?" and faction or "") end
+    -- Имя зоны уходит текстом только когда id не нашёлся: иначе получатель
+    -- возьмёт имя из своего клиента на своём языке. Порядок в хвосте:
+    -- класс, раса, фракция, зона — только для слотов, которым нужен текст.
+    local zoneNeedsText = (zoneId <= 0) and (zoneName ~= "" and zoneName ~= "?")
+    if zoneNeedsText then extra[#extra + 1] = cleanText(zoneName) end
 
-    local function BuildRec(z, zid, cx, cy)
+    local function BuildRec(cx, cy)
         local rec = table.concat({data.name,
             clsCode, tostring(level), raceCode, facCode,
-            tostring(zid), z, cx, cy, tostring(tonumber(data.observedAt) or time())}, ";")
+            tostring(zoneId), cx, cy, tostring(tonumber(data.observedAt) or time())}, ";")
         if #extra > 0 then rec = rec .. ";" .. table.concat(extra, ",") end
         return rec
     end
@@ -1135,9 +1202,8 @@ QueuePeerNew = function(db, data)
     local function PayloadOf(r)
         return table.concat({"N6", db.game, data.realm, r}, ";")
     end
-    local rec = BuildRec(zoneName, zoneId, px, py)
-    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("?", zoneId, px, py) end
-    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("?", zoneId, "-", "-") end
+    local rec = BuildRec(px, py)
+    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("-", "-") end
     if #PayloadOf(rec) > PEER_PAYLOAD_MAX then return end
     if #peerQueue >= PEER_QUEUE_MAX then
         local old = table.remove(peerQueue, 1)
@@ -1382,8 +1448,9 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     -- N2 = 8 fields (no place), N3 = 12 (zone id, zone name, x, y),
     -- N4 = 13 (N3 + unix observation time),
     -- N5 = 13 (N4 с текстовыми классом/расой/фракцией),
-    -- N6 = 13 или 14 (то же, но класс/раса/фракция — ОДИН символ; 14-е поле
-    -- появляется только когда значение не вошло в таблицу кодов),
+    -- N6 = 12 или 13: ЗАПИСЬ БЕЗ ТЕКСТА ЗОНЫ (name;cls;lvl;race;fac;zoneId;x;y;time
+    --      и необязательный хвост с 'z'-значениями). Это НЕ N3 с его 12 полями:
+    --      протокол различается первым полем.
     -- Приём держит ВСЕ версии: старый клиент в канале не должен замолчать.
     if #fields ~= 8 and #fields ~= 12 and #fields ~= 13 and #fields ~= 14 then
         return Reject("field count")
@@ -1418,6 +1485,7 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     end
     local realm, name, class = fields[3], fields[4], fields[5]
     local race, faction
+    local batchZoneText   -- имя зоны из хвоста, когда id не нашёлся (N6)
     if proto == "N6" then
         -- класс/раса/фракция — односимвольные коды; 'z' означает «не из
         -- таблицы», тогда значения идут текстом в 14-м поле через запятую в
@@ -1425,8 +1493,10 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         if not PeerField(name, 60) or not PeerField(realm, 100)
             or type(class) ~= "string" or #class ~= 1 then return Reject("bad name/class") end
         local extra = {}
-        if fields[14] and fields[14] ~= "" then
-            for part in (fields[14] .. PEER_BATCH_SEP):gmatch("(.-)" .. PEER_BATCH_SEP) do
+        -- Хвост с текстовыми значениями — 13-е поле (после zoneId;x;y;time).
+        -- Было 14-е, пока запись несла текст зоны.
+        if fields[13] and fields[13] ~= "" then
+            for part in (fields[13] .. PEER_BATCH_SEP):gmatch("(.-)" .. PEER_BATCH_SEP) do
                 extra[#extra + 1] = part
             end
         end
@@ -1446,6 +1516,10 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         race = PeerDecode("race", raceCode, raceText) or "?"
         faction = PeerDecode("faction", facCode, facText) or "?"
         if class == "" then return Reject("unknown class code") end
+        -- Имя зоны текстом приходит ТОЛЬКО если id не нашёлся, и стоит в хвосте
+        -- последним (после класса/расы/фракции). Отдаём наружу через
+        -- batchZoneText — переменную объявляем ниже, до использования.
+        batchZoneText = extra[idx + 1]
     end
     if proto ~= "N6" then
         if not PeerField(name, 60) or not PeerField(realm, 100)
@@ -1459,11 +1533,36 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return Reject("bad race") end
     if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject("bad faction") end
 
-    -- Place (N3/N4). Every part is optional: "-"/"?" means "the peer did not
-    -- know". Coordinates outside 0..1 are rejected as a whole pair, never
-    -- clamped — a clamped point would put a marker where nobody ever stood.
+    -- Place. Раскладка РАЗНАЯ у старых протоколов и у N6:
+    --   N3/N4/N5: zoneId;зона;x;y;время   (зона текстом)
+    --   N6:       zoneId;x;y;время        (текста зоны нет, имя по id)
+    -- Поэтому N6 разбирается отдельной веткой — подставлять его поля в старую
+    -- схему значило бы читать x как имя зоны.
     local zoneId, zoneName, px, py, observedAt
-    if proto ~= "N2" then
+    if proto == "N6" then
+        zoneId = tonumber(fields[9])
+        if not zoneId or zoneId < 0 or zoneId % 1 ~= 0 or zoneId > 100000 then
+            return Reject("bad zone id")
+        end
+        if fields[10] ~= "-" and fields[11] ~= "-" then
+            px, py = tonumber(fields[10]), tonumber(fields[11])
+            if not px or not py or px < 0 or px > 1 or py < 0 or py > 1 then
+                return Reject("bad coords")
+            end
+        else
+            px, py = nil, nil
+        end
+        observedAt = tonumber(fields[12])
+        if not observedAt or observedAt <= 0 then return Reject("bad time") end
+        if observedAt > time() + PEER_CLOCK_SKEW then return Reject("time in future") end
+        -- Имя зоны: из своего клиента по id (тогда оно на языке получателя).
+        -- Если id нет, имя могло приехать текстом в хвостовом поле — оно идёт
+        -- ПОСЛЕ зоны в общем хвосте, поэтому его забираем при разборе extra.
+        zoneName = (zoneId > 0) and ZoneNameById(zoneId) or nil
+        if not zoneName and batchZoneText and batchZoneText ~= "" then
+            if PeerField(batchZoneText, 60) then zoneName = batchZoneText end
+        end
+    elseif proto ~= "N2" then
         zoneId = tonumber(fields[9])
         if not zoneId or zoneId < 0 or zoneId % 1 ~= 0 or zoneId > 100000 then
             return Reject("bad zone id")
@@ -3026,9 +3125,12 @@ local function HandleWhoList()
             -- фракция всё равно известна — иначе игрок уезжает в базу без неё.
             faction = faction or PlayerFaction()
             -- player zone — from the /who reply (info.area), not our current one!
-            -- zoneId is known only if the zone matches ours (the API gives no id for foreign zones)
+            -- zoneId из словаря клиента: /who отдаёт зону текстом и id не даёт.
+            -- Раньше id ставился только когда зона совпадала с нашей (23.5%
+            -- записей); словарь поднимает это почти до полного покрытия и
+            -- позволяет отправлять в канал число вместо текста.
             local zone = info.area or ownZone
-            local zoneId = (zone == ownZone) and ownZoneId or nil
+            local zoneId = (zone == ownZone) and ownZoneId or ZoneIdByName(zone)
             if UpsertPlayer(db, {
                 key = name .. "-" .. realm,
                 name = name,

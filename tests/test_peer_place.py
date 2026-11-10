@@ -21,6 +21,9 @@ local REAP_SECONDS, newThisSession = 600, 0
 time = function() return 1000 end
 local function Round4(v) if v == nil then return nil end return math.floor(v * 10000 + 0.5) / 10000 end
 local function PlayerRealm() return "CAMWOW EU5 Realm 1 PvE" end
+-- Словарь зон замена: /who отдаёт текст, id берём из словаря.
+function ZoneIdByName(n) return ({ Elwynn = 12, Stormwind = 1519 })[n] end
+function ZoneNameById(id) return ({ [12] = 'Elwynn', [1429] = 'Goldshire Inn' })[tonumber(id)] end
 LOCALIZED_CLASS_NAMES_MALE = {MAGE="Маг", DRUID="Друид", WARRIOR="Воин", HUNTER="Охотник", PRIEST="Жрец", WARLOCK="Чернокнижник", PALADIN="Паладин", SHAMAN="Шаман", ROGUE="Разбойник"}
 function ClassLocFromFile(f) return (LOCALIZED_CLASS_NAMES_MALE or {})[f] end
 -- the receive path ignores packets we sent ourselves; make the local player
@@ -76,50 +79,48 @@ class PeerPlaceTests(unittest.TestCase):
         sent = [str(p) for p in self.lua.globals()["QUEUED"].values()]
         self.assertEqual(1, len(sent))
         parts = sent[0].split(";")
-        # N6 = N3 (12 полей) + время наблюдения; класс/раса/фракция — по одному
-        # символу (коды), поэтому текст в этих слотах заменён кодами.
-        self.assertEqual(13, len(parts))
+        # N6 = 12 полей: name;cls;lvl;race;fac;zoneId;x;y;time.
+        # Текста зоны НЕТ — в N6 он не нужен, получатель берёт имя по id на
+        # своём языке. Класс/раса/фракция — по одному символу.
+        self.assertEqual(12, len(parts))
         self.assertEqual("N6", parts[0])
         self.assertEqual(1, len(parts[4]), "класс не закодирован: %r" % parts[4])
-        self.assertEqual("1429", parts[8])
-        self.assertEqual("Таверна \"Гордость льва\"", parts[9])
-        self.assertEqual("0.5231", parts[10])
-        self.assertEqual("0.7113", parts[11])
+        self.assertEqual("1429", parts[8], "zoneId")
+        self.assertEqual("0.5231", parts[9], "x")
+        self.assertEqual("0.7113", parts[10], "y")
         # Время — момент НАБЛЮДЕНИЯ (1000, когда запись попала в очередь), а не
         # отправки (1100): пакет может пролежать в очереди минуты, и получатель
         # должен видеть, когда игрока видели, а не когда канал его пропустил.
-        self.assertEqual("1000", parts[12], "время наблюдения в последнем поле")
+        self.assertEqual("1000", parts[11], "время наблюдения — после координат")
 
     def test_who_record_never_sends_the_observers_position(self):
         # A /who entry has the player's zone but no coordinates: its x/y is where
         # WE stood. Sharing that put a stranger on our own map spot, and /who rows
         # are the vast majority of the database.
         parts = self.sent_parts(source="who", zone="Elwynn", zoneId=12, x=0.42, y=0.61)
-        self.assertEqual("12", parts[8])      # the zone still travels
-        self.assertEqual("Elwynn", parts[9])
-        self.assertEqual("-", parts[10])      # no position
-        self.assertEqual("-", parts[11])
+        self.assertEqual("12", parts[8])      # zoneId travels, text does not
+        self.assertEqual("-", parts[9])       # no position
+        self.assertEqual("-", parts[10])
 
     def test_chat_record_never_sends_a_position(self):
         parts = self.sent_parts(source="chat", zone="Stormwind", zoneId=1519,
                                 x=0.5, y=0.5)
+        self.assertEqual("-", parts[9])
         self.assertEqual("-", parts[10])
-        self.assertEqual("-", parts[11])
 
     def test_unit_record_without_unit_coordinates_sends_no_position(self):
         # the client refused UnitPosition, so x/y fell back to the observer —
         # that is not this player's position either
         parts = self.sent_parts(source="unit", zone="Elwynn", zoneId=12,
                                 x=0.42, y=0.61)
+        self.assertEqual("-", parts[9])
         self.assertEqual("-", parts[10])
-        self.assertEqual("-", parts[11])
 
     def test_missing_place_is_marked_not_invented(self):
         parts = self.sent_parts(**{})
-        self.assertEqual("0", parts[8])
-        self.assertEqual("?", parts[9])
+        self.assertEqual("0", parts[8], "zoneId 0 = неизвестна")
+        self.assertEqual("-", parts[9])
         self.assertEqual("-", parts[10])
-        self.assertEqual("-", parts[11])
 
     def sent_parts(self, **fields):
         self.queue(**fields)
