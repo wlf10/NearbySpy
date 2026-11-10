@@ -61,13 +61,16 @@ class PeerFilterTests(unittest.TestCase):
                          "found before this session started")
 
     def test_peer_new_shows_only_records_the_channel_taught_us(self):
-        # the 5th tab: channel rows that were NEW to us. A packet that only
-        # refreshed a known player sets peerAt alone, so it must not appear here.
-        self.assertTrue(self.visible("peern", {"peerAt": 900, "peerNew": True}))
-        self.assertFalse(self.visible("peern", {"peerAt": 900}),
+        # the 5th tab: channel rows that were NEW to us IN THIS SESSION. A packet
+        # that only refreshed a known player sets peerAt alone, so it must not
+        # appear here. Session start in this harness is time() = 1000.
+        self.assertTrue(self.visible("peern", {"peerAt": 1000, "peerNew": True}))
+        self.assertFalse(self.visible("peern", {"peerAt": 1000}),
                          "a refresh of a known player is not a new find")
         self.assertFalse(self.visible("peern", {"lastSeen": 1000}),
                          "a row from our own sighting never had a packet")
+        self.assertFalse(self.visible("peern", {"peerAt": 900, "peerNew": True}),
+                         "arrived in a previous session — the tab is about this one")
 
     def test_peer_tab_still_shows_updates_too(self):
         # the two tabs must differ, otherwise the 5th adds nothing

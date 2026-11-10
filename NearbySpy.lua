@@ -3571,12 +3571,12 @@ local function TacticalVisible(p, now)
         -- only list that shows what the channel actually delivered.
         return (p.peerAt or 0) > 0
     elseif tactical.filter == "peern" then
-        -- Only the channel records that were NEW to us: a peer packet that merely
-        -- refreshed a player we already knew sets peerAt alone (peerNew stays nil).
-        -- "New" is our own finds, "Peer" is everything from the channel, and this
-        -- is the intersection people actually ask about — players I learned about
-        -- from others and had never seen myself.
-        return (p.peerAt or 0) > 0 and p.peerNew == true
+        -- Только то, чему канал научил ЗА ЭТУ СЕССИЮ. peerNew/peerAt лежат в
+        -- SavedVariables и живут после релога, поэтому без проверки на
+        -- tactical.started вкладка показывала все записи канала за всё время
+        -- (на живом файле — 1451 строка за 19 часов). Это ровно та же ошибка,
+        -- что была у фильтра "new", и лечится так же.
+        return (p.peerAt or 0) >= tactical.started and p.peerNew == true
     end
     return true
 end
@@ -3750,7 +3750,12 @@ local function TacticalStats()
         end
         if (p.peerAt or 0) > 0 and not (p.peerForeign and GetDB().peerAllRealms == false) then
             st.peerN = st.peerN + 1
-            if p.peerNew then st.peerNewN = st.peerNewN + 1 end
+            -- Счётчик на вкладке "Peer new" — про текущую сессию, как и сам
+            -- фильтр (см. TacticalVisible). Иначе бейдж показывал бы число
+            -- записей за всё время, а список под ним — только сегодняшние.
+            if p.peerNew and (p.peerAt or 0) >= tactical.started then
+                st.peerNewN = st.peerNewN + 1
+            end
         end
         if p.faction == "Alliance" then st.alliance = st.alliance + 1
         elseif p.faction == "Horde" then st.horde = st.horde + 1
@@ -5505,20 +5510,19 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         end
         if PeerSync then pcall(PeerSync) end
     elseif msg == "peer new" or msg == "peer list" then
-        -- Everything the channel actually delivered, straight from the database:
-        -- peerAt/peerNew are persisted, so this list survives a relog, unlike
-        -- the in-memory counters printed by plain /nspy peer.
-        -- "peer new" = only records the channel taught us (the same subset as the
-        -- Peer new tab); "peer list" = everything the channel delivered, updates
-        -- included. Both were identical before, which read as a bug next to the
-        -- two separate tabs.
+        -- "peer new" = то, чему канал научил ЗА ЭТУ СЕССИЮ (тот же набор, что
+        -- вкладка "Peer new"); "peer list" = всё, что канал принёс когда-либо,
+        -- включая обновления. peerAt/peerNew лежат в SavedVariables, поэтому
+        -- без отсечки по tactical.started "peer new" показывал записи за всё
+        -- время — на живом файле это 1451 строка за 19 часов.
         local onlyNew = (msg == "peer new")
         local list, fresh, foreign = {}, 0, 0
         for _, p in pairs(db.players) do
             if (p.peerAt or 0) > 0 then
-                if p.peerNew then fresh = fresh + 1 end
+                local thisSession = (p.peerAt or 0) >= tactical.started
+                if p.peerNew and thisSession then fresh = fresh + 1 end
                 if p.peerForeign then foreign = foreign + 1 end
-                if not onlyNew or p.peerNew then list[#list + 1] = p end
+                if not onlyNew or (p.peerNew and thisSession) then list[#list + 1] = p end
             end
         end
         if #list == 0 then
