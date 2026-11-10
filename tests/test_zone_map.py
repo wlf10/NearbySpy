@@ -53,14 +53,25 @@ function GetDB() return DB end
 
 
 class ZoneDictionaryTests(unittest.TestCase):
-    def make(self, maps, with_api=True):
-        """maps: {id = name} — что отдаёт фейковый C_Map."""
+    def make(self, maps, with_api=True, children=None):
+        """maps: {id = name} — что отдаёт фейковый C_Map.
+        children: {parentId = {{mapID=, name=, mapType=}, ...}} — дерево."""
         lua = LuaRuntime(unpack_returned_tuples=True)
         entries = ", ".join("[%d] = { name = %r, mapType = 3, mapID = %d }" % (i, n, i)
                             for i, n in maps.items())
-        api = ("C_Map = { GetMapInfo = function(id) return ({ %s })[id] end }\n" % entries
+        kids = ""
+        if children:
+            parts = []
+            for parent, lst in children.items():
+                items = ", ".join(
+                    "{ mapID = %d, name = %r, mapType = %d }" % (c["mapID"], c["name"], c.get("mapType", 3))
+                    for c in lst)
+                parts.append("[%d] = { %s }" % (parent, items))
+            kids = "CHILDREN = { %s }\n" % ", ".join(parts)
+        api = ("C_Map = { GetMapInfo = function(id) return ({ %s })[id] end,\n"
+               "          GetMapChildrenInfo = function(id) return (CHILDREN or {})[id] or {} end }\n" % entries
                if with_api else "C_Map = nil\n")
-        lua.execute(HARNESS + api + zone_block() + "\n"
+        lua.execute(HARNESS + kids + api + zone_block() + "\n"
                     "TestInit = ZoneMapInit\n"
                     "TestRefresh = ZoneMapRefresh\n"
                     "TestReady = ZoneMapReady\n"
@@ -74,6 +85,51 @@ class ZoneDictionaryTests(unittest.TestCase):
     def test_dictionary_maps_both_directions(self):
         lua = self.make({1420: "Elwynn Forest", 1413: "Durotar", 2665: "Zephras Isle"})
         self.assertEqual(1413, lua.globals()["TestByName"]("Durotar"))
+        self.assertEqual("Zephras Isle", lua.globals()["TestById"](2665))
+
+    # --- обход дерева ------------------------------------------------------
+
+    def test_children_are_collected_from_the_tree(self):
+        # GetMapChildrenInfo(parent, nil, true) отдаёт поддерево; карты, которых
+        # нет в корневом диапазоне, должны попасть в словарь именно так
+        lua = self.make(
+            {1414: "Kalimdor"},
+            children={1414: [
+                {"mapID": 1413, "name": "Durotar"},
+                {"mapID": 1412, "name": "Mulgore"},
+            ]},
+        )
+        self.assertEqual(1413, lua.globals()["TestByName"]("Durotar"))
+        self.assertEqual("Mulgore", lua.globals()["TestById"](1412))
+
+    def test_nested_children_are_reached_when_not_pre_expanded(self):
+        # если клиент вернёт только прямых детей (без allDescendants), обход
+        # обязан спуститься сам — иначе микро-зоны потеряются
+        lua = self.make(
+            {1414: "Kalimdor"},
+            children={
+                1414: [{"mapID": 1413, "name": "Durotar"}],
+                1413: [{"mapID": 9999, "name": "Sen'jin Village"}],
+            },
+        )
+        self.assertEqual(9999, lua.globals()["TestByName"]("Sen'jin Village"))
+
+    def test_tree_walk_terminates_on_a_cycle(self):
+        # защита от петли в данных: клиент не должен подвесить аддон
+        lua = self.make(
+            {1414: "Kalimdor"},
+            children={1414: [{"mapID": 1414, "name": "Kalimdor"}]},
+        )
+        self.assertEqual(1414, lua.globals()["TestByName"]("Kalimdor"))
+
+    def test_roots_counter_is_reported(self):
+        lua = self.make({1414: "Kalimdor", 1415: "Eastern Kingdoms"})
+        lua.globals()["TestInit"]()
+        self.assertEqual(2, int(lua.globals()["TestDbg"]["debug"]["zoneMap"]["roots"]))
+
+    def test_zone_name_resolves_without_the_dictionary(self):
+        # на приёме словоарь не нужен: GetMapInfo(id) отвечает напрямую
+        lua = self.make({2665: "Zephras Isle"})
         self.assertEqual("Zephras Isle", lua.globals()["TestById"](2665))
 
     def test_diagnostic_records_which_ids_were_found(self):

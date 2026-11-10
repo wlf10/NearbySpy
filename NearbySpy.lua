@@ -274,66 +274,107 @@ end
 NSP_ZONE_BY_NAME = nil      -- имя -> id
 NSP_ZONE_NAME_BY_ID = nil   -- id -> имя
 
--- Диапазон id для скана. Живой прогон 10.11.2026 показал, что C_Map на этом
--- клиенте НЕ отвечает ниже 1412: минимальный найденный id был 1412, а всё
--- пространство 1..1411 молчало. Скан 1..3000 собирал лишь 60 карт — не потому
--- что справочник мал, а потому что диапазон был не тот. Начинаем с 1000 (с
--- запасом ниже фактической границы) и идём до 6000: id 2665 уже встречается.
-local ZONE_SCAN_FROM, ZONE_SCAN_TO = 1000, 6000
--- Порог «словарь полон». В базе 821 уникальная зона, живой скан до сдвига
--- диапазона давал 60 — это огрызок. 400 — середина: заведомо больше огрызка,
--- но не требует полного идеала от кастомного клиента. Ниже — пересканируем.
+-- Диапазон для поиска КОРНЕВЫХ карт. Обход дерева начинается с них, поэтому
+-- скан здесь маленький и грубый — точность не нужна, лишние id просто не
+-- ответят. Живой прогон 10.11.2026: ниже 1412 C_Map не отвечает вообще,
+-- поэтому начинаем с 1000.
+local ZONE_ROOT_FROM, ZONE_ROOT_TO = 1000, 6000
+-- Порог «словарь полон». В базе 821 уникальная зона; при обходе дерева
+-- ожидаем заметно больше. Ниже — пересканируем.
 local ZONE_MAP_MIN = 400
 local zoneMapLastScan = 0
 
--- ZoneMapInit — построить словари. Возвращает карты (пустые, если API нет).
+-- ZoneCollect — добавить карту и рекурсивно её детей в словари.
+-- GetMapChildrenInfo(uiMapID, nil, true) отдаёт ВСЁ поддерево одним вызовом
+-- (allDescendants=true), поэтому обход — это ~50 вызовов вместо перебора
+-- 5000 id. Именно из-за перебора мы раньше потеряли диапазон 1..1411.
+local function ZoneCollect(byName, byId, info, depth)
+    if type(info) ~= "table" then return 0 end
+    local id = tonumber(info.mapID)
+    local name = info.name
+    if not id or id <= 0 then return 0 end
+    -- секретные строки (combat) не индексируем: они не читаются
+    if canaccessvalue and type(name) == "string" and not canaccessvalue(name) then
+        return 0
+    end
+    local added = 0
+    if type(name) == "string" and name ~= "" then
+        byId[id] = name
+        local prev = byName[name]
+        -- при дубле имени оставляем ЗОНУ (mapType == 3), а не континент
+        if not prev or (info.mapType == 3) then
+            byName[name] = id
+        end
+        added = added + 1
+    end
+    -- Дети: allDescendants=true может вернуть уже всё поддерево, поэтому
+    -- рекурсия тут не нужна — но если клиент вернёт только прямых детей,
+    -- пройдём по ним сами. Глубину ограничиваем: защита от цикла в данных.
+    if depth < 12 and C_Map and C_Map.GetMapChildrenInfo then
+        local okCh, children = pcall(C_Map.GetMapChildrenInfo, id, nil, true)
+        if okCh and type(children) == "table" then
+            for i = 1, #children do
+                local child = children[i]
+                if type(child) == "table" then
+                    local cid = tonumber(child.mapID)
+                    if cid and byId[cid] then
+                        -- allDescendants уже отдал этого ребёнка: индексируем
+                        -- имя, но дальше не спускаемся
+                        if type(child.name) == "string" and child.name ~= "" then
+                            local prev = byName[child.name]
+                            if not prev or (child.mapType == 3) then
+                                byName[child.name] = cid
+                            end
+                            byId[cid] = child.name
+                            added = added + 1
+                        end
+                    else
+                        added = added + ZoneCollect(byName, byId, child, depth + 1)
+                    end
+                end
+            end
+        end
+    end
+    return added
+end
+
+-- ZoneMapInit — построить словари обходом дерева карт.
+-- Возвращает карты (пустые, если API нет).
 function ZoneMapInit()
     if NSP_ZONE_BY_NAME then return NSP_ZONE_BY_NAME, NSP_ZONE_NAME_BY_ID end
     local byName, byId = {}, {}
     NSP_ZONE_BY_NAME, NSP_ZONE_NAME_BY_ID = byName, byId
     if not (C_Map and C_Map.GetMapInfo) then return byName, byId end
-    local found = 0
-    for id = ZONE_SCAN_FROM, ZONE_SCAN_TO do
+    local roots, found = 0, 0
+    for id = ZONE_ROOT_FROM, ZONE_ROOT_TO do
         local ok, info = pcall(C_Map.GetMapInfo, id)
-        if ok and type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
-            -- секретные строки (combat) не индексируем: они не читаются
-            if not (canaccessvalue and not canaccessvalue(info.name)) then
-                found = found + 1
-                byId[id] = info.name
-                local prev = byName[info.name]
-                -- при дубле имени оставляем ЗОНУ, а не континент/микро-область
-                if not prev or (info.mapType == 3) then
-                    byName[info.name] = id
-                end
-            end
+        if ok and type(info) == "table" and tonumber(info.mapID) then
+            found = found + ZoneCollect(byName, byId, info, 1)
+            roots = roots + 1
         end
     end
     local okDb, db = pcall(GetDB)
     if okDb and type(db) == "table" then
         db.debug = db.debug or {}
-        -- Диагностика: САМИ найденные id, а не только счётчик. Живой прогон
-        -- 10.11.2026 дал found=60 из 3000 — по одному счётчику непонятно,
-        -- покрыт ли словарь частично или сканирование прошло до готовности
-        -- C_Map. Список отвечает на это без повторной игры.
-        local ids = {}
-        local shown = 0
+        -- Диагностика: сколько записей, сколько корней и список первых id —
+        -- без этого не видно, обход ли собрал огрызок или клиент отдаёт мало.
+        local ids, shown = {}, 0
         for id, name in pairs(byId) do
             shown = shown + 1
             if shown <= 40 then ids[#ids + 1] = tostring(id) .. "=" .. name end
         end
         table.sort(ids)
         db.debug.zoneMap = {
-            from = ZONE_SCAN_FROM, to = ZONE_SCAN_TO,
-            found = found, sample = ids,
+            from = ZONE_ROOT_FROM, to = ZONE_ROOT_TO,
+            found = found, roots = roots, sample = ids,
         }
     end
     return byName, byId
 end
 
 -- ZoneMapReady — словарь достаточно полон? На кастомном клиенте C_Map может
--- отдать данные не сразу после входа (карты подгружаются), поэтому первый скан
--- способен собрать огрызок. Если он подозрительно мал, разрешаем ПОВТОРНЫЙ
--- скан, но не чаще раза в минуту — перебор 3000 id не бесплатный.
+-- отдать данные не сразу после входа, поэтому первый обход способен собрать
+-- огрызок. Если он подозрительно мал, разрешаем ПОВТОРНЫЙ обход.
 function ZoneMapReady()
     ZoneMapInit()
     local n = 0
@@ -342,8 +383,7 @@ function ZoneMapReady()
 end
 
 function ZoneMapRefresh()
-    -- Пересканируем ТОЛЬКО если словарь заведомо неполон: полный скан 3000 id
-    -- не бесплатный, а живой клиент его уже прошёл успешно.
+    -- Пересканируем ТОЛЬКО если словарь заведомо неполон.
     if ZoneMapReady() then return end
     local nowT = time()
     if nowT - zoneMapLastScan < 60 then return end
@@ -356,15 +396,27 @@ end
 -- (тогда вызывающий шлёт текст, как раньше, — молча терять зону нельзя).
 function ZoneIdByName(name)
     if type(name) ~= "string" or name == "" then return nil end
-    ZoneMapRefresh()          -- если прошлый скан собрал огрызок — попробуем ещё
+    ZoneMapRefresh()          -- если прошлый обход собрал огрызок — попробуем ещё
     local byName = ZoneMapInit()
     return byName[name]
 end
 
 -- ZoneNameById — имя зоны на языке ТЕКУЩЕГО клиента по id из пакета.
+-- Словарь тут не обязателен: достаточно одного C_Map.GetMapInfo, поэтому
+-- при отсутствии словаря всё равно отвечаем.
 function ZoneNameById(id)
     local n = tonumber(id)
     if not n or n <= 0 then return nil end
+    -- Сначала прямой запрос: он не требует обхода и работает всегда.
+    if C_Map and C_Map.GetMapInfo then
+        local ok, info = pcall(C_Map.GetMapInfo, n)
+        if ok and type(info) == "table" and type(info.name) == "string"
+            and info.name ~= "" then
+            if not (canaccessvalue and not canaccessvalue(info.name)) then
+                return info.name
+            end
+        end
+    end
     local _, byId = ZoneMapInit()
     return byId[n]
 end
