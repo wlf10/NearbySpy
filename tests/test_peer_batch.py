@@ -41,6 +41,7 @@ SEND_HARNESS = """
 time = function() return 1000 end
 PEER_CHANNEL_BASE = 'nearbyspy'
 PEER_PROTO = "N6"
+PEER_BATCH_SEP = ","
 PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 0   -- GAP=0: шлём сразу
 PEER_PAYLOAD_MAX = 240
 PEER_BATCH_MAX = 5
@@ -118,6 +119,33 @@ class BatchSendTests(unittest.TestCase):
         text_form = single.replace(";g;10;a;a;", ";MAGE;10;Human;Alliance;")
         self.assertLess(len(single.encode()), len(text_form.encode()))
 
+    def test_payload_never_contains_a_pipe(self):
+        # Сервер отклоняет сообщение с '|' как «Invalid escape code in chat
+        # message» — пакет не уходит вообще (живой лог 10.11.2026: sent=0,
+        # очередь росла). Мок SendChatMessage такое НЕ ловит, потому что
+        # ограничение живёт на сервере, поэтому проверяем сам payload.
+        self.push("Alice"); self.push("Bob")
+        self.g["TestDrain"]()
+        for msg in self.sent():
+            self.assertNotIn("|", msg, "в отправке остался '|': сервер её отвергнет")
+
+    def test_batch_separator_is_comma(self):
+        self.push("Alice"); self.push("Bob")
+        self.g["TestDrain"]()
+        msg = self.sent()[0]
+        body = msg.split(";", 3)[3]
+        self.assertEqual(2, len(body.split(",")), "записи не разделены запятой")
+
+    def test_send_is_blocked_explicitly_if_a_pipe_appears(self):
+        # защита в самом DrainPeerQueue: если '|' somehow попал в запись,
+        # отправка блокируется с видимой причиной, а не молча копит очередь
+        self.push("Alice")
+        q = self.g["peerQueue"]
+        q[1]["rec"] = str(q[1]["rec"]) + "|bad"
+        self.g["TestDrain"]()
+        self.assertEqual([], self.sent(), "пакет с '|' всё-таки ушёл")
+        self.assertIn("|", str(self.g["DB"]["debug"]["peerSendError"]))
+
     # --- пачка -------------------------------------------------------------
 
     def test_two_records_go_in_one_message(self):
@@ -127,7 +155,7 @@ class BatchSendTests(unittest.TestCase):
         self.assertEqual(1, len(sent), "две записи ушли двумя сообщениями")
         self.assertTrue(sent[0].startswith("N6;"))
         body = sent[0].split(";", 3)[3]
-        self.assertEqual(2, len(body.split("|")))
+        self.assertEqual(2, len(body.split(",")), "записи не разделены запятой")
 
     def test_batch_is_capped_by_payload_size(self):
         # длинные имена: в 240 байт влезет меньше пяти записей
@@ -180,8 +208,9 @@ class BatchReceiveTests(unittest.TestCase):
                          "function PlayerRealm() return 'R' end\n"
                          "function PeerChannelName() return 'nearbyspyh' end\n"
                          "function PeerField(s, n) return type(s) == 'string' and #s > 0 "
-                         "and #s <= n and not s:find('[%c|;]') end\n"
+                         "and #s <= n and not s:find('[%c|;,]') end\n"
                          "PEER_BATCH_MAX, PEER_CLOCK_SKEW = 5, 3600\n"
+                         "PEER_BATCH_SEP = ','\n"
                          "peerStats = {seen = 0, valid = 0, received = 0, merged = 0, "
                          "rejected = 0, foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, "
                          "rejectLogged = {}}\n"
@@ -218,8 +247,8 @@ class BatchReceiveTests(unittest.TestCase):
 
     def test_batch_adds_every_record(self):
         msg = ("N5;forever;R;"
-               "Alice;MAGE;10;Human;Alliance;12;Elwynn;-;-;1794300000|"
-               "Bob;WARRIOR;20;Orc;Horde;14;Durotar;-;-;1794300000|"
+               "Alice;MAGE;10;Human;Alliance;12;Elwynn;-;-;1794300000,"
+               "Bob;WARRIOR;20;Orc;Horde;14;Durotar;-;-;1794300000,"
                "Carol;PRIEST;30;Dwarf;Alliance;1;Ironforge;-;-;1794300000")
         self.recv(msg)
         for name in ("Alice", "Bob", "Carol"):
@@ -228,7 +257,7 @@ class BatchReceiveTests(unittest.TestCase):
 
     def test_seen_counts_messages_not_records(self):
         msg = ("N5;forever;R;"
-               "Alice;MAGE;10;Human;Alliance;12;Elwynn;-;-;1794300000|"
+               "Alice;MAGE;10;Human;Alliance;12;Elwynn;-;-;1794300000,"
                "Bob;WARRIOR;20;Orc;Horde;14;Durotar;-;-;1794300000")
         self.recv(msg)
         self.assertEqual(1, int(self.lua.globals()["TestStats"]["seen"]),
@@ -237,7 +266,7 @@ class BatchReceiveTests(unittest.TestCase):
     def test_bad_record_inside_batch_is_rejected_not_accepted(self):
         # уровень вне диапазона — эта запись отбрасывается, соседняя проходит
         msg = ("N5;forever;R;"
-               "Good;MAGE;10;Human;Alliance;12;Elwynn;-;-;1794300000|"
+               "Good;MAGE;10;Human;Alliance;12;Elwynn;-;-;1794300000,"
                "Bad;WARRIOR;999;Orc;Horde;14;Durotar;-;-;1794300000")
         self.recv(msg)
         self.assertIsNotNone(self.player("Good"))
@@ -255,7 +284,7 @@ class BatchReceiveTests(unittest.TestCase):
     def test_batch_does_not_exceed_the_record_cap(self):
         recs = ["P%d;MAGE;10;Human;Alliance;12;Elwynn;-;-;1794300000" % i
                 for i in range(10)]
-        self.recv("N5;forever;R;" + "|".join(recs))
+        self.recv("N5;forever;R;" + ",".join(recs))
         added = sum(1 for i in range(10) if self.player("P%d" % i) is not None)
         self.assertLessEqual(added, 5, "пачка обошла лимит записей")
 

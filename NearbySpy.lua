@@ -910,6 +910,12 @@ local PEER_CLOCK_SKEW = 3600
 -- Сколько записей максимум в одной пачке N5. Ограничение по БАЙТАМ считает
 -- сборщик пачки (PEER_PAYLOAD_MAX), это — защита от абсурда на приёме.
 local PEER_BATCH_MAX = 5
+-- Разделитель записей в пачке. НЕ '|': сервер отклоняет сообщение с ним как
+-- «Invalid escape code in chat message» (проверено в игре 10.11.2026 — пачка с
+-- '|' не уходила вовсе: sent=0, queued росла). Запятая не escape-символ и не
+-- встречается ни в одном имени/зоне живого файла (16 138 записей), а PeerField
+-- её и не пропускает в полях, которые мы сами контролируем.
+local PEER_BATCH_SEP = ","
 local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- Per-session peer counters/state. Kept in ONE table on purpose: the main chunk
 -- of this file sits at the Lua 5.1 ceiling of 200 locals, so every new
@@ -963,8 +969,12 @@ function PeerEsc(s, maxLen)
     return s
 end
 local function PeerField(s, maxLen)
+    -- Запятая запрещена: она разделяет записи в пачке (PEER_BATCH_SEP) и
+    -- значения в хвостовом текстовом поле. Пропустив её, мы получили бы
+    -- неразбираемое сообщение. '|' запрещён по той же причине и вдобавок
+    -- отклоняется сервером как escape-код.
     return type(s) == "string" and #s > 0 and #s <= maxLen
-        and not s:find("[%c|;]")
+        and not s:find("[%c|;,]")
 end
 
 -- ── Коды для класса, расы и фракции (протокол N6) ──────────────────────────
@@ -1081,10 +1091,27 @@ QueuePeerNew = function(db, data)
     local clsCode, clsText = PeerEncode("class", data.class)
     local raceCode, raceText = PeerEncode("race", race ~= "?" and race or nil)
     local facCode, facText = PeerEncode("faction", faction ~= "?" and faction or nil)
+    -- Коды отправляются через один символ, значения в тексте (когда 'z') — через
+    -- запятую: именно сюда попадают кастомные значения, и запятая в них была бы
+    -- неотличима от разделителя. Поэтому такие значения отправляются по одному:
+    -- если в тексте есть запятая, вместо неё ставится '?', а в debug пишется
+    -- след — молча потерять кастомную расу хуже, чем испортить один символ.
+    local function cleanText(v)
+        local s = tostring(v or "")
+        if s:find(",", 1, true) then
+            local dbg = (type(GetDB()) == "table") and GetDB() or nil
+            if dbg then
+                dbg.debug = dbg.debug or {}
+                dbg.debug.peerCommaStripped = (dbg.debug.peerCommaStripped or 0) + 1
+            end
+            s = s:gsub(",", "?")
+        end
+        return s
+    end
     local extra = {}
-    if clsText then extra[#extra + 1] = tostring(data.class or "") end
-    if raceText then extra[#extra + 1] = tostring(race ~= "?" and race or "") end
-    if facText then extra[#extra + 1] = tostring(faction ~= "?" and faction or "") end
+    if clsText then extra[#extra + 1] = cleanText(data.class) end
+    if raceText then extra[#extra + 1] = cleanText(race ~= "?" and race or "") end
+    if facText then extra[#extra + 1] = cleanText(faction ~= "?" and faction or "") end
 
     local function BuildRec(z, zid, cx, cy)
         local rec = table.concat({data.name,
@@ -1194,7 +1221,18 @@ local function DrainPeerQueue()
     else
         local parts = {}
         for k = 1, #batch do parts[k] = recFor(batch[k]) end
-        payload = PEER_PROTO .. ";" .. head.game .. ";" .. head.realm .. ";" .. table.concat(parts, "|")
+        payload = PEER_PROTO .. ";" .. head.game .. ";" .. head.realm .. ";" .. table.concat(parts, PEER_BATCH_SEP)
+    end
+
+    -- Последняя защита перед отправкой: сервер отклоняет сообщение с '|' как
+    -- «Invalid escape code», и пакет с ним не уходит НИКОГДА (проверено в игре
+    -- 10.11.2026). Лучше не отправить и сказать об этом, чем молча копить
+    -- очередь: ошибка видна в db.debug.peerSendError.
+    if payload:find("|", 1, true) then
+        db.debug.peerSendError = "payload contains '|' (server rejects it)"
+        D(("Peer send blocked: '|' in payload (%s)"):format(PeerEsc(payload, 60)))
+        PeerSync()
+        return
     end
 
     local ok, result = pcall(send, payload, "CHANNEL", nil, channel)
@@ -1292,20 +1330,23 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
 
-    -- Пачка N6/N5: Nx;game;realm;<rec>|<rec>|…
-    -- Признак пачки — символ '|': он ЗАПРЕЩЁН в имени, зоне и мире (PeerField),
-    -- поэтому в одиночном пакете его быть не может. Без этой проверки одиночный
-    -- N5 неотличим от пачки (у обоих 13 полей), и строка уходила в batch-ветку
-    -- заново — рекурсия до лимита частоты.
+    -- Признак пачки — разделитель PEER_BATCH_SEP (запятая). Он ЗАПРЕЩЁН в
+    -- имени, зоне, мире и хвостовом тексте (PeerField), поэтому в одиночном
+    -- пакете его быть не может. Без этой проверки одиночный N5 неотличим от
+    -- пачки (у обоих 13 полей), и строка уходила в batch-ветку заново —
+    -- рекурсия до лимита частоты.
+    --
+    -- Раньше признаком был '|', но с ним сервер отклонял сообщение целиком
+    -- («Invalid escape code in chat message»), поэтому разделитель заменён.
     if (fields[1] == "N6" or fields[1] == "N5")
-        and type(message) == "string" and message:find("|", 1, true) then
+        and type(message) == "string" and message:find(PEER_BATCH_SEP, 1, true) then
         local proto = fields[1]
         if not fields[2] or not fields[3] then return Reject("batch header") end
         local prefix = proto .. ";" .. fields[2] .. ";" .. fields[3] .. ";"
         if message:sub(1, #prefix) ~= prefix then return Reject("batch header") end
         local rest = message:sub(#prefix + 1)
         local n = 0
-        for part in (rest .. "|"):gmatch("(.-)|") do
+        for part in (rest .. PEER_BATCH_SEP):gmatch("(.-)" .. PEER_BATCH_SEP) do
             if part ~= "" then
                 n = n + 1
                 if n > PEER_BATCH_MAX then break end
@@ -1360,7 +1401,7 @@ local function ReceivePeerMessage(message, sender, fromBatch)
             or type(class) ~= "string" or #class ~= 1 then return Reject("bad name/class") end
         local extra = {}
         if fields[14] and fields[14] ~= "" then
-            for part in (fields[14] .. ","):gmatch("(.-),") do
+            for part in (fields[14] .. PEER_BATCH_SEP):gmatch("(.-)" .. PEER_BATCH_SEP) do
                 extra[#extra + 1] = part
             end
         end
