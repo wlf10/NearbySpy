@@ -69,6 +69,48 @@ class ColumnGeometryTests(unittest.TestCase):
         self.assertLessEqual(const("WIN_H"), 900)
 
 
+class ToolbarFilterTests(unittest.TestCase):
+    """Пять табов фильтров обязаны идти ОДНОЙ строкой и не лезть на счётчик."""
+
+    def test_five_tiles_fit_before_the_counter(self):
+        x0 = const("FILTER_X0")
+        w = const("FILTER_W")
+        step = const("FILTER_STEP")
+        last_right = x0 + 4 * step + w
+        # счётчик прижат к правому краю тулбара: "500 / 14868" при 7pt ~ 55px
+        counter_left = const("TOOLBAR_W") - const("COUNT_X") - 60
+        self.assertLessEqual(last_right, counter_left,
+                             "последний таб (до %d) налезает на счётчик (с %d)"
+                             % (last_right, counter_left))
+
+    def test_tiles_do_not_overlap(self):
+        w = const("FILTER_W")
+        step = const("FILTER_STEP")
+        self.assertGreaterEqual(step, w, "шаг меньше ширины: табы перекрываются")
+
+    def test_longest_localized_label_fits_one_line(self):
+        # Подписи рисуются GameFontNormal (~12pt). Оценка ширины: 7px на символ
+        # для латиницы/кириллицы. Берём САМУЮ ДЛИННУЮ метку из всех локалей
+        # вместе с максимальным числом счётчика (5 знаков).
+        longest = self.longest_label() + " 99999"
+        need = len(longest) * 7
+        available = const("FILTER_W") - 6
+        self.assertLessEqual(need, available,
+                             "«%s» (~%dpx) не влезает в %dpx — перенесётся на вторую строку"
+                             % (longest, need, available))
+
+    def longest_label(self):
+        """Самая длинная метка таба по всем шести локалям."""
+        src = LOCALE.read_text(encoding="utf-8")
+        best = ""
+        for key in ("UI_ALL", "UI_FRESH", "UI_NEW", "UI_PEER", "UI_PEER_NEW"):
+            for m in re.finditer(r'\b%s\s*=\s*"([^"]*)"' % key, src):
+                if len(m.group(1)) > len(best):
+                    best = m.group(1)
+        self.assertTrue(best, "метки табов не найдены в локалях")
+        return best
+
+
 class NoHardcodedLayoutTests(unittest.TestCase):
     """Числа колонок не должны встречаться в коде окна напрямую."""
 

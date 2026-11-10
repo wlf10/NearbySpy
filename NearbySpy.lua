@@ -3499,13 +3499,16 @@ end
 
 local function TacticalFilter(parent, key, x)
     local button = CreateFrame("Button", nil, parent)
-    button:SetSize(112, 25)
+    button:SetSize(NSP_CONST.FILTER_W, 25)
     button:SetPoint("LEFT", x, 0)
     button.bg = button:CreateTexture(nil, "BACKGROUND")
     button.bg:SetAllPoints()
     button.label = NewText(button, 10)
     button.label:SetPoint("CENTER")
-    button.label:SetWidth(106)
+    -- Ширина подписи = ширина кнопки минус поля. Подпись рисуется
+    -- GameFontNormal (12pt): в 106px "Partage nouveaux 1451" переносилась на
+    -- вторую строку и вылезала за кнопку высотой 25px.
+    button.label:SetWidth(NSP_CONST.FILTER_W - 6)
     button.key = key
     button:SetScript("OnClick", function(self) tactical.filter = self.key; TacticalUpdate() end)
     button:SetScript("OnEnter", function(self) if tactical.filter ~= self.key then self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end end)
@@ -3966,12 +3969,21 @@ local function BuildWindow()
 
     local toolbar = TacticalPanel(win)
     toolbar:SetPoint("TOPLEFT", 16, -224); toolbar:SetSize(NSP_CONST.TOOLBAR_W, 31)
-    TacticalFilter(toolbar, "all", 6); TacticalFilter(toolbar, "fresh", 122); TacticalFilter(toolbar, "new", 238)
-    -- 4th tile: rows that arrived over the nearbyspydata channel (peerAt)
-    TacticalFilter(toolbar, "peer", 354)
-    -- 5th tile: the subset of channel rows that were new to us (peerNew)
-    TacticalFilter(toolbar, "peern", 470)
-    tactical.count = NewText(toolbar, 9, 0.6, 0.53, 0.4); tactical.count:SetPoint("RIGHT", -9, 0)
+    -- Пять табов одной строкой. Позиции считаются из констант, а не вписаны
+    -- числами: при смене ширины окна или подписи достаточно поправить
+    -- FILTER_X0 / FILTER_W / FILTER_STEP, и ряд остаётся ровным.
+    -- tile 1..3: все / свежие / новые
+    TacticalFilter(toolbar, "all", NSP_CONST.FILTER_X0)
+    TacticalFilter(toolbar, "fresh", NSP_CONST.FILTER_X0 + NSP_CONST.FILTER_STEP)
+    TacticalFilter(toolbar, "new", NSP_CONST.FILTER_X0 + 2 * NSP_CONST.FILTER_STEP)
+    -- tile 4: rows that arrived over the exchange channel (peerAt)
+    TacticalFilter(toolbar, "peer", NSP_CONST.FILTER_X0 + 3 * NSP_CONST.FILTER_STEP)
+    -- tile 5: the subset of channel rows that were new to us (peerNew)
+    TacticalFilter(toolbar, "peern", NSP_CONST.FILTER_X0 + 4 * NSP_CONST.FILTER_STEP)
+    -- Счётчик "показано / всего" — 7pt (small): подпись табов идёт 12pt, и
+    -- счётчик того же размера отъедал место у последнего таба.
+    tactical.count = NewText(toolbar, 7, 0.6, 0.53, 0.4)
+    tactical.count:SetPoint("RIGHT", -NSP_CONST.COUNT_X, 0)
 
     -- Selector row: the database can hold players from other realms of the
     -- cluster (peer channel), so the list needs a realm selector of its own.

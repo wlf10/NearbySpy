@@ -43,6 +43,13 @@ NSP_CONST = {
     CHART_W = 512, CHART_STEP = 8,  -- гистограмма уровней: ширина и шаг столбца
     CLASSES_X = 536, CLASSES_W = 328,  -- панель классов справа от гистограммы
     ROW_COL_W = 310,              -- ширина строки в панели классов
+    -- Табы фильтров в тулбаре. Ширина считается от САМОЙ ДЛИННОЙ подписи:
+    -- подпись рисуется GameFontNormal (12pt, порог small — 7), и в frFR
+    -- "Partage nouveaux 1451" занимает ~137px. В 106px она переносилась на
+    -- вторую строку внутри кнопки высотой 25px (10.11.2026).
+    -- 5 табов: X0 + 4*STEP + W должны кончаться ДО счётчика справа.
+    FILTER_X0 = 4, FILTER_W = 152, FILTER_STEP = 155,
+    COUNT_X = 8,                  -- отступ счётчика "показано / всего" от правого края
 }
 
 NSP_LOCALE = {
@@ -369,7 +376,7 @@ NSP_LOCALE = {
         UI_DETECTED = "DÉTECTÉS", UI_ACTIVE5 = "ACTIFS < 5 MIN", UI_FACTIONS = "FACTIONS",
         UI_CLASSES = "CLASSES", UI_ALL = "Tous", UI_FRESH = "Récents", UI_NEW = "Nouveaux", UI_NEW_SHORT = "nouveaux",
         UI_PEER = "Partage",
-        UI_PEER_NEW = "Partage nouveaux",
+        UI_PEER_NEW = "Partage neufs",
         PEER_LIST_HEAD = "Canal de partage : %d entrées, dont %d nouvelles. Les %d dernières :",
         PEER_LIST_EMPTY = "Canal de partage : aucune entrée — rien reçu via %s.",
         PEER_TAG_NEW = "nouveau", PEER_TAG_UPD = "maj",
