@@ -56,7 +56,9 @@ def block() -> str:
 class PeerObservationTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(CONST_PRELUDE + "\n" + PRELUDE + "\n" + block() + "\n"
+        self.lua.execute(CONST_PRELUDE + "\n" + PRELUDE + "\n"
+                         "function ZoneNameById(id) return nil end\n"
+                         + block() + "\n"
                          "TestReceive = ReceivePeerMessage\n"
                          "TestUpsert = UpsertPlayer\n"
                          "TestDB = DB\n")

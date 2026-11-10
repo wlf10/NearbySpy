@@ -42,6 +42,7 @@ time = function() return 1000 end
 PEER_CHANNEL_BASE = 'nearbyspy'
 PEER_PROTO = "N6"
 PEER_BATCH_SEP = ","
+PEER_TAIL_SEP = "~"
 PEER_QUEUE_MAX, PEER_TTL = 60, 120
 PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 0, 0, 999  -- шлём сразу
 PEER_PAYLOAD_MAX = 240
@@ -240,6 +241,7 @@ class BatchReceiveTests(unittest.TestCase):
                          "and #s <= n and not s:find('[%c|;,]') end\n"
                          "PEER_BATCH_MAX, PEER_CLOCK_SKEW = 5, 3600\n"
                          "PEER_BATCH_SEP = ','\n"
+                         "PEER_TAIL_SEP = '~'\n"
                          "peerStats = {seen = 0, valid = 0, received = 0, merged = 0, "
                          "rejected = 0, foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, "
                          "rejectLogged = {}}\n"
@@ -248,6 +250,7 @@ class BatchReceiveTests(unittest.TestCase):
                          "function PeerEsc(s, n) return tostring(s) end\n"
                          "function ClassLocFromFile() return nil end\n"
                          "PEER_CLOCK_SKEW = 3600\n"
+                         "function ZoneNameById(id) return nil end\n"
                          "DB = {peerEnabled = true, peerAllRealms = true, game = 'forever', "
                          "players = {}, debug = {}}\n"
                          "function GetDB() return DB end\n"

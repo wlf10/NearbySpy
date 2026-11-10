@@ -79,19 +79,20 @@ class PeerPlaceTests(unittest.TestCase):
         sent = [str(p) for p in self.lua.globals()["QUEUED"].values()]
         self.assertEqual(1, len(sent))
         parts = sent[0].split(";")
-        # N6 = 12 полей: name;cls;lvl;race;fac;zoneId;x;y;time.
-        # Текста зоны НЕТ — в N6 он не нужен, получатель берёт имя по id на
-        # своём языке. Класс/раса/фракция — по одному символу.
-        self.assertEqual(12, len(parts))
+        # N6 = 13 полей: name;cls;lvl;race;fac;zoneId;x;y;time;хвост
+        # zoneId — ОСНОВНОЙ ключ, имя зоны едет РАСШИРЕНИЕМ в хвосте
+        # (последним, после 'z'-значений).
+        self.assertEqual(13, len(parts))
         self.assertEqual("N6", parts[0])
         self.assertEqual(1, len(parts[4]), "класс не закодирован: %r" % parts[4])
-        self.assertEqual("1429", parts[8], "zoneId")
+        self.assertEqual("1429", parts[8], "zoneId — основной ключ")
         self.assertEqual("0.5231", parts[9], "x")
         self.assertEqual("0.7113", parts[10], "y")
         # Время — момент НАБЛЮДЕНИЯ (1000, когда запись попала в очередь), а не
         # отправки (1100): пакет может пролежать в очереди минуты, и получатель
         # должен видеть, когда игрока видели, а не когда канал его пропустил.
         self.assertEqual("1000", parts[11], "время наблюдения — после координат")
+        self.assertIn("Таверна", parts[12], "имя зоны — расширение в хвосте")
 
     def test_who_record_never_sends_the_observers_position(self):
         # A /who entry has the player's zone but no coordinates: its x/y is where
@@ -148,7 +149,9 @@ class PeerPlaceTests(unittest.TestCase):
     def test_receive_stores_place_from_n3(self):
         self.recv("N3;forever;CAMWOW EU5 Realm 1 PvE;Alice;MAGE;20;Human;Alliance;1429;Elwynn;0.5231;0.7113")
         row = self.lua.globals()["TestDB"]["players"]["Alice-CAMWOW EU5 Realm 1 PvE"]
-        self.assertEqual("Elwynn", row["zone"])
+        # Локализация: свой клиент по id главнее присланного текста. В харнессе
+        # ZoneNameById(1429) = "Goldshire Inn", поэтому ждём его, а не "Elwynn".
+        self.assertEqual("Goldshire Inn", row["zone"])
         self.assertEqual(1429, row["zoneId"])
         self.assertAlmostEqual(0.5231, row["x"], places=4)
         self.assertAlmostEqual(0.7113, row["y"], places=4)
@@ -187,7 +190,9 @@ class PeerPlaceTests(unittest.TestCase):
         })
         self.recv("N3;forever;CAMWOW EU5 Realm 1 PvE;Alice;MAGE;20;Human;Alliance;1429;Elwynn;0.9;0.1")
         row = db["players"]["Alice-CAMWOW EU5 Realm 1 PvE"]
-        self.assertEqual("Elwynn", row["zone"])
+        # Локализация: у получателя id 1429 резолвится в своё имя ("Goldshire
+        # Inn" в харнессе), и оно главнее присланного "Elwynn".
+        self.assertEqual("Goldshire Inn", row["zone"])
         self.assertEqual(1429, row["zoneId"])
 
 

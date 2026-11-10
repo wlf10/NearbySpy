@@ -120,6 +120,7 @@ class N6ReceiveTests(unittest.TestCase):
                          "function PeerField(s, n) return type(s) == 'string' and #s > 0 "
                          "and #s <= n and not s:find('[%c|;,]') end\n"
                          "PEER_BATCH_SEP = ','\n"
+                         "PEER_TAIL_SEP = '~'\n"
                          "ZONE_NAMES = { [12] = 'Elwynn', [14] = 'Durotar', [2521] = 'Zephras Isle' }\n"
                          "function ZoneNameById(id) return ZONE_NAMES[tonumber(id)] end\n"
                          "function PeerCoord(v) return string.format('%.4f', v) end\n"

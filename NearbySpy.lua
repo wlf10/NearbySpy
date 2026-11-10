@@ -1134,10 +1134,14 @@ local PEER_CLOCK_SKEW = 3600
 local PEER_BATCH_MAX = 5
 -- Разделитель записей в пачке. НЕ '|': сервер отклоняет сообщение с ним как
 -- «Invalid escape code in chat message» (проверено в игре 10.11.2026 — пачка с
--- '|' не уходила вовсе: sent=0, queued росла). Запятая не escape-символ и не
--- встречается ни в одном имени/зоне живого файла (16 138 записей), а PeerField
--- её и не пропускает в полях, которые мы сами контролируем.
+-- '|' не уходила вовсе: sent=0, queue росла). Запятая не escape-символ и не
+-- встречается ни в одном имени/зоне живого файла (16 138 записей).
 local PEER_BATCH_SEP = ","
+-- Разделитель ПОЛЕЙ внутри хвоста записи. Обязан отличаться от
+-- PEER_BATCH_SEP: иначе имя зоны в хвосте склеивается с разделителем записей —
+-- живой прогон дал «…;1000;Степи,Кэрол;e;25…», где «Степи» читалась как
+-- отдельная запись. '~' не встречается в данных (проверено) и не escape-символ.
+local PEER_TAIL_SEP = "~"
 local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- Per-session peer counters/state. Kept in ONE table on purpose: the main chunk
 -- of this file sits at the Lua 5.1 ceiling of 200 locals, so every new
@@ -1191,12 +1195,12 @@ function PeerEsc(s, maxLen)
     return s
 end
 local function PeerField(s, maxLen)
-    -- Запятая запрещена: она разделяет записи в пачке (PEER_BATCH_SEP) и
-    -- значения в хвостовом текстовом поле. Пропустив её, мы получили бы
-    -- неразбираемое сообщение. '|' запрещён по той же причине и вдобавок
-    -- отклоняется сервером как escape-код.
+    -- Запрещены оба разделителя: запятая разделяет ЗАПИСИ в пачке, тильда —
+    -- ПОЛЯ внутри хвоста записи. Пропустив любой из них, получим неразбираемое
+    -- сообщение. '|' запрещён по той же причине и вдобавок отклоняется сервером
+    -- как escape-код («Invalid escape code in chat message»).
     return type(s) == "string" and #s > 0 and #s <= maxLen
-        and not s:find("[%c|;,]")
+        and not s:find("[%c|;,~]")
 end
 
 -- ── Коды для класса, расы и фракции (протокол N6) ──────────────────────────
@@ -1330,13 +1334,13 @@ QueuePeerNew = function(db, data)
     -- след — молча потерять кастомную расу хуже, чем испортить один символ.
     local function cleanText(v)
         local s = tostring(v or "")
-        if s:find(",", 1, true) then
+        if s:find(PEER_TAIL_SEP, 1, true) or s:find(PEER_BATCH_SEP, 1, true) then
             local dbg = (type(GetDB()) == "table") and GetDB() or nil
             if dbg then
                 dbg.debug = dbg.debug or {}
                 dbg.debug.peerCommaStripped = (dbg.debug.peerCommaStripped or 0) + 1
             end
-            s = s:gsub(",", "?")
+            s = s:gsub(PEER_TAIL_SEP, "?"):gsub(PEER_BATCH_SEP, "?")
         end
         return s
     end
@@ -1344,26 +1348,43 @@ QueuePeerNew = function(db, data)
     if clsText then extra[#extra + 1] = cleanText(data.class) end
     if raceText then extra[#extra + 1] = cleanText(race ~= "?" and race or "") end
     if facText then extra[#extra + 1] = cleanText(faction ~= "?" and faction or "") end
-    -- Имя зоны уходит текстом только когда id не нашёлся: иначе получатель
-    -- возьмёт имя из своего клиента на своём языке. Порядок в хвосте:
-    -- класс, раса, фракция, зона — только для слотов, которым нужен текст.
-    local zoneNeedsText = (zoneId <= 0) and (zoneName ~= "" and zoneName ~= "?")
-    if zoneNeedsText then extra[#extra + 1] = cleanText(zoneName) end
+    -- ── Имя зоны: РАСШИРЕНИЕ в хвосте, не поле записи ─────────────────────
+    -- Основной ключ зоны — zoneId. Имя едет ДОПОЛНИТЕЛЬНО, последним в хвосте,
+    -- и только если оно известно. Причины:
+    --  1) нумерация uiMapID в клиенте Forever не совпадает с внешними дампами
+    --     (проверено 10.11.2026: клиентский 1420 = Тирисфаль, в wago он
+    --     18/997/1247/2070, сдвиг плавает 1369..1405) — id может не
+    --     резолвиться у получателя;
+    --  2) поэтому имя — запасной вариант, а не второй равноправный ключ.
+    -- Приём отличает зону от 'z'-значений по количеству: он знает, сколько
+    -- слотов помечено 'z', всё сверх этого — имя зоны.
+    local zoneInTail = (zoneName ~= "" and zoneName ~= "?" and PeerField(zoneName, 60))
+    if zoneInTail then extra[#extra + 1] = cleanText(zoneName) end
 
-    local function BuildRec(cx, cy)
+    -- Запись N6: имя;класс;уровень;раса;фракция;zoneId;x;y;время[;хвост]
+    -- Хвост = текстовые значения для 'z'-слотов + имя зоны последним.
+    local function BuildRec(cx, cy, withZone)
         local rec = table.concat({data.name,
             clsCode, tostring(level), raceCode, facCode,
             tostring(zoneId), cx, cy, tostring(tonumber(data.observedAt) or time())}, ";")
-        if #extra > 0 then rec = rec .. ";" .. table.concat(extra, ",") end
+        local tail = extra
+        if not withZone and zoneInTail and #extra > 0 then
+            -- отбрасываем именно зону (последний элемент), прочие 'z' остаются
+            tail = {}
+            for i = 1, #extra - 1 do tail[i] = extra[i] end
+        end
+        if #tail > 0 then rec = rec .. ";" .. table.concat(tail, PEER_TAIL_SEP) end
         return rec
     end
     -- Размер проверяется по ОДИНОЧНОМУ пакету: запись, которая не влезает одна,
-    -- не влезет и в пачке.
+    -- не влезет и в пачке. Деградация в фиксированном порядке: сначала зона из
+    -- хвоста (это расширение), затем координаты.
     local function PayloadOf(r)
         return table.concat({"N6", db.game, data.realm, r}, ";")
     end
-    local rec = BuildRec(px, py)
-    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("-", "-") end
+    local rec = BuildRec(px, py, true)
+    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec(px, py, false) end
+    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("-", "-", false) end
     if #PayloadOf(rec) > PEER_PAYLOAD_MAX then return end
     if #peerQueue >= PEER_QUEUE_MAX then
         local old = table.remove(peerQueue, 1)
@@ -1611,9 +1632,8 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     -- N2 = 8 fields (no place), N3 = 12 (zone id, zone name, x, y),
     -- N4 = 13 (N3 + unix observation time),
     -- N5 = 13 (N4 с текстовыми классом/расой/фракцией),
-    -- N6 = 12 или 13: ЗАПИСЬ БЕЗ ТЕКСТА ЗОНЫ (name;cls;lvl;race;fac;zoneId;x;y;time
-    --      и необязательный хвост с 'z'-значениями). Это НЕ N3 с его 12 полями:
-    --      протокол различается первым полем.
+    -- N6 = 13 или 14 (класс/раса/фракция и игра — кодами; имя зоны рядом с id;
+    --      14-е поле — хвост с текстовыми значениями для слотов 'z').
     -- Приём держит ВСЕ версии: старый клиент в канале не должен замолчать.
     if #fields ~= 8 and #fields ~= 12 and #fields ~= 13 and #fields ~= 14 then
         return Reject("field count")
@@ -1648,26 +1668,24 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     end
     local realm, name, class = fields[3], fields[4], fields[5]
     local race, faction
-    local batchZoneText   -- имя зоны из хвоста, когда id не нашёлся (N6)
+    local tail = {}          -- хвост записи N6: 'z'-значения + имя зоны последним
+    local tailZone           -- имя зоны из хвоста (расширение к zoneId)
     if proto == "N6" then
         -- класс/раса/фракция — односимвольные коды; 'z' означает «не из
-        -- таблицы», тогда значения идут текстом в 14-м поле через запятую в
-        -- порядке класс, раса, фракция — только для тех, у кого код 'z'.
+        -- таблицы», тогда значения идут текстом в хвосте (13-е поле).
         if not PeerField(name, 60) or not PeerField(realm, 100)
             or type(class) ~= "string" or #class ~= 1 then return Reject("bad name/class") end
-        local extra = {}
-        -- Хвост с текстовыми значениями — 13-е поле (после zoneId;x;y;time).
-        -- Было 14-е, пока запись несла текст зоны.
+        -- Хвост: zoneId;x;y;time;хвост — 13-е поле.
         if fields[13] and fields[13] ~= "" then
-            for part in (fields[13] .. PEER_BATCH_SEP):gmatch("(.-)" .. PEER_BATCH_SEP) do
-                extra[#extra + 1] = part
+            for part in (fields[13] .. PEER_TAIL_SEP):gmatch("(.-)" .. PEER_TAIL_SEP) do
+                tail[#tail + 1] = part
             end
         end
         local idx = 0
         local function takeText(code)
             if code ~= PEER_CODE_UNKNOWN then return nil end
             idx = idx + 1
-            return extra[idx]
+            return tail[idx]
         end
         local clsText = takeText(class)
         local raceCode, facCode = fields[7], fields[8]
@@ -1679,10 +1697,12 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         race = PeerDecode("race", raceCode, raceText) or "?"
         faction = PeerDecode("faction", facCode, facText) or "?"
         if class == "" then return Reject("unknown class code") end
-        -- Имя зоны текстом приходит ТОЛЬКО если id не нашёлся, и стоит в хвосте
-        -- последним (после класса/расы/фракции). Отдаём наружу через
-        -- batchZoneText — переменную объявляем ниже, до использования.
-        batchZoneText = extra[idx + 1]
+        -- Имя зоны — РАСШИРЕНИЕ: лежит последним в хвосте, ПОСЛЕ всех
+        -- 'z'-значений. Сколько их — знаем по кодам, остальное зона.
+        if #tail > idx then
+            local z = tail[idx + 1]
+            if z ~= "" and PeerField(z, 60) then tailZone = z end
+        end
     end
     if proto ~= "N6" then
         if not PeerField(name, 60) or not PeerField(realm, 100)
@@ -1696,11 +1716,10 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return Reject("bad race") end
     if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject("bad faction") end
 
-    -- Place. Раскладка РАЗНАЯ у старых протоколов и у N6:
-    --   N3/N4/N5: zoneId;зона;x;y;время   (зона текстом)
-    --   N6:       zoneId;x;y;время        (текста зоны нет, имя по id)
-    -- Поэтому N6 разбирается отдельной веткой — подставлять его поля в старую
-    -- схему значило бы читать x как имя зоны.
+    -- Place. zoneId — ОСНОВНОЙ ключ зоны во всех версиях, имя — расширение.
+    --   N2: нет места вообще
+    --   N3/N4/N5: zoneId;зона;x;y[;время] — имя полем
+    --   N6:       zoneId;x;y;время[;хвост] — имя только в хвосте (расширение)
     local zoneId, zoneName, px, py, observedAt
     if proto == "N6" then
         zoneId = tonumber(fields[9])
@@ -1718,13 +1737,11 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         observedAt = tonumber(fields[12])
         if not observedAt or observedAt <= 0 then return Reject("bad time") end
         if observedAt > time() + PEER_CLOCK_SKEW then return Reject("time in future") end
-        -- Имя зоны: из своего клиента по id (тогда оно на языке получателя).
-        -- Если id нет, имя могло приехать текстом в хвостовом поле — оно идёт
-        -- ПОСЛЕ зоны в общем хвосте, поэтому его забираем при разборе extra.
+        -- Имя: сначала свой клиент по id (тогда оно на языке получателя), и
+        -- только если id не резолвится — присланное расширение.
         zoneName = (zoneId > 0) and ZoneNameById(zoneId) or nil
-        if not zoneName and batchZoneText and batchZoneText ~= "" then
-            if PeerField(batchZoneText, 60) then zoneName = batchZoneText end
-        end
+        if not zoneName then zoneName = tailZone end
+        if zoneName and not PeerField(zoneName, 60) then zoneName = nil end
     elseif proto ~= "N2" then
         zoneId = tonumber(fields[9])
         if not zoneId or zoneId < 0 or zoneId % 1 ~= 0 or zoneId > 100000 then
@@ -1747,6 +1764,11 @@ local function ReceivePeerMessage(message, sender, fromBatch)
             -- один пакет «из 2030 года» навсегда перебивал бы все обновления.
             if not observedAt or observedAt <= 0 then return Reject("bad time") end
             if observedAt > time() + PEER_CLOCK_SKEW then return Reject("time in future") end
+        end
+        -- Локализация: если id известен получателю, его имя главнее текста.
+        if zoneId > 0 then
+            local localName = ZoneNameById(zoneId)
+            if localName then zoneName = localName end
         end
     end
     peerStats.valid = peerStats.valid + 1
