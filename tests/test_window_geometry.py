@@ -21,12 +21,13 @@ LOCALE = Path(__file__).resolve().parents[1] / "NearbySpy_Locale.lua"
 
 
 def const(name):
-    """Значение NSP_CONST.<name> из файла локалей."""
+    """Значение NSP_CONST.<name> из файла локалей (целое или дробное)."""
     src = LOCALE.read_text(encoding="utf-8")
-    m = re.search(r"\b%s\s*=\s*(-?\d+)\s*," % name, src)
+    m = re.search(r"\b%s\s*=\s*(-?\d+(?:\.\d+)?)\s*," % name, src)
     if not m:
         raise AssertionError("NSP_CONST.%s не найдена" % name)
-    return int(m.group(1))
+    raw = m.group(1)
+    return float(raw) if "." in raw else int(raw)
 
 
 class ColumnGeometryTests(unittest.TestCase):
@@ -54,6 +55,21 @@ class ColumnGeometryTests(unittest.TestCase):
         last_right = 9 + 59 * const("CHART_STEP") + (const("CHART_STEP") - 2.5)
         self.assertLessEqual(last_right, const("CHART_W"),
                              "гистограмма вылезает за панель")
+
+    def test_chart_fills_its_panel(self):
+        # Обратная проверка: столбцы должны ЗАПОЛНЯТЬ панель, а не оставлять
+        # дырку справа — иначе половина ширины гистограммы потрачена зря, а
+        # расширяли её именно ради более широких столбцов (по ним кликают,
+        # выбирая точный уровень).
+        last_right = 9 + 59 * const("CHART_STEP") + (const("CHART_STEP") - 2.5)
+        gap = const("CHART_W") - last_right
+        self.assertLessEqual(gap, 20,
+                             "справа от столбцов пустует %.0fpx — шаг столбца занижен" % gap)
+
+    def test_classes_panel_is_narrower_than_the_chart(self):
+        # соотношение, ради которого блок топ-3 сжимали: гистограмма шире панели
+        # классов, потому что по ней кликают, а классы — только три строки
+        self.assertGreater(const("CHART_W"), const("CLASSES_W"))
 
     def test_classes_panel_stays_inside_the_window(self):
         right = const("CLASSES_X") + const("CLASSES_W")
