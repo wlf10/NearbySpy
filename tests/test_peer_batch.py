@@ -42,7 +42,8 @@ time = function() return 1000 end
 PEER_CHANNEL_BASE = 'nearbyspy'
 PEER_PROTO = "N6"
 PEER_BATCH_SEP = ","
-PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 0   -- GAP=0: шлём сразу
+PEER_QUEUE_MAX, PEER_TTL = 60, 120
+PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 0, 0, 999  -- шлём сразу
 PEER_PAYLOAD_MAX = 240
 PEER_BATCH_MAX = 5
 peerQueue, peerQueued, peerSent = {}, {}, {}

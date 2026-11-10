@@ -275,6 +275,11 @@ NSP_ZONE_BY_NAME = nil      -- имя -> id
 NSP_ZONE_NAME_BY_ID = nil   -- id -> имя
 
 local ZONE_SCAN_MAX = 3000  -- с запасом: живые id доходят до 2521+
+-- Порог «словарь полон». Живой скан на 1.60.1 собрал 60 карт из 3000 — это
+-- заведомо огрызок (в базе 821 уникальная зона), значит C_Map отдаёт данные
+-- не сразу. Ниже порога разрешаем повторный скан.
+local ZONE_MAP_MIN = 200
+local zoneMapLastScan = 0
 
 -- ZoneMapInit — построить словари. Возвращает карты (пустые, если API нет).
 function ZoneMapInit()
@@ -301,15 +306,49 @@ function ZoneMapInit()
     local okDb, db = pcall(GetDB)
     if okDb and type(db) == "table" then
         db.debug = db.debug or {}
-        db.debug.zoneMap = { scanned = ZONE_SCAN_MAX, found = found }
+        -- Диагностика: САМИ найденные id, а не только счётчик. Живой прогон
+        -- 10.11.2026 дал found=60 из 3000 — по одному счётчику непонятно,
+        -- покрыт ли словарь частично или сканирование прошло до готовности
+        -- C_Map. Список отвечает на это без повторной игры.
+        local ids = {}
+        local shown = 0
+        for id, name in pairs(byId) do
+            shown = shown + 1
+            if shown <= 40 then ids[#ids + 1] = tostring(id) .. "=" .. name end
+        end
+        table.sort(ids)
+        db.debug.zoneMap = { scanned = ZONE_SCAN_MAX, found = found, sample = ids }
     end
     return byName, byId
+end
+
+-- ZoneMapReady — словарь достаточно полон? На кастомном клиенте C_Map может
+-- отдать данные не сразу после входа (карты подгружаются), поэтому первый скан
+-- способен собрать огрызок. Если он подозрительно мал, разрешаем ПОВТОРНЫЙ
+-- скан, но не чаще раза в минуту — перебор 3000 id не бесплатный.
+function ZoneMapReady()
+    ZoneMapInit()
+    local n = 0
+    for _ in pairs(NSP_ZONE_NAME_BY_ID or {}) do n = n + 1 end
+    return n >= ZONE_MAP_MIN
+end
+
+function ZoneMapRefresh()
+    -- Пересканируем ТОЛЬКО если словарь заведомо неполон: полный скан 3000 id
+    -- не бесплатный, а живой клиент его уже прошёл успешно.
+    if ZoneMapReady() then return end
+    local nowT = time()
+    if nowT - zoneMapLastScan < 60 then return end
+    zoneMapLastScan = nowT
+    NSP_ZONE_BY_NAME, NSP_ZONE_NAME_BY_ID = nil, nil
+    ZoneMapInit()
 end
 
 -- ZoneIdByName — id по тексту зоны из /who. nil, если зоны нет в словаре
 -- (тогда вызывающий шлёт текст, как раньше, — молча терять зону нельзя).
 function ZoneIdByName(name)
     if type(name) ~= "string" or name == "" then return nil end
+    ZoneMapRefresh()          -- если прошлый скан собрал огрызок — попробуем ещё
     local byName = ZoneMapInit()
     return byName[name]
 end
@@ -965,7 +1004,12 @@ end
 -- работать в обе стороны: мы их слышим, они нас — пока мы в режиме N5.
 local PEER_PROTO = "N6"
 
-local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
+local PEER_QUEUE_MAX, PEER_TTL = 60, 120
+-- Интервал между сообщениями. Обычно 10 сек (не спамим канал зря), но при
+-- большой очереди — 4 сек: /who-скан выдаёт десятки записей залпом, а при
+-- 10 сек уходит лишь 24/мин, и очередь переполнялась (живой лог 10.11.2026:
+-- 43 записи, «queue full»). 15 сообщений в минуту для канала — не флуд.
+local PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 10, 4, 20
 -- Допустимое расхождение часов у отправителя пакета N4. Больше — отказ:
 -- «пакет из будущего» иначе навсегда перебивал бы все обновления.
 local PEER_CLOCK_SKEW = 3600
@@ -1234,7 +1278,10 @@ local function DrainPeerQueue()
     local db = GetDB()
     if not db.peerEnabled or #peerQueue == 0 then return end
     local nowT = time()
-    if nowT - peerStats.lastSend < PEER_GAP then return end
+    -- Адаптивный интервал: при большой очереди отправляем чаще, иначе канал
+    -- захлёбывается после /who-скана.
+    local gap = (#peerQueue >= PEER_BUSY_LEN) and PEER_GAP_BUSY or PEER_GAP
+    if nowT - peerStats.lastSend < gap then return end
     while #peerQueue > 0 and nowT - peerQueue[1].at > PEER_TTL do
         local old = table.remove(peerQueue, 1)
         peerQueued[old.key] = nil
