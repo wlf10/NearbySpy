@@ -22,5 +22,6 @@ tests/*
 !tests/test_peer_channel_name.py
 !tests/test_peer_new_session.py
 !tests/test_class_level_filter.py
+!tests/test_window_geometry.py
 !tests/fixtures/
 !tests/fixtures/datapack.lua

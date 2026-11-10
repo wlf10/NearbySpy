@@ -3594,7 +3594,7 @@ end
 
 local function TacticalRow(parent, index)
     local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(632, TACTICAL_ROW_H)
+    row:SetSize(NSP_CONST.LIST_W, TACTICAL_ROW_H)
     row:EnableMouse(true)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
@@ -3610,30 +3610,32 @@ local function TacticalRow(parent, index)
     -- underneath it: 12pt + 8pt + gap is ~26px in a 30px row. The tag is a
     -- SEPARATE FontString, not a colour code appended to the name — one string
     -- cannot carry two sizes, and appending it to the name pushed the name
-    -- itself off the 142px column.
+    -- itself off its column.
+    -- Column offsets come from NSP_CONST: the table header reads the SAME
+    -- numbers, so a width change can never leave the headings misaligned.
     row.name = NewText(row, 12)
-    row.name:SetPoint("LEFT", 34, 5)
-    row.name:SetWidth(142)
+    row.name:SetPoint("LEFT", NSP_CONST.COL_NAME_X, 5)
+    row.name:SetWidth(NSP_CONST.COL_NAME_W)
     row.name:SetJustifyH("LEFT")
     -- 7pt: the realm is a dim annotation, not data the eye should land on first.
     -- 12pt name + 7pt tag + gap is ~24px in a 30px row, so nothing clips; the
     -- name moved 5px up (was 4) to keep the pair centred.
     row.realm = NewText(row, 7, 0.55, 0.5, 0.4)
     row.realm:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, 0)
-    row.realm:SetWidth(142)
+    row.realm:SetWidth(NSP_CONST.COL_NAME_W)
     row.realm:SetJustifyH("LEFT")
     row.realm:Hide()
     row.profile = NewText(row, 11, 0.82, 0.79, 0.72)
-    row.profile:SetPoint("LEFT", 180, 0)
-    row.profile:SetWidth(150)
+    row.profile:SetPoint("LEFT", NSP_CONST.COL_PROF_X, 0)
+    row.profile:SetWidth(NSP_CONST.COL_PROF_W)
     row.profile:SetJustifyH("LEFT")
     row.zone = NewText(row, 11, 0.6, 0.55, 0.45)
-    row.zone:SetPoint("LEFT", 334, 0)
-    row.zone:SetWidth(195)
+    row.zone:SetPoint("LEFT", NSP_CONST.COL_ZONE_X, 0)
+    row.zone:SetWidth(NSP_CONST.COL_ZONE_W)
     row.zone:SetJustifyH("LEFT")
     row.seen = NewText(row, 10, 0.45, 0.5, 0.5)
-    row.seen:SetPoint("LEFT", 533, 0)
-    row.seen:SetWidth(94)
+    row.seen:SetPoint("LEFT", NSP_CONST.COL_SEEN_X, 0)
+    row.seen:SetWidth(NSP_CONST.COL_SEEN_W)
     row.seen:SetJustifyH("LEFT")
     row:SetScript("OnEnter", function(self)
         self.hover:Show()
@@ -3862,7 +3864,7 @@ function TacticalRealmCycler(parent, x, y, width)
     button:SetSize(width, 25)
     -- TOPLEFT with an explicit y: the toolbar positions itself with "LEFT" inside a
     -- 31px strip, but this button hangs off the window itself, where "LEFT" means
-    -- the vertical centre of a 668px frame.
+    -- the vertical centre of the whole (800px) window.
     button:SetPoint("TOPLEFT", x, y)
     button.bg = button:CreateTexture(nil, "BACKGROUND")
     button.bg:SetAllPoints()
@@ -4194,7 +4196,7 @@ local function BuildWindow()
         win.CloseButton:SetSize(26, 26); win.CloseButton:SetPoint("TOPRIGHT", -8, -8)
         local text = NewText(win.CloseButton, 15, 0.85, 0.65, 0.25); text:SetPoint("CENTER"); text:SetText("x")
     end
-    win:SetSize(700, 668)
+    win:SetSize(NSP_CONST.WIN_W, NSP_CONST.WIN_H)
     win:SetPoint("CENTER")
     SolidUnderlay(win)
     win:SetFrameStrata("DIALOG")
@@ -4226,40 +4228,42 @@ local function BuildWindow()
     ApplyFont(tactical.factions.value, 11)
 
     local chart = TacticalPanel(win)
-    chart:SetPoint("TOPLEFT", 16, -116); chart:SetSize(412, 100)
+    chart:SetPoint("TOPLEFT", 16, -116); chart:SetSize(NSP_CONST.CHART_W, 100)
     tactical.chartLabel = NewText(chart, 9, 0.62, 0.55, 0.42)
     tactical.chartLabel:SetPoint("TOPLEFT", 9, -7)
     for level = 1, 60 do
         local bar = chart:CreateTexture(nil, "ARTWORK")
-        bar:SetPoint("BOTTOMLEFT", 9 + (level - 1) * 6.5, 10)
-        bar:SetWidth(5.5); bar:SetHeight(1)
+        bar:SetPoint("BOTTOMLEFT", 9 + (level - 1) * NSP_CONST.CHART_STEP, 10)
+        bar:SetWidth(NSP_CONST.CHART_STEP - 2.5); bar:SetHeight(1)
         tactical.bars[level] = bar
-        -- Прозрачная кнопка поверх столбца: сам столбец 5.5 px — мелкая цель
-        -- для мыши, а зона клика в 12 px ловит уровень надёжно. Высота — вся
-        -- высота гистограммы: промахнуться по уровню невозможно.
+        -- Прозрачная кнопка поверх столбца: сам столбец узкий — мелкая цель
+        -- для мыши, а зона клика по всей ширине шага ловит уровень надёжно.
+        -- Высота — вся высота гистограммы: промахнуться по уровню невозможно.
         local hit = CreateFrame("Button", nil, chart)
-        hit:SetPoint("BOTTOMLEFT", 9 + (level - 1) * 6.5 - 3, 8)
-        hit:SetSize(12, NSP_CONST.LEVEL_CHART_H)
+        hit:SetPoint("BOTTOMLEFT", 9 + (level - 1) * NSP_CONST.CHART_STEP - 3, 8)
+        hit:SetSize(NSP_CONST.CHART_STEP, NSP_CONST.LEVEL_CHART_H)
         hit.level = level
         hit:SetScript("OnClick", function(self) TacticalLevelExact(self.level) end)
     end
     local axis = chart:CreateTexture(nil, "ARTWORK")
-    axis:SetPoint("BOTTOMLEFT", 8, 9); axis:SetSize(391, 1); axis:SetColorTexture(0.3, 0.24, 0.12, 1)
+    axis:SetPoint("BOTTOMLEFT", 8, 9)
+    axis:SetSize(NSP_CONST.CHART_W - 21, 1); axis:SetColorTexture(0.3, 0.24, 0.12, 1)
 
     local classes = TacticalPanel(win)
-    classes:SetPoint("TOPLEFT", 436, -116); classes:SetSize(248, 100)
+    classes:SetPoint("TOPLEFT", NSP_CONST.CLASSES_X, -116)
+    classes:SetSize(NSP_CONST.CLASSES_W, 100)
     local classTitle = NewText(classes, 9, 0.62, 0.55, 0.42)
     classTitle:SetPoint("TOPLEFT", 9, -7); classTitle:SetText(L("UI_CLASSES"))
     for i = 1, NSP_CONST.CLASS_BARS do
         local row = CreateFrame("Button", nil, classes)
-        row:SetSize(230, 20); row:SetPoint("TOPLEFT", 9, -23 - (i - 1) * 23)
+        row:SetSize(NSP_CONST.ROW_COL_W, 20); row:SetPoint("TOPLEFT", 9, -23 - (i - 1) * 23)
         row.icon = row:CreateTexture(nil, "ARTWORK"); row.icon:SetSize(18, 18); row.icon:SetPoint("LEFT")
         row.label = NewText(row, 9, 0.85, 0.82, 0.75); row.label:SetPoint("LEFT", 23, 0); row.label:SetWidth(68); row.label:SetJustifyH("LEFT")
         -- StatusBar is the native bar widget (min/max/value, it fills itself);
         -- texture fallback if the custom beta lacks the widget
         local okBar, bar = pcall(CreateFrame, "StatusBar", nil, row)
         if okBar and bar and bar.SetMinMaxValues then
-            bar:SetPoint("LEFT", 92, 0); bar:SetSize(100, 13)
+            bar:SetPoint("LEFT", 92, 0); bar:SetSize(NSP_CONST.ROW_COL_W - 150, 13)
             bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
             bar:SetMinMaxValues(0, 1); bar:SetValue(0)
             local bg = bar:CreateTexture(nil, "BACKGROUND")
@@ -4275,7 +4279,7 @@ local function BuildWindow()
             row.value:SetShadowColor(0, 0, 0, 0.9)
         else
             if bar and bar.Hide then bar:Hide() end
-            local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 92, 0); track:SetSize(100, 8); track:SetColorTexture(0.1, 0.08, 0.05, 1)
+            local track = row:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", 92, 0); track:SetSize(NSP_CONST.ROW_COL_W - 150, 8); track:SetColorTexture(0.1, 0.08, 0.05, 1)
             row.fill = row:CreateTexture(nil, "ARTWORK"); row.fill:SetPoint("LEFT", 92, 0); row.fill:SetHeight(8); row.fill:SetWidth(1)
             row.value = NewText(row, 9); row.value:SetPoint("RIGHT", -1, 0)
         end
@@ -4302,7 +4306,7 @@ local function BuildWindow()
     end
 
     local toolbar = TacticalPanel(win)
-    toolbar:SetPoint("TOPLEFT", 16, -224); toolbar:SetSize(668, 31)
+    toolbar:SetPoint("TOPLEFT", 16, -224); toolbar:SetSize(NSP_CONST.TOOLBAR_W, 31)
     TacticalFilter(toolbar, "all", 6); TacticalFilter(toolbar, "fresh", 122); TacticalFilter(toolbar, "new", 238)
     -- 4th tile: rows that arrived over the nearbyspydata channel (peerAt)
     TacticalFilter(toolbar, "peer", 354)
@@ -4313,24 +4317,26 @@ local function BuildWindow()
     -- Selector row: the database can hold players from other realms of the
     -- cluster (peer channel), so the list needs a realm selector of its own.
     -- A second row rather than another toolbar tile: the five filters plus the
-    -- counter already fill the 668px strip. The class and level selectors
-    -- live in the same row — three selectors, one strip.
-    TacticalRealmCycler(win, 22, -256, 200)
-    TacticalClassCycler(win, 238, -256, 200)
-    TacticalLevelCycler(win, 454, -256, 200)
+    -- counter already fill the strip. The class and level selectors live in the
+    -- same row — three selectors, one strip, each 260px in an 880px window.
+    TacticalRealmCycler(win, 22, -256, 260)
+    TacticalClassCycler(win, 298, -256, 260)
+    TacticalLevelCycler(win, 574, -256, 260)
 
     local tableHeader = CreateFrame("Frame", nil, win)
-    tableHeader:SetPoint("TOPLEFT", 16, -288); tableHeader:SetSize(668, 24)
+    tableHeader:SetPoint("TOPLEFT", 16, -288); tableHeader:SetSize(NSP_CONST.TOOLBAR_W, 24)
     local thBg = tableHeader:CreateTexture(nil, "BACKGROUND"); thBg:SetAllPoints(); thBg:SetColorTexture(0.07, 0.055, 0.035, 1)
-    local h1 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h1:SetPoint("LEFT", 34, 0); h1:SetText(L("UI_PLAYER"))
-    local h2 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h2:SetPoint("LEFT", 180, 0); h2:SetText(L("UI_PROFILE"))
-    local h3 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h3:SetPoint("LEFT", 334, 0); h3:SetText(L("UI_ZONE"))
-    local h4 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h4:SetPoint("LEFT", 533, 0); h4:SetText(L("UI_CONTACT"))
+    -- Заголовки берут X из тех же констант, что и строки: при смене ширины
+    -- окна они не могут разъехаться с данными.
+    local h1 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h1:SetPoint("LEFT", NSP_CONST.COL_NAME_X, 0); h1:SetText(L("UI_PLAYER"))
+    local h2 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h2:SetPoint("LEFT", NSP_CONST.COL_PROF_X, 0); h2:SetText(L("UI_PROFILE"))
+    local h3 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h3:SetPoint("LEFT", NSP_CONST.COL_ZONE_X, 0); h3:SetText(L("UI_ZONE"))
+    local h4 = NewText(tableHeader, 9, 0.62, 0.55, 0.4); h4:SetPoint("LEFT", NSP_CONST.COL_SEEN_X, 0); h4:SetText(L("UI_CONTACT"))
 
     local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
     if not okSf or not sf then sf = CreateFrame("ScrollFrame", nil, win) end
     sf:SetPoint("TOPLEFT", 16, -312); sf:SetPoint("BOTTOMRIGHT", -32, 43)
-    local content = CreateFrame("Frame", nil, sf); content:SetSize(632, 1); sf:SetScrollChild(content); winList = content
+    local content = CreateFrame("Frame", nil, sf); content:SetSize(NSP_CONST.LIST_W, 1); sf:SetScrollChild(content); winList = content
 
     tactical.status = NewText(win, 9, 0.55, 0.5, 0.4); tactical.status:SetPoint("BOTTOMLEFT", 17, 20)
     local hint = NewText(win, 9, 0.4, 0.36, 0.28)
