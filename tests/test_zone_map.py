@@ -49,6 +49,9 @@ time = function() return 1794300000 end
 canaccessvalue = nil
 DB = {debug = {}}
 function GetDB() return DB end
+-- Клиент предоставляет Enum.UIMapType; в коде типы карт перебираются из него.
+Enum = { UIMapType = { Cosmic = 0, World = 1, Continent = 2, Zone = 3,
+                       Dungeon = 4, Micro = 5, Orphan = 6 } }
 """
 
 
@@ -69,6 +72,7 @@ class ZoneDictionaryTests(unittest.TestCase):
                 parts.append("[%d] = { %s }" % (parent, items))
             kids = "CHILDREN = { %s }\n" % ", ".join(parts)
         api = ("C_Map = { GetMapInfo = function(id) return ({ %s })[id] end,\n"
+               "          RequestPreloadMap = function() end,\n"
                "          GetMapChildrenInfo = function(id) return (CHILDREN or {})[id] or {} end }\n" % entries
                if with_api else "C_Map = nil\n")
         lua.execute(HARNESS + kids + api + zone_block() + "\n"
@@ -131,6 +135,61 @@ class ZoneDictionaryTests(unittest.TestCase):
         # на приёме словоарь не нужен: GetMapInfo(id) отвечает напрямую
         lua = self.make({2665: "Zephras Isle"})
         self.assertEqual("Zephras Isle", lua.globals()["TestById"](2665))
+
+    def test_map_type_is_passed_explicitly(self):
+        # Blizzard сам вызывает GetMapChildrenInfo с Enum.UIMapType.Zone, а не с
+        # nil. С nil клиент отдавал пустое поддерево — это и была причина
+        # found=117. Проверяем, что тип доходит до API.
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute(HARNESS + """
+SEEN_TYPES = {}
+C_Map = {
+    GetMapInfo = function(id)
+        if id == 1414 then return { name = "Kalimdor", mapType = 2, mapID = 1414 } end
+    end,
+    RequestPreloadMap = function() end,
+    GetMapChildrenInfo = function(id, mapType, all)
+        SEEN_TYPES[#SEEN_TYPES + 1] = tostring(mapType)
+        if mapType == 3 then return { { mapID = 1413, name = "Durotar", mapType = 3 } } end
+        return {}
+    end,
+}
+""" + zone_block() + "\nTestInit = ZoneMapInit\nTestSeen = SEEN_TYPES\n")
+        lua.globals()["TestInit"]()
+        seen = lua.globals()["TestSeen"]
+        vals = [str(seen[i]) for i in range(1, len(seen) + 1)]
+        self.assertTrue(vals, "GetMapChildrenInfo вообще не вызывался")
+        self.assertFalse(all(v == "nil" for v in vals),
+                         "тип карты ни разу не передан: %s" % vals)
+        # и тип Zone (3) обязан быть среди запрошенных
+        self.assertIn("3", vals, "Enum.UIMapType.Zone не запрашивался: %s" % vals)
+
+    def test_preload_is_requested_for_roots(self):
+        # карты грузятся по требованию: без RequestPreloadMap поддерево пустое
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute(HARNESS + """
+PRELOADED = {}
+C_Map = {
+    GetMapInfo = function(id)
+        if id == 1414 then return { name = "Kalimdor", mapType = 2, mapID = 1414 } end
+    end,
+    RequestPreloadMap = function(id) PRELOADED[#PRELOADED + 1] = id end,
+    GetMapChildrenInfo = function() return {} end,
+}
+""" + zone_block() + "\nTestInit = ZoneMapInit\nTestPre = PRELOADED\n")
+        lua.globals()["TestInit"]()
+        pre = lua.globals()["TestPre"]
+        vals = [int(pre[i]) for i in range(1, len(pre) + 1)]
+        self.assertIn(1414, vals, "preload не запрошен для корневой карты: %s" % vals)
+
+    def test_diagnostic_reports_enum_and_preload_availability(self):
+        lua = self.make({1414: "Kalimdor"})
+        lua.globals()["TestInit"]()
+        dbg = lua.globals()["TestDbg"]["debug"]["zoneMap"]
+        self.assertTrue(bool(dbg["hasPreload"]))
+        self.assertTrue(bool(dbg["hasEnum"]))
+        types = [str(dbg["types"][i]) for i in range(1, len(dbg["types"]) + 1)]
+        self.assertIn("3", types, "тип Zone не попал в диагностику: %s" % types)
 
     def test_diagnostic_records_which_ids_were_found(self):
         # именно этой информации не хватало: found=60 без списка — непонятно,

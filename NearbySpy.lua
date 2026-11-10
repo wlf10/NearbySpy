@@ -284,10 +284,61 @@ local ZONE_ROOT_FROM, ZONE_ROOT_TO = 1000, 6000
 local ZONE_MAP_MIN = 400
 local zoneMapLastScan = 0
 
+-- ZonePreload — запросить загрузку карты. В C_Map карты грузятся по требованию
+-- (Blizzard: RequestPreloadMap в Blizzard_WorldMap/MapTexturePreloader.lua), и
+-- до запроса GetMapChildrenInfo может честно вернуть пусто — именно это мы и
+-- наблюдали: roots=59, добавлено 58, поддеревья пустые.
+local function ZonePreload(id)
+    if C_Map and C_Map.RequestPreloadMap then
+        pcall(C_Map.RequestPreloadMap, id)
+    end
+end
+
+-- ZoneChildren — дети карты. Тип карты передаётся ЯВНО, как это делает сам
+-- Blizzard (ZoneLabelDataProvider.lua: C_Map.GetMapChildrenInfo(mapID,
+-- Enum.UIMapType.Zone)). С nil вместо типа клиент отдавал почти пустой список.
+-- Пробуем несколько типов: поддерево может содержать зоны, пещеры и мир.
+local ZONE_MAP_TYPES = nil   -- заполняется лениво из Enum
+local function ZoneTypes()
+    if ZONE_MAP_TYPES then return ZONE_MAP_TYPES end
+    local t = {}
+    local e = Enum and Enum.UIMapType
+    if e then
+        for _, key in ipairs({ "Cosmic", "World", "Continent", "Zone", "Dungeon",
+                               "Micro", "Orphan" }) do
+            if e[key] then t[#t + 1] = e[key] end
+        end
+    end
+    -- без Enum — хотя бы nil (как было), чтобы поведение не пропало совсем
+    if #t == 0 then t[1] = nil end
+    ZONE_MAP_TYPES = t
+    return t
+end
+
+local function ZoneChildren(id)
+    if not (C_Map and C_Map.GetMapChildrenInfo) then return nil end
+    local merged, seen = {}, {}
+    local got = false
+    for _, mapType in ipairs(ZoneTypes()) do
+        local ok, children = pcall(C_Map.GetMapChildrenInfo, id, mapType, true)
+        if ok and type(children) == "table" then
+            for i = 1, #children do
+                local c = children[i]
+                local cid = type(c) == "table" and tonumber(c.mapID)
+                if cid and not seen[cid] then
+                    seen[cid] = true
+                    merged[#merged + 1] = c
+                    got = true
+                end
+            end
+        end
+    end
+    return got and merged or nil
+end
+
 -- ZoneCollect — добавить карту и рекурсивно её детей в словари.
--- GetMapChildrenInfo(uiMapID, nil, true) отдаёт ВСЁ поддерево одним вызовом
--- (allDescendants=true), поэтому обход — это ~50 вызовов вместо перебора
--- 5000 id. Именно из-за перебора мы раньше потеряли диапазон 1..1411.
+-- Дети берутся через ZoneChildren (явный тип карты + preload), потому что
+-- запрос с nil вместо типа на этом клиенте отдавал пустое поддерево.
 local function ZoneCollect(byName, byId, info, depth)
     if type(info) ~= "table" then return 0 end
     local id = tonumber(info.mapID)
@@ -307,19 +358,17 @@ local function ZoneCollect(byName, byId, info, depth)
         end
         added = added + 1
     end
-    -- Дети: allDescendants=true может вернуть уже всё поддерево, поэтому
-    -- рекурсия тут не нужна — но если клиент вернёт только прямых детей,
-    -- пройдём по ним сами. Глубину ограничиваем: защита от цикла в данных.
-    if depth < 12 and C_Map and C_Map.GetMapChildrenInfo then
-        local okCh, children = pcall(C_Map.GetMapChildrenInfo, id, nil, true)
-        if okCh and type(children) == "table" then
+    if depth < 12 then
+        ZonePreload(id)
+        local children = ZoneChildren(id)
+        if children then
             for i = 1, #children do
                 local child = children[i]
                 if type(child) == "table" then
                     local cid = tonumber(child.mapID)
                     if cid and byId[cid] then
-                        -- allDescendants уже отдал этого ребёнка: индексируем
-                        -- имя, но дальше не спускаемся
+                        -- уже проиндексирован этим же обходом: имя обновляем,
+                        -- дальше не спускаемся
                         if type(child.name) == "string" and child.name ~= "" then
                             local prev = byName[child.name]
                             if not prev or (child.mapType == 3) then
@@ -356,17 +405,24 @@ function ZoneMapInit()
     local okDb, db = pcall(GetDB)
     if okDb and type(db) == "table" then
         db.debug = db.debug or {}
-        -- Диагностика: сколько записей, сколько корней и список первых id —
-        -- без этого не видно, обход ли собрал огрызок или клиент отдаёт мало.
+        -- Диагностика: сколько записей, сколько корней, какие типы карт
+        -- запрашивались и есть ли они в клиенте — без этого не отличить
+        -- «дерево пустое» от «Enum.UIMapType отсутствует».
         local ids, shown = {}, 0
         for id, name in pairs(byId) do
             shown = shown + 1
             if shown <= 40 then ids[#ids + 1] = tostring(id) .. "=" .. name end
         end
         table.sort(ids)
+        local types = {}
+        for _, v in ipairs(ZoneTypes()) do types[#types + 1] = tostring(v) end
         db.debug.zoneMap = {
             from = ZONE_ROOT_FROM, to = ZONE_ROOT_TO,
-            found = found, roots = roots, sample = ids,
+            found = found, roots = roots,
+            hasPreload = (C_Map and C_Map.RequestPreloadMap) and true or false,
+            hasEnum = (Enum and Enum.UIMapType) and true or false,
+            types = types,
+            sample = ids,
         }
     end
     return byName, byId
