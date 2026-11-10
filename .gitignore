@@ -23,5 +23,6 @@ tests/*
 !tests/test_class_level_filter.py
 !tests/test_window_geometry.py
 !tests/test_mastercraft_gap.py
+!tests/test_status_line.py
 !tests/fixtures/
 !tests/fixtures/datapack.lua

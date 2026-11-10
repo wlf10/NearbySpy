@@ -3444,17 +3444,29 @@ end
 local function TacticalSources()
     local s = (GetDB().debug and GetDB().debug.src) or {}
     local parts, shown = {}, {}
-    for _, key in ipairs({"unit", "guild", "chat", "who"}) do
-        parts[#parts + 1] = key .. " " .. tostring(s[key] or 0)
+    -- Название источника берём из локалей: ключи в SV остаются техническими
+    -- (unit/who/chat/guild/peer), но игроку в статус-строке нужен человеческий
+    -- текст. Незнакомый источник печатается сырым ключом — он не должен
+    -- молча исчезать из строки статуса.
+    local function label(key)
+        local k = "SRC_" .. string.upper(key)
+        local t = L(k)
+        return (t ~= k) and t or key
+    end
+    for _, key in ipairs({ "unit", "guild", "chat", "who" }) do
+        local n = tonumber(s[key]) or 0
+        -- Нулевой источник в строку не пишем: она отвечает на вопрос «что
+        -- реально кормит базу сейчас», а "гильдия 0; чат 0" — шум. Новые
+        -- источники ниже выводятся только при > 0 по той же причине.
+        if n > 0 then parts[#parts + 1] = label(key) .. " " .. n end
         shown[key] = true
     end
-    -- any new data source with a nonzero counter is appended — it must not
-    -- silently vanish from the status bar
     for key, value in pairs(s) do
         if not shown[key] and type(value) == "number" and value > 0 then
-            parts[#parts + 1] = tostring(key) .. " " .. value
+            parts[#parts + 1] = label(tostring(key)) .. " " .. value
         end
     end
+    if #parts == 0 then return L("SRC_LINE") .. L("SRC_EMPTY") end
     return L("SRC_LINE") .. table.concat(parts, "; ")
 end
 
