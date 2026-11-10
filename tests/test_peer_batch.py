@@ -119,6 +119,33 @@ class BatchSendTests(unittest.TestCase):
         text_form = single.replace(";g;10;a;a;", ";MAGE;10;Human;Alliance;")
         self.assertLess(len(single.encode()), len(text_form.encode()))
 
+    def test_game_is_encoded_in_the_header(self):
+        # игра — конечное множество (forever/retail/classic_era), кодируется
+        # одним символом: "forever" (7 байт) -> "f"
+        self.push("Alice")
+        self.g["TestDrain"]()
+        parts = self.sent()[0].split(";")
+        self.assertEqual(1, len(parts[1]), "игра не закодирована: %r" % parts[1])
+        self.assertEqual("f", parts[1], "код forever должен быть 'f'")
+
+    def test_legacy_mode_sends_game_as_text(self):
+        # переходный N5: старый клиент кода не поймёт, игра едет текстом
+        self.lua.execute("PEER_PROTO = 'N5'")
+        self.push("Alice")
+        self.g["TestDrain"]()
+        parts = self.sent()[0].split(";")
+        self.assertEqual("N5", parts[0])
+        self.assertEqual("forever", parts[1])
+
+    def test_game_is_encoded_in_batch_header_too(self):
+        # Заголовок пачки — тот же, что у одиночного пакета. Этот тест появился
+        # после реальной ошибки: код игры добавили только в одиночную ветку, и
+        # пачка продолжала слать "forever" (7 байт вместо 1).
+        self.push("Alice"); self.push("Bob")
+        self.g["TestDrain"]()
+        parts = self.sent()[0].split(";")
+        self.assertEqual("f", parts[1], "игра в пачке не закодирована: %r" % parts[1])
+
     def test_payload_never_contains_a_pipe(self):
         # Сервер отклоняет сообщение с '|' как «Invalid escape code in chat
         # message» — пакет не уходит вообще (живой лог 10.11.2026: sent=0,
@@ -176,7 +203,8 @@ class BatchSendTests(unittest.TestCase):
         self.g["TestDrain"]()
         sent = self.sent()
         self.assertEqual(1, len(sent), "за один вызов ушло больше одного сообщения")
-        self.assertTrue(sent[0].startswith("N6;forever;R1;"),
+        # игра в заголовке — код: "forever" -> 'f'
+        self.assertTrue(sent[0].startswith("N6;f;R1;"),
                         "в пачку попал не тот мир: %s" % sent[0][:30])
         self.assertNotIn("Bob", sent[0], "в чужой мир уехала запись другого мира")
         self.assertEqual(1, len(self.g["peerQueue"]), "второй мир должен ждать своей отправки")

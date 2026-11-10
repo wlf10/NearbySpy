@@ -896,9 +896,10 @@ function PeerChannelName()
     -- фракция неизвестна (ранний вызов, нестандартный сервер) — общий канал
     return PEER_CHANNEL_BASE
 end
--- Протокол отправки. N6 кодирует класс/расу/фракцию одним символом (экономия
--- 19 байт на запись). N5 — переходный: те же пачки, но поля текстом; включается
--- настройкой, если в канале остались клиенты, которые N6 не понимают.
+-- Протокол отправки — N6. Он кодирует ОДНИМ СИМВОЛОМ и класс/расу/фракцию
+-- (в записи), и игру (в заголовке): обе — конечные множества.
+-- N5 — переходный режим: пачки с текстовыми полями, включается настройкой,
+-- если в канале остались клиенты, которые кодов не понимают.
 -- Приём поддерживает ВСЁ от N2 до N6, поэтому старые клиенты продолжают
 -- работать в обе стороны: мы их слышим, они нас — пока мы в режиме N5.
 local PEER_PROTO = "N6"
@@ -999,11 +1000,20 @@ NSP_PEER_CODES = {
         e = "Orc", f = "Scourge", g = "Tauren", h = "Troll", i = "Skyborne",
     },
     faction = { a = "Alliance", h = "Horde" },
+    -- Игра тоже конечное множество (сейчас три значения в коде: forever,
+    -- retail, classic_era). В заголовке она стоит один раз на сообщение, но
+    -- для одиночного пакета это 6 байт из ~89 — заметно.
+    game = { f = "forever", r = "retail", c = "classic_era" },
 }
 local PEER_CODE_UNKNOWN = "z"
 
 -- Обратные карты строятся один раз при загрузке.
-NSP_PEER_DECODE = { class = {}, race = {}, faction = {} }
+-- Строятся ПО ТАБЛИЦЕ КОДОВ, а не перечислением: новая категория (как game)
+-- иначе роняла бы загрузку аддона на индексации nil.
+NSP_PEER_DECODE = {}
+for kind in pairs(NSP_PEER_CODES) do
+    NSP_PEER_DECODE[kind] = {}
+end
 for kind, map in pairs(NSP_PEER_CODES) do
     for code, name in pairs(map) do
         NSP_PEER_DECODE[kind][name] = code
@@ -1195,16 +1205,21 @@ local function DrainPeerQueue()
     -- мир — часть заголовка, иначе его пришлось бы повторять в каждой записи,
     -- съев весь выигрыш.
     local head = peerQueue[1]
+    -- Игра в заголовке — один символ: "forever" (7 байт) -> "f". Если
+    -- значение не в таблице (новая игра), уходит как есть, чтобы не потерять
+    -- запись; приём понимает оба вида.
+    local headGame = PeerEncode("game", head.game)
+    if headGame == PEER_CODE_UNKNOWN then headGame = head.game end
     -- Заголовок "N6;game;realm;" входит в лимит сообщения, поэтому считается
     -- сразу: без него пачка вылезала за PEER_PAYLOAD_MAX (живой прогон теста:
     -- 252 байта при лимите 240).
-    local headerLen = #PEER_PROTO + 1 + #head.game + 1 + #head.realm + 1
+    local headerLen = #PEER_PROTO + 1 + #headGame + 1 + #head.realm + 1
     local batch, batchLen = { head }, headerLen + #head.rec
     local i = 2
     while i <= #peerQueue and #batch < PEER_BATCH_MAX do
         local it = peerQueue[i]
         if it.game ~= head.game or it.realm ~= head.realm then break end
-        local add = 1 + #it.rec           -- '|' + сама запись
+        local add = 1 + #it.rec           -- разделитель + сама запись
         if batchLen + add > PEER_PAYLOAD_MAX then break end
         batch[#batch + 1] = it
         batchLen = batchLen + add
@@ -1216,12 +1231,14 @@ local function DrainPeerQueue()
     local function recFor(it)
         return (PEER_PROTO == "N5") and (it.legacyRec or it.rec) or it.rec
     end
+    -- В переходном режиме N5 игра тоже текстом: старый клиент кода не поймёт.
+    local gameForWire = (PEER_PROTO == "N5") and head.game or headGame
     if #batch == 1 then
-        payload = PEER_PROTO .. ";" .. head.game .. ";" .. head.realm .. ";" .. recFor(head)
+        payload = PEER_PROTO .. ";" .. gameForWire .. ";" .. head.realm .. ";" .. recFor(head)
     else
         local parts = {}
         for k = 1, #batch do parts[k] = recFor(batch[k]) end
-        payload = PEER_PROTO .. ";" .. head.game .. ";" .. head.realm .. ";" .. table.concat(parts, PEER_BATCH_SEP)
+        payload = PEER_PROTO .. ";" .. gameForWire .. ";" .. head.realm .. ";" .. table.concat(parts, PEER_BATCH_SEP)
     end
 
     -- Последняя защита перед отправкой: сервер отклоняет сообщение с '|' как
@@ -1366,18 +1383,26 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     -- N4 = 13 (N3 + unix observation time),
     -- N5 = 13 (N4 с текстовыми классом/расой/фракцией),
     -- N6 = 13 или 14 (то же, но класс/раса/фракция — ОДИН символ; 14-е поле
-    -- появляется только когда значение не вошло в таблицу кодов).
+    -- появляется только когда значение не вошло в таблицу кодов),
     -- Приём держит ВСЕ версии: старый клиент в канале не должен замолчать.
     if #fields ~= 8 and #fields ~= 12 and #fields ~= 13 and #fields ~= 14 then
         return Reject("field count")
     end
     local proto = fields[1]
-    if proto ~= "N2" and proto ~= "N3" and proto ~= "N4" and proto ~= "N5" and proto ~= "N6" then
+    if proto ~= "N2" and proto ~= "N3" and proto ~= "N4"
+        and proto ~= "N5" and proto ~= "N6" then
         return Reject("unknown protocol " .. PeerEsc(proto, 8))
     end
-    if fields[2] ~= db.game then
+    -- Игру принимаем В ОБОИХ видах: кодом (N6) и именем (N2…N5). Признак кода —
+    -- длина 1. Если такой код неизвестен, значение остаётся как есть, чтобы
+    -- новая игра не потерялась до добавления в таблицу.
+    local wireGame = fields[2]
+    if #tostring(wireGame) == 1 then
+        wireGame = PeerDecode("game", wireGame) or wireGame
+    end
+    if wireGame ~= db.game then
         return Reject(("game mismatch got=%s want=%s")
-            :format(PeerEsc(fields[2], 12), PeerEsc(db.game, 12)))
+            :format(PeerEsc(tostring(wireGame), 12), PeerEsc(db.game, 12)))
     end
     if fields[3] ~= PlayerRealm() then
         -- The channel is shared across the whole cluster (observed
