@@ -900,6 +900,9 @@ local PEER_QUEUE_MAX, PEER_TTL, PEER_GAP = 60, 120, 10
 -- Допустимое расхождение часов у отправителя пакета N4. Больше — отказ:
 -- «пакет из будущего» иначе навсегда перебивал бы все обновления.
 local PEER_CLOCK_SKEW = 3600
+-- Сколько записей максимум в одной пачке N5. Ограничение по БАЙТАМ считает
+-- сборщик пачки (PEER_PAYLOAD_MAX), это — защита от абсурда на приёме.
+local PEER_BATCH_MAX = 5
 local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- Per-session peer counters/state. Kept in ONE table on purpose: the main chunk
 -- of this file sits at the Lua 5.1 ceiling of 200 locals, so every new
@@ -1013,27 +1016,34 @@ QueuePeerNew = function(db, data)
         px, py = PeerCoord(data.x), PeerCoord(data.y)
     end
 
-    local function Build(z, zid, cx, cy)
-        -- N4 = N3 + время наблюдения (unix). Без времени получатель не может
-        -- отличить свежую встречу от пакета, который пролежал в очереди:
-        -- теперь обмен несёт и ОБНОВЛЕНИЯ уже известных игроков (новый
-        -- уровень/зона при /who), и «новее/старее» надо сравнивать, а не
-        -- угадывать по порядку прихода.
-        return table.concat({"N4", db.game, data.realm, data.name,
+    -- Запись без заголовка: имя;класс;уровень;раса;фракция;зонаId;зона;x;y;время.
+    -- Заголовок (протокол, игра, мир) общий для всей пачки, поэтому в очередь
+    -- кладётся именно эта часть — иначе при отправке пришлось бы разбирать
+    -- готовый пакет обратно.
+    local function BuildRec(z, zid, cx, cy)
+        return table.concat({data.name,
             data.class, tostring(level), race, faction,
             tostring(zid), z, cx, cy, tostring(tonumber(data.observedAt) or time())}, ";")
     end
-    local payload = Build(zoneName, zoneId, px, py)
-    if #payload > PEER_PAYLOAD_MAX then payload = Build("?", zoneId, px, py) end
-    if #payload > PEER_PAYLOAD_MAX then payload = Build("?", zoneId, "-", "-") end
-    if #payload > PEER_PAYLOAD_MAX then return end
+    -- Размер проверяется по ОДИНОЧНОМУ пакету N4: запись, которая не влезает
+    -- одна, не влезет и в пачке.
+    local function PayloadOf(r)
+        return table.concat({"N4", db.game, data.realm, r}, ";")
+    end
+    local rec = BuildRec(zoneName, zoneId, px, py)
+    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("?", zoneId, px, py) end
+    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("?", zoneId, "-", "-") end
+    if #PayloadOf(rec) > PEER_PAYLOAD_MAX then return end
     if #peerQueue >= PEER_QUEUE_MAX then
         local old = table.remove(peerQueue, 1)
         peerQueued[old.key] = nil
         peerStats.dropped = peerStats.dropped + 1
         D(("Peer queue full: dropped %s"):format(PeerEsc(old.name or "?")))
     end
-    peerQueue[#peerQueue + 1] = {key = key, payload = payload, name = data.name, at = time()}
+    peerQueue[#peerQueue + 1] = {
+        key = key, rec = rec, name = data.name, at = time(),
+        game = db.game, realm = data.realm,
+    }
     peerQueued[key] = true
     -- Only the first detailed encounter is queued: this line is the proof that
     -- the record passed every gate and is waiting for a mouse click to go out.
@@ -1071,26 +1081,73 @@ local function DrainPeerQueue()
     -- The beta may require a hardware input event for sending channel chat.
     local send = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
     if not send then return end
-    local item = peerQueue[1]
-    local ok, result = pcall(send, item.payload, "CHANNEL", nil, channel)
+
+    -- ── Сборка пачки ────────────────────────────────────────────────────────
+    -- Одна отправка = одно сообщение канала, а PEER_GAP даёт лишь 6 отправок в
+    -- минуту. /who-скан на 20 человек при этом не успевал разгрузиться: очередь
+    -- переполнялась, и через PEER_TTL записи сгорали неотправленными (живой лог
+    -- 10.11.2026: пять строк "expired before send" подряд).
+    --
+    -- В одно сообщение влезает 3 записи (проверено по байтам: заголовок общий,
+    -- записи через "|", разделитель безопасен — PeerField не пропускает "|" в
+    -- имени/зоне). Пачка собирается только из записей ОДНОГО game+realm:
+    -- мир — часть заголовка, иначе его пришлось бы повторять в каждой записи,
+    -- съев весь выигрыш.
+    local head = peerQueue[1]
+    local batch, batchLen = { head }, #head.rec
+    local i = 2
+    while i <= #peerQueue and #batch < PEER_BATCH_MAX do
+        local it = peerQueue[i]
+        if it.game ~= head.game or it.realm ~= head.realm then break end
+        local add = 1 + #it.rec           -- '|' + сама запись
+        if batchLen + add > PEER_PAYLOAD_MAX then break end
+        batch[#batch + 1] = it
+        batchLen = batchLen + add
+        i = i + 1
+    end
+
+    local payload
+    if #batch == 1 then
+        -- Одна запись — шлём прежний N4: старый клиент в канале её поймёт.
+        payload = "N4;" .. head.game .. ";" .. head.realm .. ";" .. head.rec
+    else
+        local parts = {}
+        for k = 1, #batch do parts[k] = batch[k].rec end
+        payload = "N5;" .. head.game .. ";" .. head.realm .. ";" .. table.concat(parts, "|")
+    end
+
+    local ok, result = pcall(send, payload, "CHANNEL", nil, channel)
     if not ok or result == false then
         db.debug.peerSendError = tostring(result):sub(1, 150)
         D(("Peer send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
         PeerSync()
         return
     end
-    table.remove(peerQueue, 1)
-    peerQueued[item.key] = nil
-    peerSent[item.key] = true
+    local names = {}
+    for k = 1, #batch do
+        local it = batch[k]
+        table.remove(peerQueue, 1)
+        peerQueued[it.key] = nil
+        peerSent[it.key] = true
+        names[#names + 1] = PeerEsc(it.name or "?", 20)
+    end
     peerStats.lastSend = nowT
-    peerStats.sent = peerStats.sent + 1
+    peerStats.sent = peerStats.sent + #batch
+    peerStats.batched = (peerStats.batched or 0) + ((#batch > 1) and 1 or 0)
     db.debug.peerSendError = nil
-    D(("Peer sent: %s q=%d sent=%d"):format(PeerEsc(item.name or "?"), #peerQueue, peerStats.sent))
+    D(("Peer sent: %s%s q=%d sent=%d"):format(
+        table.concat(names, ", "), (#batch > 1) and (" [batch " .. #batch .. "]") or "",
+        #peerQueue, peerStats.sent))
     PeerSync()
 end
 
-local function ReceivePeerMessage(message, sender)
-    peerStats.seen = peerStats.seen + 1
+local function ReceivePeerMessage(message, sender, fromBatch)
+    -- fromBatch: строку вызвал разбор пачки N5. Счётчики сообщений и лимит
+    -- частоты считаются ОДИН раз на сообщение, а не на каждую запись внутри
+    -- него — иначе пачка из 5 человек съедала бы 5/120 минутного лимита.
+    if not fromBatch then
+        peerStats.seen = peerStats.seen + 1
+    end
     -- Reject(reason) — the reason is logged once per session (first occurrence)
     -- so a misconfigured realm or a foreign client version is visible in chat
     -- instead of the traffic silently vanishing.
@@ -1153,6 +1210,31 @@ local function ReceivePeerMessage(message, sender)
     if peerStats.inCount > 120 then return Reject("rate limit") end
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
+
+    -- Пачка N5: N5;game;realm;<rec>|<rec>|…
+    -- Разбирается ЗДЕСЬ и каждая запись уходит в обычную валидацию как N4 —
+    -- так пачка не получает ни одного правила, которого нет у одиночного
+    -- пакета (проверка мира, имени, уровня, зоны, времени).
+    if fields[1] == "N5" then
+        if not fields[2] or not fields[3] then return Reject("batch header") end
+        local prefix = "N5;" .. fields[2] .. ";" .. fields[3] .. ";"
+        if message:sub(1, #prefix) ~= prefix then return Reject("batch header") end
+        local rest = message:sub(#prefix + 1)
+        local n = 0
+        for part in (rest .. "|"):gmatch("(.-)|") do
+            if part ~= "" then
+                n = n + 1
+                if n > PEER_BATCH_MAX then break end
+                ReceivePeerMessage(
+                    "N4;" .. fields[2] .. ";" .. fields[3] .. ";" .. part, sender, true)
+            end
+        end
+        if n == 0 then return Reject("empty batch") end
+        peerStats.batchIn = (peerStats.batchIn or 0) + n
+        if PeerSync then PeerSync() end
+        return
+    end
+
     -- N2 = 8 fields (no place), N3 = 12 (zone id, zone name, x, y),
     -- N4 = 13 (N3 + unix observation time). All are accepted so an older
     -- client in the channel is not cut off.

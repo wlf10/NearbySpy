@@ -25,5 +25,6 @@ tests/*
 !tests/test_mastercraft_gap.py
 !tests/test_status_line.py
 !tests/test_peer_update.py
+!tests/test_peer_batch.py
 !tests/fixtures/
 !tests/fixtures/datapack.lua
