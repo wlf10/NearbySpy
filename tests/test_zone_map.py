@@ -44,6 +44,14 @@ def drain_gap_block() -> str:
     return src[start:end]
 
 
+def throttle_block() -> str:
+    """PeerThrottled — реакция на отказ сервера."""
+    src = SOURCE.read_text(encoding="utf-8")
+    start = src.index("function PeerThrottled()")
+    end = src.index("\nend\n", start) + len("\nend\n")
+    return src[start:end]
+
+
 HARNESS = """
 time = function() return 1794300000 end
 canaccessvalue = nil
@@ -245,7 +253,8 @@ class AdaptiveGapTests(unittest.TestCase):
     def gap_for(self, queue_len):
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute(
-            "PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 10, 4, 20\n"
+            "PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 10, 7, 20\n"
+            "PEER_GAP_THROTTLED = 15\n"
             "time = function() return 1794300000 end\n"
             "peerStats = { lastSend = 0 }\n"
             "peerQueue = {}\n"
@@ -258,7 +267,50 @@ class AdaptiveGapTests(unittest.TestCase):
 
     def test_full_queue_sends_faster(self):
         # /who-скан выдаёт десятки записей залпом; при 10 сек уходит лишь 24/мин
-        self.assertEqual(4, self.gap_for(25))
+        self.assertEqual(7, self.gap_for(25))
+
+
+class ThrottleTests(unittest.TestCase):
+    """Сервер отказывает сам — реагируем на его сигнал, а не на свой расчёт.
+
+    Живой прогон 10.11.2026: интервал 4 сек давал троттлинг на 5 из 18
+    отправок и 39 потерянных записей. Канал держит примерно 10 сообщений в
+    минуту, поэтому после отказа ждём дольше, а через TTL возвращаемся к
+    обычному интервалу — поток мог утихнуть.
+    """
+
+    def setUp(self):
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(
+            "PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 10, 7, 20\n"
+            "PEER_GAP_THROTTLED, PEER_THROTTLE_TTL = 15, 90\n"
+            "NOW = 1794300000\n"
+            "time = function() return NOW end\n"
+            "peerStats = { lastSend = 0 }\n"
+            "peerQueue = {}\n"
+            "for i = 1, 25 do peerQueue[i] = {} end\n"
+            "local function D() end\n"
+            "work = function()\n" + drain_gap_block() + "\nreturn gap end\n"
+            + throttle_block() + "\n"
+            "TestThrottle = PeerThrottled\n"
+        )
+
+    def test_throttle_backs_off_the_interval(self):
+        self.lua.globals()["TestThrottle"]()
+        self.assertEqual(15, int(self.lua.globals()["work"]()),
+                         "после отказа сервера интервал не увеличился")
+
+    def test_throttle_is_counted(self):
+        self.lua.globals()["TestThrottle"]()
+        self.lua.globals()["TestThrottle"]()
+        self.assertEqual(2, int(self.lua.globals()["peerStats"]["throttled"]))
+
+    def test_interval_relaxes_after_the_ttl(self):
+        self.lua.globals()["TestThrottle"]()
+        # поток утих: через TTL возвращаемся к обычному интервалу
+        self.lua.execute("NOW = NOW + 91")
+        self.assertEqual(7, int(self.lua.globals()["work"]()),
+                         "после истечения TTL интервал не вернулся к обычному")
 
 
 if __name__ == "__main__":

@@ -1125,7 +1125,16 @@ local PEER_QUEUE_MAX, PEER_TTL = 60, 120
 -- большой очереди — 4 сек: /who-скан выдаёт десятки записей залпом, а при
 -- 10 сек уходит лишь 24/мин, и очередь переполнялась (живой лог 10.11.2026:
 -- 43 записи, «queue full»). 15 сообщений в минуту для канала — не флуд.
-local PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 10, 4, 20
+local PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 10, 7, 20
+-- Интервал после троттлинга и время, через которое он «протухает».
+-- Сервер на этом канале держит примерно 10 сообщений в минуту (живые метки:
+-- медиана между отправками 6 секунд, троттлинг на 5 из 18 отправок). Поэтому
+-- обычный интервал 7 секунд, а после отказа — 15: лучше отправить пачку позже,
+-- чем получить отказ и потерять записи (в живом прогоне ушло 39 dropped).
+local PEER_GAP_THROTTLED = 15
+local PEER_THROTTLE_TTL = 90
+-- Интервал между сообщениями. Обычно 10 сек (не спамим канал зря), при большой
+-- очереди — 7 сек: 60 записей/мин сервер не держит, он троттлит.
 -- Допустимое расхождение часов у отправителя пакета N4. Больше — отказ:
 -- «пакет из будущего» иначе навсегда перебивал бы все обновления.
 local PEER_CLOCK_SKEW = 3600
@@ -1149,6 +1158,20 @@ local peerQueue, peerQueued, peerSent = {}, {}, {}
 local peerStats = {sent = 0, received = 0, merged = 0, dropped = 0, seen = 0, valid = 0, rejected = 0,
     foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, lastSend = 0, rejectLogged = {}, lastNoChannel = 0,
     leftStale = nil}
+
+-- PeerThrottled — сервер отказал принимать сообщения так часто
+-- ("THROTTLED" в CHANNEL_MSG_CHANNEL_NOTICE). Реагируем на СИГНАЛ сервера, а не
+-- на свой расчёт лимита: на живых метках интервал 4-6 секунд давал троттлинг на
+-- 5 из 18 отправок и 39 потерянных записей. Теперь после отказа ждём дольше, а
+-- через PEER_THROTTLE_TTL возвращаемся к обычному интервалу — поток мог
+-- утихнуть.
+function PeerThrottled()
+    peerStats.throttled = (peerStats.throttled or 0) + 1
+    peerStats.throttleUntil = time() + PEER_THROTTLE_TTL
+    D(("Peer throttled by server, backing off to %ds (total %d)"):format(
+        PEER_GAP_THROTTLED, peerStats.throttled))
+end
+
 local peerChatVisible = false -- session-only diagnostic; never persist raw traffic
 
 -- Snapshot of peer counters into SavedVariables.
@@ -1416,8 +1439,12 @@ local function DrainPeerQueue()
     if not db.peerEnabled or #peerQueue == 0 then return end
     local nowT = time()
     -- Адаптивный интервал: при большой очереди отправляем чаще, иначе канал
-    -- захлёбывается после /who-скана.
+    -- захлёбывается после /who-скана. Но если сервер только что отказал
+    -- (THROTTLED) — наоборот, ждём дольше.
     local gap = (#peerQueue >= PEER_BUSY_LEN) and PEER_GAP_BUSY or PEER_GAP
+    if peerStats.throttleUntil and nowT < peerStats.throttleUntil then
+        gap = PEER_GAP_THROTTLED
+    end
     if nowT - peerStats.lastSend < gap then return end
     while #peerQueue > 0 and nowT - peerQueue[1].at > PEER_TTL do
         local old = table.remove(peerQueue, 1)
@@ -6072,6 +6099,14 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
                 local line = table.concat(parts, " | ")
                 if line:lower():find(PEER_CHANNEL_BASE, 1, true) then
                     D("Channel notice: " .. line)
+                    -- Сервер САМ сообщает, что канал не принимает сообщения
+                    -- так часто ("THROTTLED"). Это точнее любого расчёта: на
+                    -- живых метках интервал между отправками был 4-6 секунд, а
+                    -- троттлинг приходил на 5 из 18 отправок. Реагируем на
+                    -- сигнал, а не гадаем лимит.
+                    if line:find("THROTTLED", 1, true) then
+                        PeerThrottled()
+                    end
                 end
             end, ...)
             if not okN then DbgErr("channelNotice", errN) end
