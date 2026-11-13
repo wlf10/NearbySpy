@@ -1,0 +1,43 @@
+name: tests
+
+# Added 14.11.2026: the suite existed but nothing ran it — not on push, not on a
+# tag — so a test stayed red from 1.4.0 to 1.5.4 without anyone noticing, and a
+# third of the test files were not even in the repository.
+#
+# The tests slice real code out of NearbySpy.lua and execute it in an actual
+# Lua 5.1 runtime (lupa), which is why the interpreter is pinned and no WoW
+# client is needed.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lua51:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install lupa (real Lua 5.1 runtime)
+        run: python -m pip install --upgrade pip lupa
+
+      - name: Compile every lua file in Lua 5.1
+        run: python tests/lua51_compile.py
+
+      # One file per invocation, not a single discovery run: the suite mixes
+      # unittest classes with plain main() scripts, and discovery silently skips
+      # the latter — those files would look green while never running.
+      - name: Run the test suite
+        run: |
+          failed=0
+          for f in tests/test_*.py; do
+            echo "::group::$f"
+            python "$f" || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed
