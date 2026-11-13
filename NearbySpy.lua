@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.5.4
+    NearbySpy 1.5.5
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -1202,6 +1202,11 @@ PeerSync = function()
         seen = peerStats.seen, valid = peerStats.valid,
         rejected = peerStats.rejected, foreign = peerStats.foreign,
         selfEcho = peerStats.selfEcho,
+        -- Отказы сервера на частоте («THROTTLED»). Без этого поля счётчик жил
+        -- только в памяти, и обещанная по нему диагностика в SV не появлялась:
+        -- отличить «сервер отказывал» от «нечего было отправлять» было нельзя.
+        throttled = peerStats.throttled or 0,
+        throttleUntil = peerStats.throttleUntil,
         lastSender = peerStats.lastSender,
         chat = peerChatVisible and true or false,
     }
@@ -5957,19 +5962,20 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             :format(ownName, tostring(ownId),
                 joinInfo and (("; last join: %s") :format(
                     joinInfo.ok and "ok" or ("FAILED " .. tostring(joinInfo.result)))) or ""))
-        P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, merged=%d, foreign=%d, selfEcho=%d, chat=%s, lastSender=%s")
+        P(("Peer transport: seen=%d, valid=%d, rejected=%d, duplicates=%d, merged=%d, foreign=%d, selfEcho=%d, throttled=%d, chat=%s, lastSender=%s")
             :format(peerStats.seen, peerStats.valid, peerStats.rejected,
                 peerStats.valid - peerStats.received - peerStats.merged, peerStats.merged,
-                peerStats.foreign, peerStats.selfEcho, peerChatVisible and "ON" or "OFF",
+                peerStats.foreign, peerStats.selfEcho, peerStats.throttled or 0,
+                peerChatVisible and "ON" or "OFF",
                 peerStats.lastSender or "-"))
         -- counters of the LAST logged session: the only cross-session proof that
         -- the channel carries anything at all (memory-only stats die on logout)
         local last = type(db.debug) == "table" and db.debug.peer or nil
         if type(last) == "table" then
-            P(("Peer last session: sent=%d received=%d merged=%d foreign=%d selfEcho=%d seen=%d valid=%d rejected=%d channel=%s lastSender=%s")
+            P(("Peer last session: sent=%d received=%d merged=%d foreign=%d selfEcho=%d seen=%d valid=%d rejected=%d throttled=%d channel=%s lastSender=%s")
                 :format(last.sent or 0, last.received or 0, last.merged or 0, last.foreign or 0,
                     last.selfEcho or 0, last.seen or 0, last.valid or 0, last.rejected or 0,
-                    tostring(last.channel), PeerEsc(last.lastSender or "-", 40)))
+                    last.throttled or 0, tostring(last.channel), PeerEsc(last.lastSender or "-", 40)))
         else
             P("Peer last session: no saved counters yet (written on logout)")
         end

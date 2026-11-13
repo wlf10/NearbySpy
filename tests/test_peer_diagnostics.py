@@ -169,6 +169,17 @@ class PeerDiagnosticsTests(unittest.TestCase):
         self.assertEqual(1, stats["received"])
         self.assertEqual(1, stats["foreign"])
 
+    def test_throttle_refusal_reaches_savedvariables(self):
+        # The backoff commit promised the refusal counter would be visible in
+        # SavedVariables, but PeerSync did not carry the field: it lived in
+        # memory only, so "the server refused us" was indistinguishable from
+        # "there was nothing to send" in a saved file.
+        self.lua.globals()["PeerThrottled"]()
+        self.receive("N2;forever;Home;Alice;MAGE;20;Human;Alliance")
+        snapshot = self.lua.globals()["TestDB"]["debug"]["peer"]
+        self.assertEqual(1, snapshot["throttled"])
+        self.assertEqual(1000 + 90, snapshot["throttleUntil"])
+
     def test_snapshot_survives_getchannelname_returning_two_values(self):
         # GetChannelName(id_or_name) returns (channelNumber, channelName). Feeding
         # it straight into tonumber() puts the name into the BASE argument and
