@@ -1,32 +1,15 @@
+# dev/marketing files that must never reach the release zip. The runtime set is
+# spelled out in .pkgmeta; this list is the belt to its braces, and it also
+# keeps hand-built zips clean.
 CURSEFORGE.md
 CHANGELOG-dev.md
 NearbySpy-icon.png
-tests/*
-!tests/test_peer_priority.py
-!tests/test_peer_filter.py
-!tests/test_peer_place.py
-!tests/test_peer_realm_tag.py
-!tests/test_settings_realm_flag.py
-!tests/test_minimap_button.py
-!tests/test_name_migration.py
-!tests/test_sysmsg_gate.py
-!tests/test_peer_join.py
-!tests/test_peer_diagnostics.py
-!tests/test_help_locale.py
-!tests/test_server_window.py
-!tests/test_guild_presence.py
-!tests/test_row_limit.py
-!tests/test_peer_observation.py
-!tests/nsp_helpers.py
-!tests/test_peer_channel_name.py
-!tests/test_peer_new_session.py
-!tests/test_class_level_filter.py
-!tests/test_window_geometry.py
-!tests/test_mastercraft_gap.py
-!tests/test_status_line.py
-!tests/test_peer_update.py
-!tests/test_peer_batch.py
-!tests/test_peer_codes.py
-!tests/test_zone_map.py
-!tests/fixtures/
-!tests/fixtures/datapack.lua
+__pycache__/
+*.pyc
+
+# NOTE: tests/ used to be ignored here with an allowlist of individual files
+# (!tests/test_x.py). Every test added later was silently left out of the
+# repository unless somebody remembered to add another "!" line — 12 of 38 test
+# files existed only in the working copy, and a broken one (test_hub_minimap,
+# red since 1.4.0) stayed red because nothing ran it. Track the whole directory;
+# .pkgmeta already excludes it from the release zip.
