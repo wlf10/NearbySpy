@@ -4,6 +4,27 @@ Cut from the NearbySpy.lua header when the version was publicly reset to 1.0.0 (
 
 ## Unreleased
 
+    1.5.5 (2026-11-14) — канал сам говорит, когда он перегружен:
+      - BUGFIX: 1.5.4 включила «быстрый» интервал 4 сек при длинной очереди, и
+        сервер на него отвечал THROTTLED, а сообщения дропал: в живом прогоне
+        отказ на 5 из 18 отправок и 39 потерянных записей. Теперь интервал
+        задаёт сигнал сервера: THROTTLED в CHAT_MSG_CHANNEL_NOTICE → 15 сек,
+        через 90 сек без отказов возврат к обычному; «быстрый» интервал 4 → 7
+        сек (сколько канал реально держит).
+      - BUGFIX: счётчик отказов не попадал в SavedVariables — PeerSync его не
+        выгружал, хотя коммит обещал диагностику в SV. Живой SV подтвердил:
+        ни `throttled`, ни строк «Peer throttled» в файле не было, отличить
+        «сервер отказывал» от «нечего было отправлять» было нельзя. Теперь
+        throttled/throttleUntil пишутся в db.debug.peer и печатаются в
+        /nspy peer (transport + last session).
+      - INTERNAL: тест-харнес hub/minimap искал таблицу локалей в NearbySpy.lua
+        (с 09.11 она в NearbySpy_Locale.lua) и подставлял ключи вместо строк,
+        плюс версия была захардкожена «1.3.0» — тест был красным с 1.4.0.
+        Локаль берётся из LOCALE в файле локалей (скоуп по таблице), версия —
+        из TOC.
+      - INTERNAL: check-locale-parity.py в скилле научен новой раскладке:
+        аргумент 1 = файл с NSP_LOCALE, остальные = файлы с L("KEY").
+
     1.5.4 (2026-11-10) — bigger window; batches and updates in the peer channel; zone id with the name:
 
       - FEATURE: окно игроков 700x668 -> 880x800 (+4 строки, колонка зоны

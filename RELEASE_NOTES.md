@@ -1,54 +1,24 @@
-## NearbySpy 1.5.4
+## NearbySpy 1.5.5
 
-### New: a bigger player window
+### Fixed: sharing is no longer refused by the channel
 
-- The window grew from 700x668 to 880x800: about four more rows visible, and the
-  zone column finally has room (it was the first thing to be cut).
-- The five filter tabs now fit on one line in every language. They used to wrap
-  inside their buttons, and the counter in the corner was taking the space.
-- The level histogram is wider and its columns are bigger, so picking one exact
-  level by clicking a column is easier rather than harder.
-- The top-3 classes panel was made narrower: it holds three rows, while the
-  histogram is the part you interact with.
+1.5.4 made the sender go faster while the send queue was long, and the channel
+would not take it: the server answered THROTTLED and dropped the messages. In
+one recorded session five of eighteen sends were refused and 39 records never
+left the client.
 
-### New: your catches are compared with MasterCraft
+- After a refusal the addon backs off to 15 seconds between messages instead of
+  pushing at the same rate, and returns to the normal interval after 90 seconds
+  without refusals.
+- The interval used while the queue is long drops from 4 to 7 seconds, which is
+  what this channel actually tolerates.
 
-- NearbySpy keeps recording vendors, but MasterCraft already ships a vendor
-  database. The interesting part is the difference: this server is custom, and
-  seven of the ten vendors caught so far are absent from MasterCraft's list.
-- Opening a merchant that MasterCraft does not know now prints a single notice
-  with its zone, so a new vendor is noticed instead of silently piling up.
-- `/nspy world` shows how many such vendors were found and which MasterCraft
-  version the comparison used.
+### Improved: refusals are visible instead of guessed
 
-### Improved: sharing over the channel
-
-- Several records can now travel in one message. Previously one record left per
-  ten seconds, so a /who sweep overflowed the queue and the rest expired unsent.
-- Players you already know are shared again when their level or zone changes.
-  Before, only the first sighting of a player was ever sent, so everyone else
-  kept a stale level forever.
-- The queue is released on ordinary play (moving, casting, changing target),
-  not only on a click into the 3D world. Many players never clicked, and their
-  queue simply expired.
-- A record is much smaller: class, race, faction and game travel as single
-  characters instead of words, and the zone travels as its id.
-
-### Improved: zones in your language
-
-- A record carries the zone id as its key with the zone name alongside. On
-  arrival your own client resolves the id first, so a zone another player
-  reported in their language shows up in your client's language.
-- If your client does not know that id, the name the sender saw is used, so a
-  zone is never left blank.
-- `/nspy zones` shows what your client knows about zones, without running a
-  /who query.
-
-### Compatibility
-
-- Messages of every previous format are still accepted, so older clients in the
-  channel keep reaching you. But an older client cannot read the new records
-  until it is updated, so update all of your own clients.
+- Refused messages are counted, the counter is saved with your data on logout,
+  and both `/nspy peer` and its "last session" line report it. Before, a
+  refusal lived only in memory, so "the server refused us" looked exactly like
+  "there was nothing to send".
 
 ### Install
 
