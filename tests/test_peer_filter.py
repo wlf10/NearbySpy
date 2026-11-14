@@ -1,6 +1,7 @@
 """Peer filter in the player window (Lua 5.1, real TacticalVisible)."""
 
 from pathlib import Path
+import re
 import unittest
 
 from lupa.lua51 import LuaRuntime
@@ -40,10 +41,10 @@ class PeerFilterTests(unittest.TestCase):
 
     def test_foreign_rows_are_hidden_while_the_setting_is_off(self):
         # accepted earlier while the flag was on: turning it off must hide them
-        # from every filter, not only from the peer one
+        # from every filter, not only from the exchange one
         self.lua.execute("ALL_REALMS = false")
         self.assertFalse(self.visible("all", {"peerAt": 900, "peerForeign": True}))
-        self.assertFalse(self.visible("peer", {"peerAt": 900, "peerForeign": True}))
+        self.assertFalse(self.visible("peern", {"peerAt": 1000, "peerNew": True, "peerForeign": True}))
         # own-realm peer rows and ordinary sightings stay visible
         self.assertTrue(self.visible("all", {"peerAt": 900, "lastSeen": 999}))
         self.assertTrue(self.visible("all", {"lastSeen": 999}))
@@ -61,9 +62,9 @@ class PeerFilterTests(unittest.TestCase):
                          "found before this session started")
 
     def test_peer_new_shows_only_records_the_channel_taught_us(self):
-        # the 5th tab: channel rows that were NEW to us IN THIS SESSION. A packet
-        # that only refreshed a known player sets peerAt alone, so it must not
-        # appear here. Session start in this harness is time() = 1000.
+        # the exchange tab: channel rows that were NEW to us IN THIS SESSION. A
+        # packet that only refreshed a known player sets peerAt alone, so it must
+        # not appear here. Session start in this harness is time() = 1000.
         self.assertTrue(self.visible("peern", {"peerAt": 1000, "peerNew": True}))
         self.assertFalse(self.visible("peern", {"peerAt": 1000}),
                          "a refresh of a known player is not a new find")
@@ -72,10 +73,15 @@ class PeerFilterTests(unittest.TestCase):
         self.assertFalse(self.visible("peern", {"peerAt": 900, "peerNew": True}),
                          "arrived in a previous session — the tab is about this one")
 
-    def test_peer_tab_still_shows_updates_too(self):
-        # the two tabs must differ, otherwise the 5th adds nothing
-        self.assertTrue(self.visible("peer", {"peerAt": 900, "peerNew": True}))
-        self.assertTrue(self.visible("peer", {"peerAt": 900}))
+    def test_the_all_delivered_tab_is_gone(self):
+        # The second exchange tab ("everything the channel ever delivered") was
+        # removed on request: the toolbar builds exactly four tiles now, and no
+        # removed "peer" filter branch survives in the window code.
+        source = SOURCE.read_text(encoding="utf-8")
+        tiles = re.findall(r'TacticalFilter\(toolbar, "(\w+)"', source)
+        self.assertEqual(["all", "fresh", "new", "peern"], tiles)
+        self.assertNotIn('tactical.filter == "peer"', source,
+                         "the removed tab's branch is still in the code")
 
     def test_other_filters_are_untouched_by_the_peer_branch(self):
         self.assertTrue(self.visible("all", {"lastSeen": 1000}))

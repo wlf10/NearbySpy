@@ -20,6 +20,15 @@ left the client.
   refusal lived only in memory, so "the server refused us" looked exactly like
   "there was nothing to send".
 
+### Changed: one exchange tab instead of two
+
+- The player window has a single exchange tab now. The second one ("Peer" —
+  everything the channel ever delivered) is gone: it mixed records of unknown
+  age with fresh ones and answered nothing the session view does not.
+- The remaining tab shows only what the channel taught you during the current
+  session, ordered by arrival, and its counter follows the same rule.
+- `/nspy peer list` still prints everything the channel ever delivered.
+
 ### Install
 
 Unzip the archive into `Interface/AddOns/` — it contains both `NearbySpy` and

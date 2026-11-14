@@ -3902,11 +3902,6 @@ local function TacticalVisible(p, now)
         -- "whom did I discover this session", so peer rows are excluded; they have
         -- their own filter.
         return (p.firstSeen or 0) >= tactical.started and p.source ~= "peer"
-    elseif tactical.filter == "peer" then
-        -- Rows that arrived over the nearspydata channel. peerAt is written
-        -- on receipt (new row) or on refresh of a known one, so this is the
-        -- only list that shows what the channel actually delivered.
-        return (p.peerAt or 0) > 0
     elseif tactical.filter == "peern" then
         -- Только то, чему канал научил ЗА ЭТУ СЕССИЮ. peerNew/peerAt лежат в
         -- SavedVariables и живут после релога, поэтому без проверки на
@@ -4015,7 +4010,7 @@ local function TacticalRows()
     for _, row in ipairs(tactical.rows) do row:Hide() end
     local now, shown = time(), 0
     local list = SortedPlayers(GetDB())
-    if tactical.filter == "peer" then
+    if tactical.filter == "peern" then
         -- The peer list is ordered by arrival of the packet, not by our own
         -- sighting: for a player someone else met, lastSeen may be long stale.
         table.sort(list, function(a, b) return (a.peerAt or 0) > (b.peerAt or 0) end)
@@ -4056,7 +4051,7 @@ local function TacticalRows()
             -- (lastSeen = 0 since 1.5.3), so it falls back to the packet time
             -- instead of showing "?" for a contact we do know.
             local stamp = (p.lastSeen or 0) > 0 and p.lastSeen or p.peerAt
-            if tactical.filter == "peer" and (p.peerAt or 0) > 0 then stamp = p.peerAt end
+            if tactical.filter == "peern" and (p.peerAt or 0) > 0 then stamp = p.peerAt end
             local age = now - (stamp or 0)
             row.seen:SetText(TimeAgo(stamp))
             if age <= 300 then row.seen:SetTextColor(0.3, 0.9, 0.62)
@@ -4070,7 +4065,7 @@ local function TacticalRows()
 end
 
 local function TacticalStats()
-    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
+    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
     local now = time()
     local realmSel = tactical.realmFilter
     for _, p in pairs(GetDB().players) do
@@ -4087,14 +4082,12 @@ local function TacticalStats()
         if (p.firstSeen or 0) >= tactical.started and p.source ~= "peer" then
             st.newN = st.newN + 1
         end
-        if (p.peerAt or 0) > 0 and not (p.peerForeign and GetDB().peerAllRealms == false) then
-            st.peerN = st.peerN + 1
-            -- Счётчик на вкладке "Peer new" — про текущую сессию, как и сам
-            -- фильтр (см. TacticalVisible). Иначе бейдж показывал бы число
-            -- записей за всё время, а список под ним — только сегодняшние.
-            if p.peerNew and (p.peerAt or 0) >= tactical.started then
-                st.peerNewN = st.peerNewN + 1
-            end
+        -- Счётчик на вкладке "Обмен новые" — про текущую сессию, как и сам
+        -- фильтр (см. TacticalVisible). Записи чужого реалма, отключённого в
+        -- настройках, не считаются: их не показывает и список.
+        if (p.peerAt or 0) > 0 and not (p.peerForeign and GetDB().peerAllRealms == false)
+            and p.peerNew and (p.peerAt or 0) >= tactical.started then
+            st.peerNewN = st.peerNewN + 1
         end
         if p.faction == "Alliance" then st.alliance = st.alliance + 1
         elseif p.faction == "Horde" then st.horde = st.horde + 1
@@ -4503,7 +4496,6 @@ TacticalUpdate = function()
         tactical.filters.all.label:SetText(L("UI_ALL") .. " " .. st.total)
         tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. st.f5)
         tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. st.newN)
-        tactical.filters.peer.label:SetText(L("UI_PEER") .. " " .. st.peerN)
         tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. st.peerNewN)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
@@ -4659,17 +4651,18 @@ local function BuildWindow()
 
     local toolbar = TacticalPanel(win)
     toolbar:SetPoint("TOPLEFT", 16, -224); toolbar:SetSize(NSP_CONST.TOOLBAR_W, 31)
-    -- Пять табов одной строкой. Позиции считаются из констант, а не вписаны
+    -- Четыре таба одной строкой. Позиции считаются из констант, а не вписаны
     -- числами: при смене ширины окна или подписи достаточно поправить
     -- FILTER_X0 / FILTER_W / FILTER_STEP, и ряд остаётся ровным.
     -- tile 1..3: все / свежие / новые
     TacticalFilter(toolbar, "all", NSP_CONST.FILTER_X0)
     TacticalFilter(toolbar, "fresh", NSP_CONST.FILTER_X0 + NSP_CONST.FILTER_STEP)
     TacticalFilter(toolbar, "new", NSP_CONST.FILTER_X0 + 2 * NSP_CONST.FILTER_STEP)
-    -- tile 4: rows that arrived over the exchange channel (peerAt)
-    TacticalFilter(toolbar, "peer", NSP_CONST.FILTER_X0 + 3 * NSP_CONST.FILTER_STEP)
-    -- tile 5: the subset of channel rows that were new to us (peerNew)
-    TacticalFilter(toolbar, "peern", NSP_CONST.FILTER_X0 + 4 * NSP_CONST.FILTER_STEP)
+    -- tile 4: what the exchange channel taught us THIS SESSION (peerNew).
+    -- The "everything the channel ever delivered" tab was dropped: it mixed
+    -- records of unknown age with fresh ones and answered no question the
+    -- session view does not answer.
+    TacticalFilter(toolbar, "peern", NSP_CONST.FILTER_X0 + 3 * NSP_CONST.FILTER_STEP)
     -- Счётчик "показано / всего" — 7pt (small): подпись табов идёт 12pt, и
     -- счётчик того же размера отъедал место у последнего таба.
     tactical.count = NewText(toolbar, 7, 0.6, 0.53, 0.4)

@@ -9,11 +9,12 @@ peerNew и peerAt лежат в SavedVariables и переживают рело�
 firstSeen >= tactical.started и потому вёл себя правильно.
 
 Что держит файл:
-  - "Peer new" показывает только записи, пришедшие после старта сессии;
-  - "Peer" (без new) по-прежнему показывает всё, что канал принёс — он для
-    этого и нужен после релога;
-  - запись, пришедшая до старта сессии, не попадает в "Peer new", даже если
+  - вкладка обмена показывает только записи, пришедшие после старта сессии;
+  - запись, пришедшая до старта сессии, не попадает в неё, даже если
     у неё peerNew = true.
+
+Вкладки «всё, что канал принёс когда-либо» (`/nspy peer list`) больше нет в
+окне по просьбе пользователя (14.11.2026) — команда `peer list` осталась.
 """
 
 from pathlib import Path
@@ -74,17 +75,10 @@ class PeerNewSessionTests(unittest.TestCase):
 
     # --- соседние фильтры не должны измениться ----------------------------
 
-    def test_peer_filter_still_shows_everything_the_channel_delivered(self):
-        # "Peer" — это всё, что канал принёс, в том числе из прошлых сессий:
-        # после релога именно он отвечает "что мне присылали"
-        old = {"peerAt": SESSION_START - 3600, "peerNew": True}
-        self.assertTrue(self.visible(old, "peer"))
-
     def test_peer_new_still_requires_the_new_flag(self):
         # пришло сейчас, но игрока мы уже знали — это не "new", а обновление
         upd = {"peerAt": SESSION_START + 5}
         self.assertFalse(self.visible(upd, "peern"))
-        self.assertTrue(self.visible(upd, "peer"))
 
     def test_own_new_filter_is_unaffected(self):
         own = {"firstSeen": SESSION_START + 5, "source": "who"}
