@@ -1439,6 +1439,50 @@ QueuePeerNew = function(db, data)
     PeerSync()
 end
 
+-- Замер возврата канала (15.11.2026). Гейт клиента сообщает о себе СОБЫТИЕМ
+-- ADDON_ACTION_BLOCKED, а не результатом вызова, поэтому заблокированная
+-- отправка выглядела ровно как успешная: в живом SV три строки BLOCKED стояли
+-- вплотную к строкам «Peer sent», и понять, ушёл пакет или нет, было нельзя.
+-- Пишем, что вызов реально вернул (с типом: часть клиентов на успехе не
+-- возвращает ничего), и поднимаем счётчик, если отказ гейта случился в ту же
+-- секунду. global, не local: в главном чанке 193 локала из 200.
+function NspNoteSendRet(db, okSent, result, nowT)
+    if type(db) ~= "table" or type(db.debug) ~= "table" then return false end
+    db.debug.sendRet = ("ok=%s ret=%s:%s"):format(tostring(okSent), type(result),
+        PeerEsc(tostring(result), 30))
+    db.debug.sendRetAt = nowT
+    local at = type(db.debug.blockedAt) == "table" and db.debug.blockedAt["UNKNOWN()"]
+    if okSent and result == nil and at and (nowT - at) <= 1 then
+        db.debug.peerGate = (db.debug.peerGate or 0) + 1
+        return true
+    end
+    return false
+end
+
+-- Чья блокировка (15.11.2026). Счётчик рос на блокировке ЛЮБОГО аддона, поэтому
+-- «UNKNOWN() = 147» не отвечал на вопрос «сколько раз блокировали нас» и не имел
+-- метки времени — цифра неизвестно чья и неизвестно за какой период. Свои
+-- вызовы идут в blocked (+ blockedAt со временем), чужие — в blockedOther с
+-- именем аддона, чтобы их не путали с нашими. global: в чанке 193 локала из 200.
+function NspNoteBlock(db, addon, func, nowT, event)
+    if type(db) ~= "table" or type(db.debug) ~= "table" then return false end
+    local ours = type(addon) == "string" and addon:find("NearbySpy", 1, true) ~= nil
+    if ours then
+        db.debug.blocked = db.debug.blocked or {}
+        db.debug.blocked[func] = (db.debug.blocked[func] or 0) + 1
+        db.debug.blockedAt = db.debug.blockedAt or {}
+        db.debug.blockedAt[func] = nowT
+        db.debug.blockedEvent = db.debug.blockedEvent or {}
+        db.debug.blockedEvent[func] = event
+        return true
+    end
+    db.debug.blockedOther = db.debug.blockedOther or {}
+    local key = tostring(addon) .. " -> " .. tostring(func)
+    key = key:sub(1, 90)
+    db.debug.blockedOther[key] = (db.debug.blockedOther[key] or 0) + 1
+    return false
+end
+
 local function DrainPeerQueue()
     local db = GetDB()
     if not db.peerEnabled or #peerQueue == 0 then return end
@@ -1535,6 +1579,10 @@ local function DrainPeerQueue()
     end
 
     local ok, result = pcall(send, payload, "CHANNEL", nil, channel)
+    if NspNoteSendRet(db, ok, result, nowT) then
+        D(("Peer gate: a block fired with this send, packet may be lost (total %d)")
+            :format(db.debug.peerGate or 0))
+    end
     if not ok or result == false then
         db.debug.peerSendError = tostring(result):sub(1, 150)
         D(("Peer send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
@@ -3561,6 +3609,15 @@ local function CountPlayers()
     return n
 end
 
+-- Сколько РАЗНЫХ ключей в таблице счётчиков. Префикс Nsp: глобалы общие для всех
+-- аддонов, и голое CountKeys рано или поздно столкнётся с чужим.
+function NspCountKeys(t)
+    if type(t) ~= "table" then return 0 end
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
 local function DebugSummary(db)
     local d = db.debug or {}
     local age = d.lastTickAt and (time() - d.lastTickAt) or -1
@@ -3656,6 +3713,28 @@ local function ClassColorRGB(classFile)
     return 1, 1, 1
 end
 
+-- Клавиатурный захват в бою (15.11.2026). Во время combat lockdown клиент
+-- запрещает SetPropagateKeyboardInput и отвечает ADDON_ACTION_BLOCKED — в живом
+-- SV такая блокировка уже была (NearbySpyHubWindow). Вызов всё равно ничего не
+-- делал, но поднимал ложную тревогу в диагностике и разносил taint, поэтому в
+-- бою его пропускаем и считаем в db.debug.kbLockdown. global: чанк у предела
+-- в 200 локалов.
+function NspKeyboardPropagate(frame, value)
+    if type(frame) ~= "table" or not frame.SetPropagateKeyboardInput then return end
+    if InCombatLockdown and InCombatLockdown() then
+        local ok, db = pcall(GetDB)
+        if ok and type(db) == "table" and type(db.debug) == "table" then
+            db.debug.kbLockdown = (db.debug.kbLockdown or 0) + 1
+            if not db.debug.kbLockdownLogged then
+                db.debug.kbLockdownLogged = true
+                D("keyboard capture skipped: combat lockdown (client blocks it anyway)")
+            end
+        end
+        return
+    end
+    pcall(frame.SetPropagateKeyboardInput, frame, value)
+end
+
 -- Opaque underlay for every addon window (18.10.2026): on the beta the
 -- template's Bg can render transparent, so an overlapping window shows
 -- whatever window is behind it ("окна смешиваются"). Sublayer -7 keeps the
@@ -3726,10 +3805,10 @@ local function ShowHelpWindow()
         helpWin:EnableKeyboard(true)
         helpWin:SetScript("OnKeyDown", function(_, key)
             if key == "ESCAPE" then
-                helpWin:SetPropagateKeyboardInput(false)
+                NspKeyboardPropagate(helpWin, false)
                 helpWin:Hide()
             else
-                helpWin:SetPropagateKeyboardInput(true)
+                NspKeyboardPropagate(helpWin, true)
             end
         end)
         local bg = helpWin:CreateTexture(nil, "BACKGROUND")
@@ -4552,8 +4631,8 @@ local function BuildWindow()
     win:SetScript("OnDragStop", win.StopMovingOrSizing)
     win:EnableKeyboard(true)
     win:SetScript("OnKeyDown", function(_, key)
-        if key == "ESCAPE" then win:SetPropagateKeyboardInput(false); HideWindow()
-        else win:SetPropagateKeyboardInput(true) end
+        if key == "ESCAPE" then NspKeyboardPropagate(win, false); HideWindow()
+        else NspKeyboardPropagate(win, true) end
     end)
 
     -- Blizzard panel title: NORMAL_FONT gold
@@ -4768,8 +4847,8 @@ local function BuildServerWindow()
     serverWin:SetScript("OnDragStop", serverWin.StopMovingOrSizing)
     serverWin:EnableKeyboard(true)
     serverWin:SetScript("OnKeyDown", function(_, key)
-        if key == "ESCAPE" then serverWin:SetPropagateKeyboardInput(false); serverWin:Hide()
-        else serverWin:SetPropagateKeyboardInput(true) end
+        if key == "ESCAPE" then NspKeyboardPropagate(serverWin, false); serverWin:Hide()
+        else NspKeyboardPropagate(serverWin, true) end
     end)
     ApplyFont(serverWin.TitleText, 14, "OUTLINE")
     serverWin.TitleText:SetText(L("SVR_TITLE"))
@@ -5120,10 +5199,10 @@ local function BuildHubWindow()
     hubWin:EnableKeyboard(true)
     hubWin:SetScript("OnKeyDown", function(_, key)
         if key == "ESCAPE" then
-            hubWin:SetPropagateKeyboardInput(false)
+            NspKeyboardPropagate(hubWin, false)
             hubWin:Hide()
         else
-            hubWin:SetPropagateKeyboardInput(true)
+            NspKeyboardPropagate(hubWin, true)
         end
     end)
     ApplyFont(hubWin.TitleText, 14, "OUTLINE")
@@ -5462,13 +5541,13 @@ local function BuildSettingsWindow()
     win:SetScript("OnDragStart", win.StartMoving)
     win:SetScript("OnDragStop", win.StopMovingOrSizing)
     win:EnableKeyboard(true)
-    if win.SetPropagateKeyboardInput then win:SetPropagateKeyboardInput(true) end
+    NspKeyboardPropagate(win, true)
     win:SetScript("OnKeyDown", function(_, key)
         if key == "ESCAPE" then
-            win:SetPropagateKeyboardInput(false)
+            NspKeyboardPropagate(win, false)
             win:Hide()
         else
-            win:SetPropagateKeyboardInput(true)
+            NspKeyboardPropagate(win, true)
         end
     end)
     optWin = win
@@ -5815,6 +5894,13 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         P(L("COUNT"):format(
             CountPlayers(), newThisSession, db.announce and L("ON") or L("OFF")))
         P(DebugSummary(db))
+        -- Блокировки гейта: свои отдельно от чужих, плюс клавиатура в бою и
+        -- отправки, совпавшие с отказом (15.11.2026).
+        P(("debug: our gate blocks=%s, other addons=%s, keyboard skipped in combat=%d, gate-coincident sends=%d")
+            :format(type(db.debug) == "table" and NspCountKeys(db.debug.blocked) or 0,
+                type(db.debug) == "table" and NspCountKeys(db.debug.blockedOther) or 0,
+                tonumber(db.debug.kbLockdown) or 0,
+                tonumber(db.debug.peerGate) or 0))
     elseif msg == "announce" then
         db.announce = not db.announce
         P(L("ANNOUNCE_TOGGLE") .. (db.announce and L("ON") or L("OFF")))
@@ -5961,6 +6047,11 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                 peerStats.foreign, peerStats.selfEcho, peerStats.throttled or 0,
                 peerChatVisible and "ON" or "OFF",
                 peerStats.lastSender or "-"))
+        -- Приборы отправки: что вернул вызов канала и сколько отправок совпало с
+        -- отказом гейта. Без этого «ушёл пакет или нет» было не проверить.
+        P(("Peer send probe: last return %s; gate-coincident sends=%d")
+            :format(tostring(db.debug.sendRet or "none"),
+                tonumber(db.debug.peerGate) or 0))
         -- counters of the LAST logged session: the only cross-session proof that
         -- the channel carries anything at all (memory-only stats die on logout)
         local last = type(db.debug) == "table" and db.debug.peer or nil
@@ -6244,10 +6335,9 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- client guard gate (70291+): arg1 = addon, arg2 = function
         local addon, func = tostring(arg1), tostring(arg2)
         D(("BLOCKED[%s]: %s → %s"):format(event, addon, func))
-        local db = GetDB()
-        db.debug.blocked = db.debug.blocked or {}
-        db.debug.blocked[func] = (db.debug.blocked[func] or 0) + 1
-        if addon:find("NearbySpy", 1, true) then
+        -- Только свои блокировки идут в blocked/blockedAt: общий счётчик смешивал
+        -- нас с чужими аддонами и не отвечал ни на один вопрос (см. NspNoteBlock).
+        if NspNoteBlock(GetDB(), addon, func, time(), event) then
             D(("client blocked our call: %s (%s)"):format(func, event))
         end
     elseif event == "LUA_WARNING" then
