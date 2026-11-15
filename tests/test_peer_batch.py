@@ -23,7 +23,7 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
-from nsp_helpers import CONST_PRELUDE
+from nsp_helpers import CONST_PRELUDE, RACE_PRELUDE
 
 ADDON = Path(__file__).resolve().parents[1]
 SOURCE = ADDON / "NearbySpy.lua"
@@ -81,7 +81,7 @@ def codes_block() -> str:
 class BatchSendTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(CONST_PRELUDE + "\n" + SEND_HARNESS + "\n" + codes_block() + "\n"
+        self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n" + SEND_HARNESS + "\n" + codes_block() + "\n"
                          + queue_part() + "\n"
                          "TestQueue = QueuePeerNew\n"
                          "TestDrain = DrainPeerQueue\n")
@@ -232,7 +232,7 @@ class BatchReceiveTests(unittest.TestCase):
         end = src.index("local function JoinPeerChannel()")
         block = src[start:end]
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(CONST_PRELUDE + "\n"
+        self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n"
                          "time = function() return 1794300000 end\n"
                          "UnitName = function() return 'Me', nil end\n"
                          "function PlayerRealm() return 'R' end\n"

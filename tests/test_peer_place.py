@@ -14,6 +14,8 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
+from nsp_helpers import RACE_PRELUDE
+
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
 PRELUDE = r"""
@@ -53,7 +55,7 @@ def block() -> str:
 class PeerPlaceTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(PRELUDE + "\n" + block() + "\n"
+        self.lua.execute(PRELUDE + "\n" + RACE_PRELUDE + "\n" + block() + "\n"
                          "TestQueue = QueuePeerNew\n"
                          # NB: `DrainPeerQueue = DrainPeerQueue` is a NO-OP: with a
                          # local of that name in scope the left side resolves to the
@@ -93,6 +95,15 @@ class PeerPlaceTests(unittest.TestCase):
         # должен видеть, когда игрока видели, а не когда канал его пропустил.
         self.assertEqual("1000", parts[11], "время наблюдения — после координат")
         self.assertIn("Таверна", parts[12], "имя зоны — расширение в хвосте")
+
+    def test_absent_race_does_not_steal_the_zone_text(self):
+        # 15.11.2026: раса "?" кодировалась 'z' БЕЗ текста, и приёмник забирал
+        # следующим текстом хвоста имя зоны — 384 записи в живом SV получили зону
+        # в поле расы. Теперь отсутствие идёт кодом 'q' и хвост не сдвигает.
+        parts = self.sent_parts(race=None, zone="Duskwood", zoneId=10)
+        # N6;game;realm;name;class;level;race;faction;zoneId;x;y;time;tail
+        self.assertEqual("q", parts[6], "отсутствие расы — свой код, не 'z'")
+        self.assertIn("Duskwood", parts[12], "имя зоны остаётся первым в хвосте")
 
     def test_who_record_never_sends_the_observers_position(self):
         # A /who entry has the player's zone but no coordinates: its x/y is where

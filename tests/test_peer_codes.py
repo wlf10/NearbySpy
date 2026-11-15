@@ -23,7 +23,7 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
-from nsp_helpers import CONST_PRELUDE
+from nsp_helpers import CONST_PRELUDE, RACE_PRELUDE
 
 ADDON = Path(__file__).resolve().parents[1]
 SOURCE = ADDON / "NearbySpy.lua"
@@ -88,11 +88,15 @@ class CodecTests(unittest.TestCase):
         # и декодируется обратно из текста
         self.assertEqual("Pandaren", self.dec("race", code, "Pandaren"))
 
-    def test_empty_value_is_unknown_without_text(self):
+    def test_empty_value_has_its_own_code_without_text(self):
+        # 15.11.2026: пустое значение НЕ кодируется как 'z'. Раньше оно шло тем же
+        # 'z', что и «значение текстом», но без текста — и приёмник забирал
+        # следующим текстом хвоста имя зоны (384 записи с зоной в поле расы).
         for value in (None, ""):
             code, needs_text = self.enc("race", value)
-            self.assertEqual("z", code)
+            self.assertEqual("q", code)
             self.assertFalse(needs_text, "пустое значение не требует текста")
+            self.assertIsNone(self.dec("race", code), "и декодируется в «нет данных»")
 
     def test_codes_are_unique_within_a_kind(self):
         for kind in ("class", "race", "faction"):
@@ -111,7 +115,7 @@ class N6ReceiveTests(unittest.TestCase):
         end = src.index("local function JoinPeerChannel()")
         block = src[start:end]
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(CONST_PRELUDE + "\n"
+        self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n"
                          + codes_block() + "\n"
                          "time = function() return 1794300000 end\n"
                          "UnitName = function() return 'Me', nil end\n"
@@ -164,6 +168,38 @@ class N6ReceiveTests(unittest.TestCase):
         self.assertEqual("PALADIN", p["class"])
         self.assertEqual("Human", p["race"])
         self.assertEqual("Alliance", p["faction"])
+
+    def test_n6_absent_race_keeps_the_zone_text_in_place(self):
+        # 15.11.2026: раса "?" шла кодом 'z' БЕЗ текста, приёмник забирал
+        # следующим текстом хвоста имя зоны, и оно попадало в поле расы.
+        # Теперь отсутствие — 'q': хвост состоит только из имени зоны (12-1
+        # поле zoneId не резолвится, берём текст из хвоста).
+        self.recv("N6;forever;R;Carl;g;20;q;a;99999;-;-;1794300000;Duskwood")
+        p = self.player("Carl")
+        self.assertIsNotNone(p, "пакет с отсутствующей расой не должен отвергаться")
+        self.assertIsNone(p["race"], "у расы нет значения — nil, а не имя зоны")
+
+    def test_n6_localized_race_with_a_space_is_accepted(self):
+        # «Night Elf» не проходит старый ASCII-гейт из-за пробела: пакет целиком
+        # отвергался «bad race». Теперь значение принимается и приводится к ключу.
+        self.recv("N6;forever;R;Dora;g;20;z;a;12;-;-;1794300000;Night Elf")
+        p = self.player("Dora")
+        self.assertIsNotNone(p, "локализованная раса не должна ронять пакет")
+        self.assertEqual("NightElf", p["race"], "приём приводит имя к файл-ключу")
+
+    def test_n6_cyrillic_race_is_accepted(self):
+        self.recv("N6;forever;R;Egor;g;20;z;a;12;-;-;1794300000;Человек")
+        p = self.player("Egor")
+        self.assertIsNotNone(p, "кириллическая раса не должна ронять пакет")
+        self.assertEqual("Human", p["race"])
+
+    def test_n6_unknown_race_text_does_not_reject_the_packet(self):
+        # раса вне всех таблиц и не зона: раньше — Reject("bad race"), то есть
+        # терялась вся встреча; теперь запись принимается, раса остаётся текстом
+        self.recv("N6;forever;R;Frida;g;20;z;a;12;-;-;1794300000;SomeNewRace")
+        p = self.player("Frida")
+        self.assertIsNotNone(p, "неизвестная раса не повод терять встречу")
+        self.assertEqual("SomeNewRace", p["race"])
 
     def test_n6_custom_race_travels_as_text(self):
         # раса не из таблицы: код 'z' и текст в 14-м поле

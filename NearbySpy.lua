@@ -173,6 +173,10 @@ GetDB = function()
             db.players = merged
         end
     end
+    -- Чистка мусора в поле расы (15.11.2026): 384 записи с именем зоны вместо
+    -- расы. Глобал может быть ещё не объявлен, если GetDB позвали во время
+    -- загрузки файла — проверка на nil это покрывает.
+    if NspMigrateRaces then NspMigrateRaces(db) end
     return db
 end
 
@@ -1259,6 +1263,15 @@ NSP_PEER_CODES = {
     game = { f = "forever", r = "retail", c = "classic_era" },
 }
 local PEER_CODE_UNKNOWN = "z"
+-- Отдельный код «значения нет» (15.11.2026). Раньше отсутствие значения кодировалось
+-- тем же 'z', что и «значение есть, но не из таблицы, текст в хвосте» — и приёмник
+-- для любого 'z' лез в хвост за текстом. Наш отправитель при расе "?" клал 'z' и
+-- текст НЕ клал, поэтому слот расы съедал следующий текст хвоста (имя зоны), и в
+-- базе оказалось 384 записи с зоной в поле расы ("Duskwood", "Wetlands", …).
+-- 'q' свободен: коды рас — a..i, классы — a..i, фракции — a/h, игра — f/r/c.
+-- Новый код безопасен и для старых приёмников: PeerDecode вернёт nil (неизвестный
+-- код) → "?", а takeText для 'q' не сдвигает индекс (он сдвигается только для 'z').
+local PEER_CODE_NONE = "q"
 
 -- Обратные карты строятся один раз при загрузке.
 -- Строятся ПО ТАБЛИЦЕ КОДОВ, а не перечислением: новая категория (как game)
@@ -1275,8 +1288,10 @@ end
 
 -- PeerEncode(kind, value) -> code, needsText
 -- needsText=true означает: значение не в таблице, его надо отправить текстом.
+-- Отсутствие значения — отдельный код 'q' БЕЗ текста: иначе приёмник сдвигает
+-- разбор хвоста и забирает чужой текст (см. PEER_CODE_NONE).
 function PeerEncode(kind, value)
-    if type(value) ~= "string" or value == "" then return PEER_CODE_UNKNOWN, false end
+    if type(value) ~= "string" or value == "" then return PEER_CODE_NONE, false end
     local code = NSP_PEER_DECODE[kind][value]
     if code then return code, false end
     return PEER_CODE_UNKNOWN, true
@@ -1310,7 +1325,12 @@ QueuePeerNew = function(db, data)
     local level = tonumber(data.level)
     if not level or level < 1 or level > 80 or level % 1 ~= 0 then return end
     if not data.class:match("^[A-Z]+$") then return end
-    local race = PeerField(data.race, 32) and data.race:match("^[A-Za-z]+$") and data.race or "?"
+    -- Раса: ASCII-гейта больше нет (15.11.2026). Он отбрасывал не только мусор,
+    -- но и настоящие значения — локализованное «Night Elf» (пробел) и кастомные
+    -- расы кириллицей, а такие записи в канал просто не уходили. Достаточно
+    -- PeerField (длина и отсутствие разделителей): не из таблицы — уйдёт текстом
+    -- в хвосте, приём нормализует известные значения обратно в файл-ключ.
+    local race = PeerField(data.race, 32) and data.race or "?"
     local faction = (data.faction == "Alliance" or data.faction == "Horde") and data.faction or "?"
     local base = db.game .. "|" .. data.key
     local zoneName = PeerField(data.zone, 60) and data.zone or "?"
@@ -1535,7 +1555,10 @@ local function DrainPeerQueue()
     -- значение не в таблице (новая игра), уходит как есть, чтобы не потерять
     -- запись; приём понимает оба вида.
     local headGame = PeerEncode("game", head.game)
-    if headGame == PEER_CODE_UNKNOWN then headGame = head.game end
+    -- 'q' (нет значения) и 'z' (неизвестное значение) здесь одинаково означают
+    -- «кодом игру не передать»: тогда уходит имя игры как есть, приём понимает
+    -- значение длиной больше одного символа.
+    if headGame == PEER_CODE_UNKNOWN or headGame == PEER_CODE_NONE then headGame = head.game end
     -- Заголовок "N6;game;realm;" входит в лимит сообщения, поэтому считается
     -- сразу: без него пачка вылезала за PEER_PAYLOAD_MAX (живой прогон теста:
     -- 252 байта при лимите 240).
@@ -1792,9 +1815,36 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     end
     local level = tonumber(fields[6])
     if not level or level < 1 or level > 80 or level % 1 ~= 0 then return Reject("bad level") end
+    -- Раса и фракция БОЛЬШЕ НЕ РОНЯЮТ ПАКЕТ (15.11.2026). Раньше строка
+    -- "bad race" отбрасывала всю встречу целиком: живой лог терял игроков из-за
+    -- одного второстепенного поля, причём под отказ попадали НАСТОЯЩИЕ значения
+    -- (локализованное «Night Elf» не проходит ASCII-гейт из-за пробела, кастомные
+    -- расы кириллицей — тоже). Имя, реалм, класс и уровень остаются критичными,
+    -- раса с фракцией — украшение: ставим "?" и принимаем запись.
     if type(race) ~= "string" then race = "?" end
-    if race ~= "?" and (not race:match("^[A-Za-z]+$") or #race > 32) then return Reject("bad race") end
-    if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then return Reject("bad faction") end
+    local raceIsZone
+    do
+        local rawRace = race
+        race, raceIsZone = NspNormalizeRace(db, race)
+        if race == "?" and rawRace ~= "?" then
+            peerStats.raceFixed = (peerStats.raceFixed or 0) + 1
+            if not peerStats.rejectLogged.raceFixed then
+                peerStats.rejectLogged.raceFixed = true
+                D(("Peer race not recognised, kept as unknown: %s (from %s)")
+                    :format(PeerEsc(rawRace, 30), PeerEsc(sender or "?", 40)))
+            end
+        end
+        -- Текст, оказавшийся именем зоны, — это сдвиг разбора у старого
+        -- отправителя. Не теряем его: если другого источника зоны нет, он и есть
+        -- зона (так 384 записи в живом SV получили зону в поле расы).
+        if raceIsZone and (not zoneName) and (not zoneId or zoneId == 0) then
+            zoneName = rawRace
+        end
+    end
+    if faction ~= "?" and faction ~= "Alliance" and faction ~= "Horde" then
+        peerStats.factionFixed = (peerStats.factionFixed or 0) + 1
+        faction = "?"
+    end
 
     -- Place. zoneId — ОСНОВНОЙ ключ зоны во всех версиях, имя — расширение.
     --   N2: нет места вообще
@@ -1970,7 +2020,78 @@ local RACE_LOCALE = {
 }
 
 -- LearnedFactions — НАБОР фракций, в которых наблюдалась раса.
+
+-- ── Раса: нормализация и защита от сдвига разбора (15.11.2026) ─────────────
+-- Симптом: 384 записи в живом SV с именем зоны в поле расы ("Duskwood",
+-- "Wetlands", "Ironforge", …). Корень — кодирование: отсутствие значения шло
+-- кодом 'z' (тем же, что «значение текстом в хвосте») без самого текста, и
+-- приёмник забирал следующим текстом хвоста имя зоны. Подробно — PEER_CODE_NONE.
 --
+-- Правила нормализации:
+--  1) известное значение приводим к ФАЙЛ-КЛЮЧУ («Night Elf» / «Ночной эльф» ->
+--     NightElf): база и выгрузка на сайт ждут файл-ключи, иначе одна раса
+--     распадается на несколько строк статистики;
+--  2) нераспознанный текст, совпавший с известным именем ЗОНЫ, — не раса (это
+--     и есть сдвиг от старого отправителя): ставим «?»;
+--  3) прочий текст принимаем как есть: кастомная раса, которой ещё нет в
+--     таблицах, не должна теряться.
+-- strict=true (только для записей из канала при миграции): любой нераспознанный
+-- текст считается мусором — у локальных источников раса всегда файл-ключ от
+-- UnitRace, поэтому текст вне таблиц приходит только сдвигом разбора.
+-- Глобальные функции: главный чанк стоит на 193-м из 200 локалов.
+function NspZoneNameSet(db)
+    if type(db) ~= "table" then return {} end
+    db.learn = db.learn or {}
+    local set = db.learn.zoneNames
+    if type(set) ~= "table" then set = {}; db.learn.zoneNames = set end
+    return set
+end
+
+function NspNormalizeRace(db, race, strict)
+    if type(race) ~= "string" or race == "" or race == "?" then return "?" end
+    if NSP_PEER_DECODE.race[race] then return race end   -- уже файл-ключ
+    local canon = RACE_LOCALE[race]
+    if canon then return canon end
+    local learn = type(db) == "table" and db.learn or nil
+    local byLoc = learn and learn.raceLoc2File
+    if type(byLoc) == "table" and byLoc[race] then return byLoc[race] end
+    if NspZoneNameSet(db)[race] then return "?", true end  -- имя зоны, а не раса
+    if strict then return "?" end
+    if PeerField(race, 32) then return race end            -- новая кастомная раса
+    return "?"
+end
+
+-- Одноразовая чистка базы от мусора в поле расы. Идёт вместе с миграцией имён
+-- (GetDB), считает результат в db.debug, чтобы это было видно, а не «само
+-- прошло». Словарь зон собирается из самой базы: имена зон, которые уже есть
+-- в записях, — единственный локальный справочник, доступный без /who.
+function NspMigrateRaces(db)
+    if type(db) ~= "table" or db.migRaces == 2 then return end
+    local zones = NspZoneNameSet(db)
+    for _, p in pairs(db.players) do
+        if type(p) == "table" and type(p.zone) == "string"
+            and p.zone ~= "" and p.zone ~= "?" then
+            zones[p.zone] = true
+        end
+    end
+    local junk, canonical = 0, 0
+    for _, p in pairs(db.players) do
+        if type(p) == "table" and p.race ~= nil then
+            local fixed = NspNormalizeRace(db, p.race, p.source == "peer")
+            if fixed ~= p.race then
+                if fixed == "?" then junk = junk + 1 else canonical = canonical + 1 end
+                p.race = (fixed ~= "?") and fixed or nil
+            end
+        end
+    end
+    db.migRaces = 2
+    if junk > 0 or canonical > 0 then
+        db.debug.raceJunkCleared = junk
+        db.debug.raceCanonicalised = canonical
+        R(("race migration: %d junk cleared, %d canonicalised"):format(junk, canonical))
+    end
+end
+
 -- Раньше хранилась ОДНА фракция на расу (db.learn.raceFaction), и это ломало
 -- кастомные расы: Skyborne есть и у Альянса, и у Орды (в базе сайта
 -- Skyborne/Alliance 698 + Skyborne/Horde 1, то есть раса не одноместная).
