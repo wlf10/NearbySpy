@@ -15,6 +15,7 @@ This file also holds the attribution of a block to its trigger context
 Run: python tests/test_action_blocked.py
 """
 from pathlib import Path
+import re
 import unittest
 
 from lupa.lua51 import LuaRuntime
@@ -105,6 +106,25 @@ end
         self.g["handleBlocked"]("SomeOtherAddon", "Foo()", "ADDON_ACTION_BLOCKED")
         self.assertEqual(1, self.g["DB"]["debug"]["blockedOther"]["SomeOtherAddon -> Foo()"])
         self.assertIsNone(self.g["DB"]["debug"]["blocked"])
+
+    # --- the drain triggers that only produced refusals -------------------
+
+    def test_movement_no_longer_triggers_a_send_attempt(self):
+        # The client gates channel sends to hardware events. PLAYER_STARTED_MOVING
+        # is not one: 16.11.2026 the user confirmed the "Interface action failed
+        # because of an AddOn" popup appeared when he moved. Those two events gave
+        # no successful sends (2869 + 2869 attempts, 156 refusals), so they are
+        # unregistered. A test, not a comment, keeps them from creeping back.
+        registered = re.findall(r'peerInput:RegisterEvent\("([A-Z_]+)"\)', SRC)
+        self.assertNotIn("PLAYER_STARTED_MOVING", registered)
+        self.assertNotIn("PLAYER_STOPPED_MOVING", registered)
+        self.assertIn("PLAYER_TARGET_CHANGED", registered, "a working trigger was removed too")
+
+    def test_the_world_click_trigger_is_still_hooked(self):
+        # this is the one real hardware event we have — losing it would stall the
+        # queue for players who never click into the world
+        self.assertIn('HookScript("OnMouseDown"', SRC)
+        self.assertIn('PeerTryDrain("world")', SRC)
 
     # --- attribution of a block to its trigger -----------------------------
 

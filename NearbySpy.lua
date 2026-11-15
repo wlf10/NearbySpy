@@ -6364,11 +6364,18 @@ if WorldFrame and WorldFrame.HookScript then
     WorldFrame:HookScript("OnMouseDown", function() PeerTryDrain("world") end)
 end
 
--- События реального ввода: каждое означает, что игрок что-то нажал.
--- Регистрируются на отдельном фрейме, чтобы не трогать основной обработчик.
+-- События, по которым пробуем разгрузить очередь.
+--
+-- ⚠️ 16.11.2026: движение ОТСЮДА УБРАНО. Клиент пускает SendChatMessage в канал
+-- только из hardware-события, а PLAYER_STARTED_MOVING/STOPPED_MOVING таковым не
+-- является — на них гейт отвечал ADDON_ACTION_BLOCKED, и игрок видел попап
+-- «Интерфейсная операция недоступна из-за модификации» (подтверждено им в игре:
+-- ошибка появляется при нажатии движения). Отправок эти события всё равно не
+-- давали, только отказы: за сессию 2869+2869 вызовов при 156 блокировках.
+-- Клик по миру (OnMouseDown ниже) — настоящее hardware-событие и работает.
+-- Остальные оставлены под замер: db.debug.gateWhy покажет, дают ли они отправки
+-- или тоже только отказы; по нему их можно будет снять так же.
 local peerInput = CreateFrame("Frame")
-peerInput:RegisterEvent("PLAYER_STARTED_MOVING")
-peerInput:RegisterEvent("PLAYER_STOPPED_MOVING")
 peerInput:RegisterEvent("UNIT_SPELLCAST_START")
 peerInput:RegisterEvent("PLAYER_TARGET_CHANGED")
 peerInput:RegisterEvent("START_LOOT_ROLL")
