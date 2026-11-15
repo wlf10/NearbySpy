@@ -123,22 +123,25 @@ ring, so it can be read after logout even in stealth mode):
 `/nspy peer` prints the live counters plus the counters of the previous session
 (persisted in `db.debug.peer`).
 
-The player window has a **Peer** filter (4th tile, next to All/Fresh/New) and
-`/nspy peer new` prints the same list in chat. Both read `peerAt`/`peerNew`,
-which are stored on the player row, so the list survives a relog:
+The player window has a single exchange filter (4th tile, next to All/Fresh/New)
+and `/nspy peer new` prints the same list in chat. Both read `peerAt`/`peerNew`,
+which are stored on the player row, so the list survives a relog. The tab itself
+is scoped to the current session — `/nspy peer list` is what shows everything
+the channel ever delivered:
 
 - rows first learned from a peer carry `peerNew` (tag `new` in the list);
 - a packet that only refreshed a player we already knew sets `peerAt` alone
   (tag `upd`) — that is the honest answer to "is the channel alive";
-- the CONTACT column in the Peer list shows the packet arrival time, not our own
-  last sighting;
+- the CONTACT column in the exchange list shows the packet arrival time, not our
+  own last sighting;
 - the settings window has **Accept other realms** (`db.peerAllRealms`, on by
   default). Off rejects foreign packets at the gate and hides the rows already
   stored (nothing is deleted), and the export skips them too;
-- a row from another realm of the cluster gets a short dim tag next to the name
-  (`Im Lapiz EU4 Realm 6 PvP`), with the full realm in the tooltip. The ZONE
-  column always means a location: peer packets carry no zone, so those rows show
-  `?` there.
+- the realm under a player's name and the realm selector both use region plus
+  ruleset (`EU PvP`, `EU PvE`, `EU RP PvP`), because the cluster's realms differ
+  only by shard and number. The full realm name is still stored with every
+  record and shown in the tooltip. The ZONE column always means a location: peer
+  packets carry no zone, so those rows show `?` there.
 
 ## Sharing the data
 

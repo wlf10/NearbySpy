@@ -1,24 +1,39 @@
 ## NearbySpy 1.5.5
 
-### Fixed: sharing is no longer refused by the channel
+### Fixed: fewer records lost on the way to the channel
 
-1.5.4 made the sender go faster while the send queue was long, and the channel
-would not take it: the server answered THROTTLED and dropped the messages. In
-one recorded session five of eighteen sends were refused and 39 records never
-left the client.
-
-- After a refusal the addon backs off to 15 seconds between messages instead of
-  pushing at the same rate, and returns to the normal interval after 90 seconds
-  without refusals.
+- 1.5.4 made the sender go faster while the send queue was long, and the channel
+  would not take it: the server answered THROTTLED and dropped the messages. In
+  one recorded session five of eighteen sends were refused and 39 records never
+  left the client. The interval now follows the server's own signal — after a
+  refusal it waits 15 seconds instead of pushing at the same rate, and returns
+  to the normal interval after 90 seconds without refusals.
 - The interval used while the queue is long drops from 4 to 7 seconds, which is
   what this channel actually tolerates.
+- Refusals are counted and reported by `/nspy peer`. Before, "the server refused
+  us" and "there was nothing to send" looked exactly the same.
 
-### Improved: refusals are visible instead of guessed
+### Fixed: a race no longer costs you the whole encounter
 
-- Refused messages are counted, the counter is saved with your data on logout,
-  and both `/nspy peer` and its "last session" line report it. Before, a
-  refusal lived only in memory, so "the server refused us" looked exactly like
-  "there was nothing to send".
+- One unrecognised race used to reject the entire packet, so the player was never
+  recorded. Worse, the check behind it also threw away genuine values: the
+  localized "Night Elf" (it has a space) and custom races written in Cyrillic.
+  Those records never even left the sender.
+- Now the name, realm, class and level stay strict, while race and faction are
+  normalized: a localized name becomes the standard value, and anything we do
+  not know is stored as unknown instead of dropping the encounter.
+- Records that had a zone name stored in the race field ("Duskwood", "Wetlands")
+  are cleaned up automatically on the first login — 388 such records were found
+  and removed from the live database.
+
+### Changed: realms are shown by region and ruleset
+
+- The cluster has a dozen realms that differ only by shard and number. The
+  selector multiplied that difference into a dozen near-identical entries.
+- The realm under a player's name and the realm selector now use "EU PvE",
+  "EU PvP" and "EU RP PvP", with your own realm first in the list.
+- Stored data is untouched: the full realm name still travels with every record,
+  so the statistics site keeps its per-realm accounting.
 
 ### Changed: one exchange tab instead of two
 
@@ -28,6 +43,11 @@ left the client.
 - The remaining tab shows only what the channel taught you during the current
   session, ordered by arrival, and its counter follows the same rule.
 - `/nspy peer list` still prints everything the channel ever delivered.
+
+### Changed: the menu closes when it opens a window
+
+- Picking a tile in the main menu no longer leaves the menu sitting behind the
+  window it opened — one click less every time.
 
 ### Install
 
