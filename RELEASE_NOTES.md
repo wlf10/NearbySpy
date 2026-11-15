@@ -12,6 +12,10 @@
   what this channel actually tolerates.
 - Refusals are counted and reported by `/nspy peer`. Before, "the server refused
   us" and "there was nothing to send" looked exactly the same.
+- A record now waits ten minutes for its turn instead of two. After a /who sweep
+  the queue is longer than two batches could clear, and records were expiring
+  unsent while still waiting — five of them went in a single second in one
+  recorded session.
 
 ### Fixed: a race no longer costs you the whole encounter
 
