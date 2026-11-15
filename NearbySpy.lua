@@ -1491,6 +1491,12 @@ function NspNoteSendRet(db, okSent, result, nowT)
     local at = type(db.debug.blockedAt) == "table" and db.debug.blockedAt["UNKNOWN()"]
     if okSent and result == nil and at and (nowT - at) <= 1 then
         db.debug.peerGate = (db.debug.peerGate or 0) + 1
+        -- В КАКОМ контексте нас заблокировали: движение/каст/цель — это НЕ
+        -- hardware-события, а клик по миру — да. Без этого нельзя решить, какие
+        -- триггеры отправки стоит убрать (16.11.2026).
+        db.debug.gateWhy = db.debug.gateWhy or {}
+        local why = tostring(db.debug.lastDrainWhy or "?")
+        db.debug.gateWhy[why] = (db.debug.gateWhy[why] or 0) + 1
         return true
     end
     return false
@@ -6343,6 +6349,9 @@ function PeerDrainStat(why)
     db.debug = db.debug or {}
     db.debug.peerDrain = db.debug.peerDrain or {}
     db.debug.peerDrain[why] = (db.debug.peerDrain[why] or 0) + 1
+    -- Последний контекст вызова: по нему NspNoteSendRet атрибутирует блокировку
+    -- гейта (см. db.debug.gateWhy). Глобал-поле, а не local — чанк у потолка.
+    db.debug.lastDrainWhy = tostring(why)
 end
 
 local function PeerTryDrain(why)
@@ -6545,6 +6554,26 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- нас с чужими аддонами и не отвечал ни на один вопрос (см. NspNoteBlock).
         if NspNoteBlock(GetDB(), addon, func, time(), event) then
             D(("client blocked our call: %s (%s)"):format(func, event))
+            -- Интерфейсная ошибка «Interface action failed because of an AddOn»
+            -- — это и есть попап ADDON_ACTION_BLOCKED/FORBIDDEN. Он всплывает на
+            -- отправке в канал (гейт требует hardware-событие), а мы этот вызов
+            -- пробуем сами и отказ уже учли в db.debug.blocked/peerGate —
+            -- беспокоить игрока нечем. Гасим попап и НЕ трогаем чужие: если
+            -- заблокировали другой аддон, его диалог не наше дело.
+            -- pcall: в кастомном клиенте попапа может не быть вовсе.
+            if StaticPopup_Hide then
+                pcall(StaticPopup_Hide, "ADDON_ACTION_BLOCKED")
+                pcall(StaticPopup_Hide, "ADDON_ACTION_FORBIDDEN")
+                -- Близзард показывает попап по тому же событию и может сделать это
+                -- ПОСЛЕ нас: повторяем хайд на следующем кадре, иначе диалог
+                -- остаётся на экране и жалоба возвращается.
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, function()
+                        pcall(StaticPopup_Hide, "ADDON_ACTION_BLOCKED")
+                        pcall(StaticPopup_Hide, "ADDON_ACTION_FORBIDDEN")
+                    end)
+                end
+            end
         end
     elseif event == "LUA_WARNING" then
         D(("LUA_WARNING: %s | %s"):format(tostring(arg1), tostring(arg2)))
