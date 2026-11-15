@@ -19,6 +19,7 @@
 """
 
 from pathlib import Path
+import re
 import unittest
 
 from lupa.lua51 import LuaRuntime
@@ -43,7 +44,7 @@ PEER_CHANNEL_BASE = 'nearbyspy'
 PEER_PROTO = "N6"
 PEER_BATCH_SEP = ","
 PEER_TAIL_SEP = "~"
-PEER_QUEUE_MAX, PEER_TTL = 60, 120
+PEER_QUEUE_MAX, PEER_TTL = __QM__, __TTL__
 PEER_GAP, PEER_GAP_BUSY, PEER_BUSY_LEN = 0, 0, 999  -- шлём сразу
 PEER_PAYLOAD_MAX = 240
 PEER_BATCH_MAX = 5
@@ -81,7 +82,13 @@ def codes_block() -> str:
 class BatchSendTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n" + SEND_HARNESS + "\n" + codes_block() + "\n"
+        # The harness constants are substituted FROM PRODUCTION: a hardcoded copy
+        # silently keeps testing the old value after the real one changes (TTL was
+        # raised 120 -> 600 on 15.11.2026 and the harness would not have noticed).
+        src = SOURCE.read_text(encoding="utf-8")
+        qm, ttl = re.search(r"local PEER_QUEUE_MAX, PEER_TTL = (\d+), (\d+)", src).groups()
+        harness = SEND_HARNESS.replace("__QM__", qm).replace("__TTL__", ttl)
+        self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n" + harness + "\n" + codes_block() + "\n"
                          + queue_part() + "\n"
                          "TestQueue = QueuePeerNew\n"
                          "TestDrain = DrainPeerQueue\n")
@@ -216,6 +223,25 @@ class BatchSendTests(unittest.TestCase):
         self.g["TestDrain"]()
         self.assertEqual(0, len(self.g["peerQueue"]), "очередь не очистилась")
         self.assertEqual(2, int(self.g["peerStats"]["sent"]))
+
+    def test_old_record_waits_long_enough_to_be_sent(self):
+        # TTL 120 -> 600 (15.11.2026): запись, прождавшая пять минут, обязана
+        # уехать, а не сгореть. Живой SV показывал пять "expired before send"
+        # в одну секунду — очередь после /who-скана не успевала разгрузиться.
+        self.push("Alice")
+        self.g["peerQueue"][1]["at"] = 1000 - 300
+        self.g["TestDrain"]()
+        self.assertEqual(1, len(self.sent()), "запись на 300 с не отправлена")
+        self.assertEqual(0, int(self.g["peerStats"]["dropped"]))
+
+    def test_record_beyond_the_ttl_is_dropped(self):
+        # граница важна с другой стороны: вечно копить очередь тоже нельзя
+        self.push("Alice")
+        self.g["peerQueue"][1]["at"] = 1000 - 700
+        self.g["TestDrain"]()
+        self.assertEqual(0, len(self.sent()), "просроченная запись всё-таки ушла")
+        self.assertEqual(1, int(self.g["peerStats"]["dropped"]))
+        self.assertEqual(0, len(self.g["peerQueue"]), "просроченная запись осталась в очереди")
 
     def test_batch_counter_is_tracked(self):
         self.push("Alice"); self.push("Bob")
