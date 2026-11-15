@@ -5162,7 +5162,16 @@ local function HubCell(parent, col, row, labelKey, descKey, lr, lg, lb, onClick)
     desc:SetPoint("TOP", label, "BOTTOM", 0, -1)
     desc:SetWidth(HUBG.w - 10)
     desc:SetText(L(descKey))
-    cell:SetScript("OnClick", onClick)
+    -- Окно из главного меню ЗАМЕНЯЕТ меню: раньше hub оставался висеть под
+    -- открытым окном, и его приходилось закрывать отдельным кликом (просьба
+    -- пользователя 15.11.2026). Прячем после вызова, а не вместо него, и в
+    -- pcall: падение обработчика не должно оставить меню на экране.
+    -- hubWin — forward-объявление выше по файлу, поэтому виден здесь как upvalue.
+    cell:SetScript("OnClick", function()
+        local okClick, errClick = pcall(onClick)
+        if hubWin then hubWin:Hide() end
+        if not okClick then P(tostring(errClick)) end
+    end)
     return cell, desc
 end
 

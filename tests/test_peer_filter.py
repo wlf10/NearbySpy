@@ -30,14 +30,14 @@ class PeerFilterTests(unittest.TestCase):
         stats["filter"] = filt
         return self.lua.globals()["TestVisible"](self.lua.table_from(player), 1000)
 
-    def test_peer_filter_selects_rows_that_came_from_the_channel(self):
-        self.assertTrue(self.visible("peer", {"peerAt": 900}))
-        self.assertFalse(self.visible("peer", {"lastSeen": 999}))
+    def test_exchange_tab_selects_rows_the_channel_taught_us(self):
+        self.assertTrue(self.visible("peern", {"peerAt": 1000, "peerNew": True}))
+        self.assertFalse(self.visible("peern", {"lastSeen": 1000}))
 
-    def test_peer_filter_ignores_rows_without_a_peer_timestamp(self):
+    def test_exchange_tab_ignores_rows_without_a_packet(self):
         # a row from our own sighting has no peerAt: it must not leak into the
-        # peer list just because it is fresh
-        self.assertFalse(self.visible("peer", {"lastSeen": 1000, "firstSeen": 1000}))
+        # exchange list just because it is fresh
+        self.assertFalse(self.visible("peern", {"lastSeen": 1000, "firstSeen": 1000}))
 
     def test_foreign_rows_are_hidden_while_the_setting_is_off(self):
         # accepted earlier while the flag was on: turning it off must hide them

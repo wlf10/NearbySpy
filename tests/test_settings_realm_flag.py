@@ -102,6 +102,13 @@ function CreateFrame()
 end
 function NewText() return Widget() end
 
+-- Global helper defined ABOVE the sliced block, so the block cannot see it.
+-- Without this stub the settings build dies on "attempt to call global
+-- 'NspKeyboardPropagate' (a nil value)".
+function NspKeyboardPropagate(frame, value)
+    if frame and frame.SetPropagateKeyboardInput then frame:SetPropagateKeyboardInput(value) end
+end
+
 CHECKS = {}
 SELECTS = {}
 CHECK_ROWS = {}

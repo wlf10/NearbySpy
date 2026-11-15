@@ -127,6 +127,16 @@ GameTooltip = setmetatable({}, { __index = function(t, k)
     return f
 end })
 
+-- Global helper defined ABOVE the sliced block (production line ~3.7k), so the
+-- block cannot see it: without this stub every window build that touches the
+-- keyboard dies with "attempt to call global 'NspKeyboardPropagate' (a nil
+-- value)" — that is exactly how the combat guard broke this harness.
+function NspKeyboardPropagate(frame, value)
+    if frame and frame.SetPropagateKeyboardInput then
+        frame:SetPropagateKeyboardInput(value)
+    end
+end
+
 -- ---- addon-local stubs ----
 local LOCALE_EN = __EN__
 local function L(key) return LOCALE_EN[key] or key end
@@ -203,7 +213,9 @@ def main():
     T = t["TEST"]
 
     def fail(msg):
+        # errors from the addon's own pcall handlers are the first thing to see
         print("FAIL:", msg)
+        print("addon errors:", [str(e) for e in T["errors"]])
         sys.exit(1)
 
     # 1. minimap button: build, shown, angle default
@@ -281,7 +293,17 @@ def main():
 
     # 5. settings cell opens the settings window; peer checkbox toggles peerEnabled
     settings_cell = cells[3]  # creation order: players, server, help, settings
+    # A window opened from the menu REPLACES the menu: the hub must be hidden, not
+    # left sitting under the new window (user request 15.11.2026). Checked on the
+    # settings cell: cells are collected from the widget list, whose iteration
+    # order is not guaranteed, so keying the check on cell index would test the
+    # harness rather than the behaviour.
+    hub_win_now = t.GetHubWin()
+    if hub_win_now is None or not hub_win_now["__shown"]:
+        fail("hub should still be shown before a cell click")
     settings_cell["__scripts"]["OnClick"](settings_cell)
+    if t.GetHubWin()["__shown"]:
+        fail("hub stayed open after opening a window from it")
     opt_win = t.GetOptWin()
     if opt_win is None or not opt_win["__shown"]:
         fail("settings window not shown after settings cell click")
@@ -367,7 +389,16 @@ def main():
     if T["clicks"]["players"] != 2:
         fail("right click did not open player list")
 
-    # 8. toggle hub twice -> hidden again
+    # 8. toggle hub twice -> hidden again. Since a cell click hides the menu,
+    # the state on entry is not "shown" any more: normalize first, otherwise the
+    # check would depend on what the previous step happened to leave behind.
+    if hub_win["__shown"]:
+        t.ToggleHubWindow()
+    if hub_win["__shown"]:
+        fail("hub should be hidden before the toggle check")
+    t.ToggleHubWindow()
+    if not hub_win["__shown"]:
+        fail("first toggle should show the hub")
     t.ToggleHubWindow()
     if hub_win["__shown"]:
         fail("hub should be hidden after second toggle")
