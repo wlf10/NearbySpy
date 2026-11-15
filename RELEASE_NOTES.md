@@ -22,12 +22,3 @@
   so one old entry hid every later error of the same kind — which is why an error
   in the log could not be found afterwards. Every failure is counted now, with
   its time and its latest text, and `/nspy count` prints them.
-
-### Install
-
-Unzip the archive into `Interface/AddOns/` — it contains both `NearbySpy` and
-`NearbySpy_Data`. Enable them in the in-game AddOns list. If the client flags the
-addon as out of date, tick "Load out of date add-ons".
-
-Full instructions in your language: https://foragerstats.com/docs/install
-Statistics site fed by this addon: https://foragerstats.com
