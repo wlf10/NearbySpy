@@ -103,11 +103,21 @@ class FilterTests(unittest.TestCase):
         self.assertFalse(self.visible({"class": "PALADIN", "level": 30}, **both))
 
     def test_class_and_level_combine_with_the_realm_filter(self):
+        # The realm selection is a BUCKET since 15.11.2026 ("EU PvE" / "EU PvP"):
+        # two servers of the same ruleset are one entry, so a row from either of
+        # them passes the same selection.
         player = {"class": "PALADIN", "level": 45, "realm": "CAMWOW EU5 Realm 1 PvE"}
-        self.assertTrue(self.visible(player, classFilter="PALADIN",
-                                     realmFilter="CAMWOW EU5 Realm 1 PvE"))
-        self.assertFalse(self.visible(player, classFilter="PALADIN",
-                                      realmFilter="CAMWOW EU4 Realm 6 PvP"))
+        self.assertTrue(self.visible(player, classFilter="PALADIN", realmFilter="EU PvE"))
+        self.assertFalse(self.visible(player, classFilter="PALADIN", realmFilter="EU PvP"))
+        other_shard = {"class": "PALADIN", "level": 45, "realm": "CAMWOW EU5 Realm 7 PvE"}
+        self.assertTrue(self.visible(other_shard, classFilter="PALADIN", realmFilter="EU PvE"))
+
+    def test_a_stale_full_realm_selection_still_matches_its_bucket(self):
+        # A selection is not persisted in SavedVariables, but /reload keeps the
+        # running value: a full realm name left over from the previous build must
+        # still resolve to its bucket instead of blanking the list.
+        player = {"class": "PALADIN", "level": 45, "realm": "CAMWOW EU5 Realm 1 PvE"}
+        self.assertTrue(self.visible(player, realmFilter="CAMWOW EU5 Realm 1 PvE"))
 
     # --- подписи ---------------------------------------------------------
 

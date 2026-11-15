@@ -3930,18 +3930,15 @@ function PeerRealmTag(realm, mine)
     return tag
 end
 
--- Badge under the player name for EVERY row, not only for foreign ones. Our own
--- realm shrinks to its ruleset ("PvE" / "PvP"), because repeating a long realm
--- name under every line of a 12k-row list is noise; a foreign realm keeps the
--- part that identifies it. Global: the main chunk is at the 200-local ceiling.
+-- Badge under the player name for EVERY row, not only for foreign ones. Since
+-- 15.11.2026 every realm shrinks to its bucket, ours included: "EU PvE" / "EU PvP".
+-- Before, our own realm showed only the ruleset ("PvE") while a foreign one kept
+-- shard and number ("EU4 Realm 6 PvP") — the same distinction displayed in two
+-- different shapes, and a dozen near-identical labels in the selector.
+-- Global: the main chunk is at the 200-local ceiling.
 function RealmBadge(realm)
     if type(realm) ~= "string" or realm == "" then return nil end
-    if realm == PlayerRealm() then
-        -- last token of "CAMWOW EU5 Realm 1 PvE" — the ruleset
-        local rules = realm:match("(%S+)$")
-        return rules or realm
-    end
-    return PeerRealmTag(realm)
+    return RealmBucket(realm) or PeerRealmTag(realm) or realm
 end
 
 local function TacticalVisible(p, now)
@@ -3950,10 +3947,18 @@ local function TacticalVisible(p, now)
     -- would contradict the setting the user just changed. Nothing is deleted —
     -- turning the flag back on brings them back.
     if p.peerForeign and GetDB().peerAllRealms == false then return false end
-    -- Realm filter: the database now holds players from other realms of the
-    -- cluster (they arrive over the peer channel), so "show me only EU4 Realm 6"
-    -- has to be answerable. An empty selection means all realms.
-    if tactical.realmFilter and (p.realm or "") ~= tactical.realmFilter then return false end
+    -- Realm filter: the database holds players from other realms of the cluster
+    -- (they arrive over the peer channel). The selector works in BUCKETS since
+    -- 15.11.2026 — "EU PvP" / "EU PvE" — so a dozen shard-plus-number labels do
+    -- not pile up (user decision). An empty selection means all realms.
+    -- Both sides go through RealmBucket: the selection is normally a bucket
+    -- already, but a value left in memory by the previous build is a full realm
+    -- name, and comparing raw would blank the list until the next click.
+    -- RealmBucket is idempotent ("EU PvP" -> "EU PvP"), so this is safe.
+    if tactical.realmFilter
+        and (RealmBucket(p.realm) or p.realm or "") ~= (RealmBucket(tactical.realmFilter) or tactical.realmFilter) then
+        return false
+    end
     -- Класс: nil = все. Псевдокласс "?" — записи без класса (их видно в
     -- панели «КЛАССЫ» как отдельная строка, молча прятать их нельзя).
     if tactical.classFilter then
@@ -4150,7 +4155,7 @@ local function TacticalStats()
     for _, p in pairs(GetDB().players) do
         -- counters follow the same realm selection as the list: a "Peer 12" badge
         -- over a list of 3 realm rows would be a lie
-        if realmSel and (p.realm or "") ~= realmSel then
+        if realmSel and (RealmBucket(p.realm) or p.realm or "") ~= (RealmBucket(realmSel) or realmSel) then
             -- skip: counted nowhere
         else
         st.total = st.total + 1
@@ -4226,9 +4231,42 @@ local function TacticalFilterState(button, active)
     else button.label:SetTextColor(0.62, 0.55, 0.42) end
 end
 
--- Compact realm name for the cycler button: "CAMWOW EU4 Realm 6 PvP" -> "EU4
--- Realm 6 PvP". Only the leading cluster prefix is dropped — the rest is what
--- tells the realms apart, so nothing is invented.
+-- Bucket of a realm: region + ruleset ("EU PvP", "EU PvE", "EU RP PvP").
+-- The cluster's realms are "CAMWOW EU4 Realm 6 PvP" / "CAMWOW EU5 Realm 1 PvE";
+-- showing the shard and the realm number multiplied the same distinction across a
+-- dozen near-identical labels (user decision 15.11.2026: no multiplying layers).
+-- What actually matters when picking someone out of the list is the region and
+-- the ruleset, so both the badge and the selector use this. Stored data is NOT
+-- touched: p.realm keeps the full name for the site export and dedup keys.
+-- Global: the main chunk is at the 193rd of its 200 locals.
+function RealmBucket(realm)
+    if type(realm) ~= "string" or realm == "" then return nil end
+    local t = {}
+    for w in realm:gmatch("%S+") do t[#t + 1] = w end
+    -- Find "Realm" and the number after it: everything past the number is the
+    -- ruleset ("PvE", "PvP", "RP PvP"), the token before "Realm" is the region.
+    local at
+    for i = 2, #t do
+        if t[i] == "Realm" and tonumber(t[i + 1] or "") then at = i break end
+    end
+    if not at then
+        -- Unknown layout (another cluster, a renamed realm): keep it readable and
+        -- drop only the project prefix, as the badge always did.
+        local from = (#t >= 3) and 2 or 1
+        return table.concat(t, " ", from)
+    end
+    -- gsub returns (string, count): the parentheses keep the count from leaking
+    -- into a caller like ("%s"):format(RealmBucket(x)).
+    local region = ((t[at - 1] or ""):gsub("%d+$", ""))
+    local rules = table.concat(t, " ", at + 2)
+    if region == "" then region = t[1] or "" end
+    if rules == "" then return region end
+    return ((region .. " " .. rules):gsub("^%s+", ""))
+end
+
+-- Compact realm name for the cycler button when the bucket cannot be derived:
+-- "CAMWOW EU4 Realm 6 PvP" -> "EU4 Realm 6 PvP". Only the leading cluster prefix
+-- is dropped — the rest is what tells the realms apart, so nothing is invented.
 -- Global on purpose: the main chunk is at the Lua 5.1 ceiling of 200 locals.
 function RealmShortName(realm)
     if type(realm) ~= "string" or realm == "" then return "?" end
@@ -4241,12 +4279,16 @@ end
 
 -- Realms actually present in the database, our own first. The list is rebuilt on
 -- every click so a newly arrived realm shows up without /reload.
+-- Since 15.11.2026 the list holds BUCKETS ("EU PvP", "EU PvE"), not full realm
+-- names: the cluster has a dozen realms that differ only by shard and number, and
+-- the selector was multiplying that difference instead of answering the question
+-- a player actually has — which ruleset did this person come from.
 function TacticalRealmList()
-    local mine = PlayerRealm()
+    local mine = RealmBucket(PlayerRealm())
     local seen, list = {}, {}
     for _, p in pairs(GetDB().players) do
-        local r = p.realm
-        if type(r) == "string" and r ~= "" and not seen[r] then
+        local r = RealmBucket(p.realm) or (type(p.realm) == "string" and p.realm ~= "" and p.realm or nil)
+        if r and not seen[r] then
             seen[r] = true
             list[#list + 1] = r
         end
@@ -4326,7 +4368,9 @@ function TacticalRealmCyclerState(button)
     local active = tactical.realmFilter ~= nil
     button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
     button.label:SetTextColor(active and 1 or 0.62, active and 0.85 or 0.55, active and 0.45 or 0.42)
-    local name = active and RealmShortName(tactical.realmFilter) or L("UI_ALL")
+    -- The selection IS a bucket now ("EU PvP"), so it is displayed as is; the
+    -- RealmShortName fallback stays for a realm whose bucket could not be derived.
+    local name = active and (RealmBucket(tactical.realmFilter) or RealmShortName(tactical.realmFilter)) or L("UI_ALL")
     button.label:SetText(L("UI_REALM") .. ": " .. name)
 end
 

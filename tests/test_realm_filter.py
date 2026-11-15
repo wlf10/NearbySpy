@@ -7,7 +7,10 @@ all realms -> realm A -> realm B -> ... -> all again.
 
 What this holds:
   - the list is built from the records and puts OUR realm first;
-  - the short label drops only the cluster prefix;
+  - the list and the selection work in BUCKETS ("EU PvP" / "EU PvE"): the cluster
+    has a dozen realms differing only by shard and number, and multiplying that
+    difference was the old behaviour (user decision 15.11.2026);
+  - the short label is the bucket; RealmShortName survives only as a fallback;
   - one click moves to the next realm and wraps back to "all";
   - the list AND the counters obey the selection (a "Peer 12" badge over a list
     of 3 rows would be a lie).
@@ -27,7 +30,9 @@ P3 = "CAMWOW EU5 Realm 2 PvP"
 
 def block() -> str:
     src = SOURCE.read_text(encoding="utf-8")
-    start = src.index("function RealmShortName(realm)")
+    # RealmBucket sits just above RealmShortName and is what the list and the
+    # label now use, so the slice starts there.
+    start = src.index("function RealmBucket(realm)")
     end = src.index("local function TacticalMetric(", start)
     return src[start:end]
 
@@ -86,11 +91,21 @@ class RealmCyclerTests(unittest.TestCase):
         btn["__scripts"]["OnClick"](btn)
 
     # --- list -----------------------------------------------------------
-    def test_list_has_each_realm_once_and_our_own_first(self):
+    def test_list_holds_buckets_with_our_own_first(self):
         lst = self.lua.globals()["TestList"]()
         got = [lst[i + 1] for i in range(len(list(lst)))]
-        self.assertEqual(3, len(got))
-        self.assertEqual(MINE, got[0], "our own realm must be first")
+        # A and B are different servers but the same bucket (EU PvP), C is our
+        # own EU PvE: two entries, ours first.
+        self.assertEqual(["EU PvE", "EU PvP"], got)
+
+    def test_different_servers_do_not_multiply_labels(self):
+        # the defect this change removes: two shards of the same ruleset used to
+        # produce two near-identical entries
+        self.lua.execute('GetDB().players["D"] = {name="D", realm="CAMWOW EU5 Realm 3 PvP"} '
+                         'GetDB().players["E"] = {name="E", realm="CAMWOW EU5 Realm 7 PvE"}')
+        lst = self.lua.globals()["TestList"]()
+        got = [lst[i + 1] for i in range(len(list(lst)))]
+        self.assertEqual(["EU PvE", "EU PvP"], got)
 
     def test_short_name_drops_only_the_cluster_prefix(self):
         short = self.lua.globals()["TestShort"]
@@ -103,11 +118,11 @@ class RealmCyclerTests(unittest.TestCase):
         tac = self.lua.globals()["tactical"]
         self.assertIsNone(tac["realmFilter"], "starts at all realms")
         seen = []
-        for _ in range(4):                      # 3 realms + wrap
+        for _ in range(3):                      # 2 buckets + wrap
             self.click()
             seen.append(tac["realmFilter"])
-        self.assertEqual(3, len(set(x for x in seen[:3])), "each realm once")
-        self.assertIsNone(seen[3], "the cycle wraps back to all realms")
+        self.assertEqual(2, len(set(x for x in seen[:2])), "each bucket once")
+        self.assertIsNone(seen[2], "the cycle wraps back to all realms")
 
     def test_selection_survives_a_rebuilt_list(self):
         self.lua.globals()["TestCycler"](self.lua.globals(), 22, -256, 200)
@@ -133,11 +148,20 @@ class RealmCyclerTests(unittest.TestCase):
         self.lua.globals()["TestCycler"](self.lua.globals(), 22, -256, 200)
         self.assertEqual("UI_REALM: UI_ALL", self.lua.globals()["BUTTON"]["label"]["text"])
 
-    def test_label_shows_the_short_realm_name(self):
+    def test_label_shows_the_selected_bucket(self):
         self.lua.globals()["TestCycler"](self.lua.globals(), 22, -256, 200)
-        self.lua.globals()["tactical"]["realmFilter"] = P2
+        self.lua.globals()["tactical"]["realmFilter"] = "EU PvP"
         self.lua.globals()["TestState"]()
-        self.assertEqual("UI_REALM: EU4 Realm 6 PvP",
+        self.assertEqual("UI_REALM: EU PvP",
+                         self.lua.globals()["BUTTON"]["label"]["text"])
+
+    def test_label_falls_back_to_the_short_name_for_an_odd_selection(self):
+        # a selection carried over from an older build is a full realm name; the
+        # label must still read sensibly instead of going blank
+        self.lua.globals()["TestCycler"](self.lua.globals(), 22, -256, 200)
+        self.lua.globals()["tactical"]["realmFilter"] = MINE
+        self.lua.globals()["TestState"]()
+        self.assertEqual("UI_REALM: EU PvE",
                          self.lua.globals()["BUTTON"]["label"]["text"])
 
 
