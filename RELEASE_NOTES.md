@@ -1,66 +1,27 @@
-## NearbySpy 1.5.5
-
-### Fixed: fewer records lost on the way to the channel
-
-- 1.5.4 made the sender go faster while the send queue was long, and the channel
-  would not take it: the server answered THROTTLED and dropped the messages. In
-  one recorded session five of eighteen sends were refused and 39 records never
-  left the client. The interval now follows the server's own signal — after a
-  refusal it waits 15 seconds instead of pushing at the same rate, and returns
-  to the normal interval after 90 seconds without refusals.
-- The interval used while the queue is long drops from 4 to 7 seconds, which is
-  what this channel actually tolerates.
-- Refusals are counted and reported by `/nspy peer`. Before, "the server refused
-  us" and "there was nothing to send" looked exactly the same.
-- A record now waits ten minutes for its turn instead of two. After a /who sweep
-  the queue is longer than two batches could clear, and records were expiring
-  unsent while still waiting — five of them went in a single second in one
-  recorded session.
-
-### Fixed: a race no longer costs you the whole encounter
-
-- One unrecognised race used to reject the entire packet, so the player was never
-  recorded. Worse, the check behind it also threw away genuine values: the
-  localized "Night Elf" (it has a space) and custom races written in Cyrillic.
-  Those records never even left the sender.
-- Now the name, realm, class and level stay strict, while race and faction are
-  normalized: a localized name becomes the standard value, and anything we do
-  not know is stored as unknown instead of dropping the encounter.
-- Records that had a zone name stored in the race field ("Duskwood", "Wetlands")
-  are cleaned up automatically on the first login — 388 such records were found
-  and removed from the live database.
-
-### Changed: realms are shown by region and ruleset
-
-- The cluster has a dozen realms that differ only by shard and number. The
-  selector multiplied that difference into a dozen near-identical entries.
-- The realm under a player's name and the realm selector now use "EU PvE",
-  "EU PvP" and "EU RP PvP", with your own realm first in the list.
-- Stored data is untouched: the full realm name still travels with every record,
-  so the statistics site keeps its per-realm accounting.
-
-### Changed: one exchange tab instead of two
-
-- The player window has a single exchange tab now. The second one ("Peer" —
-  everything the channel ever delivered) is gone: it mixed records of unknown
-  age with fresh ones and answered nothing the session view does not.
-- The remaining tab shows only what the channel taught you during the current
-  session, ordered by arrival, and its counter follows the same rule.
-- `/nspy peer list` still prints everything the channel ever delivered.
-
-### Changed: the menu closes when it opens a window
-
-- Picking a tile in the main menu no longer leaves the menu sitting behind the
-  window it opened — one click less every time.
+## NearbySpy 1.5.6
 
 ### Fixed: no more "Interface action failed because of an AddOn"
 
-- The client only allows a channel send that comes from a real hardware event.
-  The addon also tried on movement — and that is exactly where the dialog
-  appeared: two events, thousands of attempts, no successful sends at all.
-  Sending on movement is gone; a click in the world still works.
-- The dialog itself is hidden too, so a refusal never interrupts play, and a
-  block belonging to another addon is left alone.
+- The client allows a channel send only when it comes from a real hardware event.
+  The addon used to try on movement as well, and that is exactly where the dialog
+  appeared: thousands of attempts a session, not one of them accepted. Sending on
+  movement is gone; a click in the world still works and remains the trigger.
+- The dialog itself is hidden as well, so a refusal never interrupts play.
+  A block belonging to another addon is left alone — that dialog is not ours.
+
+### Fixed: a record waits ten minutes for its turn instead of two
+
+- After a /who sweep the queue is longer than two batches could clear at the
+  channel's pace, so records expired unsent while still waiting their turn —
+  five of them went in a single second in one recorded session. Ten minutes
+  covers the burst and still keeps the queue finite.
+
+### Improved: the addon no longer loses track of its own errors
+
+- A failure was recorded only if that part of the addon had never failed before,
+  so one old entry hid every later error of the same kind — which is why an error
+  in the log could not be found afterwards. Every failure is counted now, with
+  its time and its latest text, and `/nspy count` prints them.
 
 ### Install
 
