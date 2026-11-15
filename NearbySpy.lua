@@ -218,18 +218,29 @@ local function D(msg)
 end
 
 -- first error per source goes to debug (pcall used to swallow it silently, 1.5.1)
+-- ⚠️ 15.11.2026: запись в err делалась ТОЛЬКО если для источника ещё нет строки —
+-- одна старая ошибка навсегда прятала все последующие («в логе была ошибка»
+-- превращалось в недоказуемое: err.chat держал запись от 09.11, а новая ошибка
+-- того же источника не попадала никуда). Теперь СЧЁТЧИК и ПОСЛЕДНЯЯ строка
+-- обновляются всегда, err[src] остаётся первой за всё время для истории, а в
+-- кольцо пишется не чаще раза в минуту на источник, чтобы поток ошибок не
+-- вытеснял из кольца остальное.
 local function DbgErr(src, err)
     local ok, db = pcall(GetDB)
-    if not ok then return end
+    if not ok or type(db) ~= "table" or type(db.debug) ~= "table" then return end
+    local now = time()
+    local text = tostring(err):sub(1, 200)
     db.debug.err = db.debug.err or {}
-    if not db.debug.err[src] then
-        db.debug.err[src] = tostring(err):sub(1, 200)
-        -- err survives logout in SavedVariables, so without a stamp a month-old
-        -- entry reads exactly like a fresh failure (cost me a hunt on 09.11.2026:
-        -- the ring said line 1471 while the deployed code had no tonumber there).
-        db.debug.errAt = db.debug.errAt or {}
-        db.debug.errAt[src] = time()
-        D(("DEBUG error [%s]: %s"):format(src, tostring(err):sub(1, 120)))
+    db.debug.errAt = db.debug.errAt or {}
+    db.debug.errCount = db.debug.errCount or {}
+    db.debug.errLast = db.debug.errLast or {}
+    db.debug.errCount[src] = (db.debug.errCount[src] or 0) + 1
+    db.debug.errLast[src] = text
+    local prev = db.debug.errAt[src]
+    db.debug.errAt[src] = now
+    if not db.debug.err[src] then db.debug.err[src] = text end
+    if not prev or now - prev > 60 then
+        D(("DEBUG error [%s] #%d: %s"):format(src, db.debug.errCount[src], text:sub(1, 120)))
     end
 end
 
@@ -6081,6 +6092,21 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                 type(db.debug) == "table" and NspCountKeys(db.debug.blockedOther) or 0,
                 tonumber(db.debug.kbLockdown) or 0,
                 tonumber(db.debug.peerGate) or 0))
+        -- Ошибки по источникам: видно в чате, без чтения SV. Показываем последнюю
+        -- и счётчик — «в логе была ошибка» должно быть проверяемо командой.
+        local errKeys = {}
+        for src in pairs(type(db.debug.errCount) == "table" and db.debug.errCount or {}) do
+            errKeys[#errKeys + 1] = src
+        end
+        table.sort(errKeys)
+        if #errKeys == 0 then
+            P("errors: none recorded")
+        else
+            for _, src in ipairs(errKeys) do
+                P(("error[%s] x%d: %s"):format(src, tonumber(db.debug.errCount[src]) or 0,
+                    PeerEsc(tostring((db.debug.errLast or {})[src] or "?"), 110)))
+            end
+        end
     elseif msg == "announce" then
         db.announce = not db.announce
         P(L("ANNOUNCE_TOGGLE") .. (db.announce and L("ON") or L("OFF")))
