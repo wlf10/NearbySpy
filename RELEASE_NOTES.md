@@ -53,6 +53,14 @@
 - Picking a tile in the main menu no longer leaves the menu sitting behind the
   window it opened — one click less every time.
 
+### Fixed: no more "Interface action failed because of an AddOn"
+
+- The client refuses a channel send that does not come from a real hardware
+  event, and reports it as a blocked action. NearbySpy already knows this can
+  happen, records the refusal and retries later, so the dialog had nothing to
+  ask you about — it is now hidden. A block belonging to another addon is left
+  alone.
+
 ### Install
 
 Unzip the archive into `Interface/AddOns/` — it contains both `NearbySpy` and
