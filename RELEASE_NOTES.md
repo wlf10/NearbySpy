@@ -55,11 +55,12 @@
 
 ### Fixed: no more "Interface action failed because of an AddOn"
 
-- The client refuses a channel send that does not come from a real hardware
-  event, and reports it as a blocked action. NearbySpy already knows this can
-  happen, records the refusal and retries later, so the dialog had nothing to
-  ask you about — it is now hidden. A block belonging to another addon is left
-  alone.
+- The client only allows a channel send that comes from a real hardware event.
+  The addon also tried on movement — and that is exactly where the dialog
+  appeared: two events, thousands of attempts, no successful sends at all.
+  Sending on movement is gone; a click in the world still works.
+- The dialog itself is hidden too, so a refusal never interrupts play, and a
+  block belonging to another addon is left alone.
 
 ### Install
 
