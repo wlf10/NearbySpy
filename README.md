@@ -26,6 +26,31 @@ longer than 10 minutes), source (unit/who/guild/chat).
 Everything is written to `WTF/.../SavedVariables/NearbySpy.lua` (the global
 `NearbySpy` table).
 
+## Your own journal: /nspy me
+
+Besides the player database, the addon keeps a journal of **your character**:
+
+- playtime (per session, per day, total) and how many sessions you played;
+- zones with the time spent in each and how often you entered them;
+- level, XP percentage, level-ups, deaths, money;
+- players you met this session and how many of them were new to the database.
+
+The journal is a bounded section of the same SavedVariables file (`db.journal`:
+40 sessions, 30 days, 25 zones per character), so the site can read it from the
+upload you already make — the addon itself still sends nothing anywhere.
+
+```
+/nspy me        -- print the summary in chat
+/nspy journal   -- same thing
+```
+
+Playtime is counted from a one-minute heartbeat, not from "login until logout",
+so a client that crashes does not add its offline hours: the next login closes
+that session at its last heartbeat and marks it truncated.
+
+Outside the game: `python3 scripts/parse_journal.py <SavedVariables/NearbySpy.lua>`
+prints the same numbers (add `--json` for a machine-readable report).
+
 ## Assisted mode: /nspy suggest
 
 Since build 1.60.1.70291 the server answers `/who` **only to a physical click**

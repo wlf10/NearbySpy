@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.5.6
+    NearbySpy 1.6.0
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -976,6 +976,12 @@ local function UpsertPlayer(db, data)
             peerFrom = data.peerFrom or nil,
         }
         newThisSession = newThisSession + 1
+        -- Journal (1.6.0): a player that entered the database is a real
+        -- encounter. Peer packets are excluded — someone else reporting a
+        -- sighting is not our meeting (same contract as the alert feature).
+        if observed and data.source ~= "peer" and NSP_JOURNAL then
+            pcall(NSP_JOURNAL.Encounter, db, key, true)
+        end
         -- per-source counter (1.5.1, full debug): who actually feeds the database
         local src = data.source or "?"
         db.debug.src = db.debug.src or {}
@@ -1014,6 +1020,11 @@ local function UpsertPlayer(db, data)
             entry.x = Round4(data.x)
             entry.y = Round4(data.y)
         end
+    end
+    -- Journal (1.6.0): a known player seen again is an encounter too, but only
+    -- our own sighting counts (peer rows also carry observe=true).
+    if observed and data.source ~= "peer" and NSP_JOURNAL then
+        pcall(NSP_JOURNAL.Encounter, db, key, false)
     end
     -- Identity fields: peer data can only fill gaps, a real observation may
     -- correct it (a peer record is not proof of race/faction).
@@ -3741,6 +3752,13 @@ local function ScheduleTick()
                 n, newThisSession,
                 #parts > 0 and table.concat(parts, ",") or "-"))
         end
+        -- Journal heartbeat, once a minute: playtime and zone time are
+        -- accumulated live so a killed client does not lose the session
+        -- (the next login closes it at the last beat).
+        if (db.debug.ticks % 30) == 0 and NSP_JOURNAL then
+            local okJ, errJ = pcall(NSP_JOURNAL.Beat, db, PlayerZone(), PlayerZoneId())
+            if not okJ then DbgErr("journalBeat", errJ) end
+        end
         ScheduleTick()
     end)
 end
@@ -3921,15 +3939,16 @@ local HELP_COMMANDS = {
     "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy peer new", "/nspy peer list",
     "/nspy peer send", "/nspy zones", "/nspy reset",
     "/nspy server", "/nspy menu", "/nspy minimap", "/nspy settings",
+    "/nspy me",
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Force-send the pending queue (no world click needed)", "Zone dictionary: rebuild and report (no /who needed)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "强制发送待发队列（无需点击世界）", "区域字典：重建并报告（无需 /who）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Отправить очередь принудительно (без клика по миру)", "Словарь зон: пересобрать и показать (без /who)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Warteschlange sofort senden (ohne Klick in die Welt)", "Zonen-Wörterbuch: neu aufbauen und melden (ohne /who)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Dictionnaire des zones : reconstruire et rapporter (sans /who)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "지역 사전: 재구성 및 보고 (/who 불필요)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Force-send the pending queue (no world click needed)", "Zone dictionary: rebuild and report (no /who needed)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)", "This character's journal: playtime, zones, encounters, level"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "强制发送待发队列（无需点击世界）", "区域字典：重建并报告（无需 /who）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)", "本角色的日志：游戏时长、区域、遇见、等级"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Отправить очередь принудительно (без клика по миру)", "Словарь зон: пересобрать и показать (без /who)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)", "Журнал персонажа: время в игре, зоны, встречи, уровень"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Warteschlange sofort senden (ohne Klick in die Welt)", "Zonen-Wörterbuch: neu aufbauen und melden (ohne /who)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)", "Journal dieses Charakters: Spielzeit, Zonen, Begegnungen, Stufe"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Dictionnaire des zones : reconstruire et rapporter (sans /who)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "지역 사전: 재구성 및 보고 (/who 불필요)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
 }
 local helpWin
 local EffectiveLocale -- forward: defined with the settings selectors below
@@ -6113,6 +6132,15 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                     PeerEsc(tostring((db.debug.errLast or {})[src] or "?"), 110)))
             end
         end
+    elseif msg == "me" or msg == "journal" then
+        -- Per-character journal (1.6.0): playtime, zones, encounters, progress.
+        if NSP_JOURNAL then
+            NSP_JOURNAL.P, NSP_JOURNAL.L = P, L
+            local okJ, errJ = pcall(NSP_JOURNAL.Report, db)
+            if not okJ then DbgErr("journalReport", errJ) end
+        else
+            P("journal module is missing")
+        end
     elseif msg == "announce" then
         db.announce = not db.announce
         P(L("ANNOUNCE_TOGGLE") .. (db.announce and L("ON") or L("OFF")))
@@ -6480,6 +6508,11 @@ frame:RegisterEvent("LUA_WARNING")
 -- если проба не включена — регистрация ничего не стоит)
 frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("LOOT_OPENED")
+-- Journal (1.6.0): session boundaries, zones, level-ups, deaths
+frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+frame:RegisterEvent("PLAYER_LOGOUT")
+frame:RegisterEvent("PLAYER_LEVEL_UP")
+frame:RegisterEvent("PLAYER_DEAD")
 
 frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
@@ -6490,6 +6523,13 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         local db = GetDB()
         EnsureNameplates(db)
         ScheduleTick()
+        -- Journal (1.6.0): open (or recover) this character's session. P and L
+        -- are injected because the journal chunk cannot see this file's locals.
+        if NSP_JOURNAL then
+            NSP_JOURNAL.P, NSP_JOURNAL.L = P, L
+            local okJ, errJ = pcall(NSP_JOURNAL.Login, db, PlayerZone(), PlayerZoneId())
+            if not okJ then DbgErr("journalLogin", errJ) end
+        end
         if db.peerEnabled then
             local ok, err = pcall(JoinPeerChannel)
             if not ok then DbgErr("peerJoin", err) end
@@ -6537,6 +6577,28 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     elseif event == "WHO_LIST_UPDATE" then
         local okE, errE = pcall(HandleWhoList)
         if not okE then DbgErr("who", errE) end
+    elseif event == "ZONE_CHANGED_NEW_AREA" then
+        if NSP_JOURNAL then
+            local okJ, errJ = pcall(NSP_JOURNAL.Zone, GetDB(), PlayerZone(), PlayerZoneId())
+            if not okJ then DbgErr("journalZone", errJ) end
+        end
+    elseif event == "PLAYER_LEVEL_UP" then
+        if NSP_JOURNAL then
+            local okJ, errJ = pcall(NSP_JOURNAL.LevelUp, GetDB(), arg1)
+            if not okJ then DbgErr("journalLevel", errJ) end
+        end
+    elseif event == "PLAYER_DEAD" then
+        if NSP_JOURNAL then
+            local okJ, errJ = pcall(NSP_JOURNAL.Died, GetDB())
+            if not okJ then DbgErr("journalDeath", errJ) end
+        end
+    elseif event == "PLAYER_LOGOUT" then
+        -- SavedVariables are written right after this event, so the session is
+        -- finalised here (/reload fires it too).
+        if NSP_JOURNAL then
+            local okJ, errJ = pcall(NSP_JOURNAL.Logout, GetDB())
+            if not okJ then DbgErr("journalLogout", errJ) end
+        end
     elseif event == "UI_ERROR_MESSAGE" then
         -- server throttles /who — the event signature varies: (msg) or (errorType, msg)
         local okE, errE = pcall(function()
