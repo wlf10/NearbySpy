@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """NearbySpy_Journal.lua — the per-character journal must count honestly.
 
-The journal (1.6.0) is a new SavedVariables section: playtime, zones, level,
+The journal (1.5.7) is a new SavedVariables section: playtime, zones, level,
 encounters and progress per character. It has no UI of its own — it is read by
 `/nspy me` and, later, by the site from the same SV file the addon uploads.
 That makes the counters the only thing the player can check, so the rules below

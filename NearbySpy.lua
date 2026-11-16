@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.6.0
+    NearbySpy 1.5.7
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -976,7 +976,7 @@ local function UpsertPlayer(db, data)
             peerFrom = data.peerFrom or nil,
         }
         newThisSession = newThisSession + 1
-        -- Journal (1.6.0): a player that entered the database is a real
+        -- Journal (1.5.7): a player that entered the database is a real
         -- encounter. Peer packets are excluded — someone else reporting a
         -- sighting is not our meeting (same contract as the alert feature).
         if observed and data.source ~= "peer" and NSP_JOURNAL then
@@ -1021,7 +1021,7 @@ local function UpsertPlayer(db, data)
             entry.y = Round4(data.y)
         end
     end
-    -- Journal (1.6.0): a known player seen again is an encounter too, but only
+    -- Journal (1.5.7): a known player seen again is an encounter too, but only
     -- our own sighting counts (peer rows also carry observe=true).
     if observed and data.source ~= "peer" and NSP_JOURNAL then
         pcall(NSP_JOURNAL.Encounter, db, key, false)
@@ -6133,7 +6133,7 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             end
         end
     elseif msg == "me" or msg == "journal" then
-        -- Per-character journal (1.6.0): playtime, zones, encounters, progress.
+        -- Per-character journal (1.5.7): playtime, zones, encounters, progress.
         if NSP_JOURNAL then
             NSP_JOURNAL.P, NSP_JOURNAL.L = P, L
             local okJ, errJ = pcall(NSP_JOURNAL.Report, db)
@@ -6508,7 +6508,7 @@ frame:RegisterEvent("LUA_WARNING")
 -- если проба не включена — регистрация ничего не стоит)
 frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("LOOT_OPENED")
--- Journal (1.6.0): session boundaries, zones, level-ups, deaths
+-- Journal (1.5.7): session boundaries, zones, level-ups, deaths
 frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("PLAYER_LEVEL_UP")
@@ -6523,7 +6523,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         local db = GetDB()
         EnsureNameplates(db)
         ScheduleTick()
-        -- Journal (1.6.0): open (or recover) this character's session. P and L
+        -- Journal (1.5.7): open (or recover) this character's session. P and L
         -- are injected because the journal chunk cannot see this file's locals.
         if NSP_JOURNAL then
             NSP_JOURNAL.P, NSP_JOURNAL.L = P, L

@@ -1,3 +1,20 @@
+## NearbySpy 1.5.7
+
+### New: a journal of your own character
+
+- `/nspy me` prints your character's own record: playtime (this session, today,
+  last 7 days, all time), the zones you spent that time in, how often you
+  entered them, your level and XP, level-ups, deaths, money — and the players
+  you met, split into "this session" and "new to the database".
+- Playtime is counted while you play, in one-minute steps, so a crash or a
+  force-quit cannot add your offline hours: the next login closes that session
+  where it actually stopped and marks it as cut short.
+- `/reload` neither adds sessions nor invents seconds.
+- The journal is a compact, bounded section of the same SavedVariables file, so
+  it travels to the site with the upload you already make. 40 sessions, 30 days
+  and 25 zones per character are kept — the oldest goes first, the file cannot
+  grow without limit.
+
 ## NearbySpy 1.5.6
 
 ### Fixed: no more "Interface action failed because of an AddOn"

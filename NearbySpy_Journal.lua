@@ -1,12 +1,12 @@
 -- NearbySpy_Journal.lua
--- Per-character activity journal (1.6.0, 16.11.2026): how long this character
+-- Per-character activity journal (1.5.7, 16.11.2026): how long this character
 -- played, where, whom it met and how it progressed. The data lives in the
 -- SavedVariables table the addon already writes, so the site receives it with
 -- the same file it already accepts — the addon itself has no HTTP and never
 -- will (see the world-data reference: SavedVariables is the only transport).
 --
 -- WHY A SEPARATE FILE: the main chunk of NearbySpy.lua sits at the Lua 5.1
--- ceiling of 200 top-level locals (194 at 1.6.0, measured by
+-- ceiling of 200 top-level locals (194 at 1.5.7, measured by
 -- scripts/count_locals.py). Both the journal state helpers and the reporters
 -- would need a dozen more. So the journal is its own chunk behind the global
 -- NSP_JOURNAL, and NearbySpy.lua injects what it needs:
