@@ -15,6 +15,14 @@
   and 25 zones per character are kept — the oldest goes first, the file cannot
   grow without limit.
 
+### Fixed: two silent errors on secret strings
+
+- A server message delivered as a secret value made the throttle detector throw
+  before it could log anything, so the message text was lost. The value is now
+  checked before it is compared.
+- The peer name formatter had no such check at all and failed on the same kind
+  of value; it now shows the name as `[secret]` instead of throwing.
+
 ## NearbySpy 1.5.6
 
 ### Fixed: no more "Interface action failed because of an AddOn"
