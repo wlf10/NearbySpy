@@ -1249,6 +1249,9 @@ end
 -- Global on purpose — a local function would cost a slot in the main chunk.
 function PeerEsc(s, maxLen)
     if type(s) ~= "string" then return tostring(s) end
+    -- A secret string passes the type check but throws on the first string
+    -- operation (gsub/#/sub), so the gate has to sit right here (16.11.2026).
+    if canaccessvalue and not canaccessvalue(s) then return "[secret]" end
     s = s:gsub("[%c|]", "?")
     maxLen = maxLen or 60
     if #s > maxLen then s = s:sub(1, maxLen) .. "..." end
@@ -2989,8 +2992,12 @@ end
 -- diagnostics: log recent system messages/errors into debug
 -- to catch the exact text and channel of the server anti-bot message
 local function LogSysMsg(chan, msg)
-    if type(msg) ~= "string" or msg == "" then return end
+    if type(msg) ~= "string" then return end
+    -- The client may deliver the message as a secret string: `msg == ""` is
+    -- already a string operation and throws on it, so the gate goes BEFORE the
+    -- emptiness check (the order CheckWhoThrottle already uses).
     if canaccessvalue and not canaccessvalue(msg) then return end
+    if msg == "" then return end
     local db = GetDB()
     db.debug.msgLog = db.debug.msgLog or {}
     local log = db.debug.msgLog

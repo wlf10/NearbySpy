@@ -68,6 +68,65 @@ class SecretSysMsgTests(unittest.TestCase):
         self.lua.globals()["TestLog"]("sys", "Подождите 5 сек")
         self.assertEqual(1, len(self.db["debug"]["msgLog"]))
 
+    def test_syslog_gate_runs_before_emptiness_check(self):
+        """`msg == ""` is itself a string operation and throws on a secret value.
+
+        A secret string cannot be constructed in Lua 5.1, so the regression that
+        bit in game (17.11.2026: "attempt to compare local 'msg' (a secret
+        string value)") is guarded by source order: the gate must come first.
+        """
+        source = SOURCE.read_text(encoding="utf-8")
+        body = source[
+            source.index("local function LogSysMsg") :
+            source.index("local function PumpWhoQueue")
+        ]
+        # Comments mention `msg == ""` too (they explain the bug), so compare the
+        # code only — otherwise the assertion measures the prose, not the order.
+        code = "\n".join(
+            line for line in body.splitlines() if not line.lstrip().startswith("--")
+        )
+        self.assertLess(
+            code.index("canaccessvalue"),
+            code.index('msg == ""'),
+            "canaccessvalue must be consulted before any string comparison",
+        )
+
+
+class PeerEscSecretTests(unittest.TestCase):
+    """PeerEsc must not run string operations on a secret string either.
+
+    Lua 5.1 strings are always accessible, so the harness flips canaccessvalue
+    to false and expects the placeholder. The old code ignored the gate and
+    returned the escaped text (it threw in game at NearbySpy.lua:1252).
+    """
+
+    def setUp(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        block = source[
+            source.index("function PeerEsc(s, maxLen)") :
+            source.index("local function PeerField")
+        ]
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(
+            "ACCESSIBLE = true\n"
+            "canaccessvalue = function(v) return ACCESSIBLE end\n"
+            + block
+        )
+
+    def test_secret_string_becomes_placeholder(self):
+        g = self.lua.globals()
+        g["ACCESSIBLE"] = False
+        self.assertEqual("[secret]", g["PeerEsc"]("Grishnákh Soulrend", 60))
+
+    def test_plain_string_is_escaped(self):
+        self.assertEqual("bad?name", self.lua.globals()["PeerEsc"]("bad|name", 60))
+
+    def test_plain_string_is_truncated(self):
+        self.assertEqual("abc...", self.lua.globals()["PeerEsc"]("abcdef", 3))
+
+    def test_non_string_is_tostringed(self):
+        self.assertEqual("42", self.lua.globals()["PeerEsc"](42, 60))
+
 
 if __name__ == "__main__":
     unittest.main()
