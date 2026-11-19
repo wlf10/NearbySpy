@@ -866,6 +866,101 @@ function J.ExportTalentTrees(level)
     step()
 end
 
+
+-- Dump EVERY field of one node. Needed because the export kept reporting
+-- type=0 for all 470 nodes while names resolved fine: that means the node
+-- structure itself is being read from the wrong place, and guessing which
+-- field is wrong is slower than printing all of them once.
+local function DumpNode(configID, nodeID, tag)
+    local ct = rawget(_G, "C_Traits")
+    local ok, node = pcall(ct.GetNodeInfo, configID, nodeID)
+    if not ok or type(node) ~= "table" then
+        return ("%s node %s: ERROR %s"):format(tag, tostring(nodeID), tostring(node):sub(1, 60))
+    end
+    local parts = {}
+    for k, v in pairs(node) do
+        local t = type(v)
+        if t == "table" then
+            local n = 0
+            for _ in pairs(v) do n = n + 1 end
+            -- для массивов показываем первые элементы: именно там entryIDs
+            local items = {}
+            for i = 1, math.min(n, 4) do
+                if type(v[i]) ~= "table" then items[#items + 1] = tostring(v[i]) end
+            end
+            v = ("tb(%d)[%s]"):format(n, table.concat(items, ","))
+        elseif t == "table" or v == nil then
+            v = "<nil>"
+        end
+        parts[#parts + 1] = tostring(k) .. "=" .. tostring(v)
+    end
+    table.sort(parts)
+    return ("%s node %s: %s"):format(tag, tostring(nodeID), table.concat(parts, " "):sub(1, 320))
+end
+
+-- /nspy talex diag — why is every node type 0?
+function J.TalexDiag()
+    local ct = rawget(_G, "C_Traits")
+    local cc = rawget(_G, "C_ClassTalents")
+    local cs = rawget(_G, "C_SpecializationInfo")
+    if type(ct) ~= "table" or type(cc) ~= "table" then
+        J.Say("talex diag: API missing")
+        return
+    end
+    -- активный персонаж: спек и его реальный конфиг
+    local specIndex = select(1, cs.GetSpecialization and cs.GetSpecialization() or nil)
+    local specID = select(1, cs.GetSpecializationInfo and cs.GetSpecializationInfo(specIndex) or nil)
+    local activeConfig = select(1, cc.GetActiveConfigID and cc.GetActiveConfigID() or nil)
+    J.Say(("talex diag: active spec=%s config=%s, view=%s, tree=%s")
+        :format(tostring(specID), tostring(activeConfig), tostring(ViewConfigID()),
+            tostring(select(1, cc.GetTraitTreeForSpec(specID or 0) or nil))))
+
+    local treeID = cc.GetTraitTreeForSpec(specID or 0)
+    if type(treeID) ~= "number" then
+        J.Say("talex diag: no tree for the active spec — stand on a character with talents")
+        return
+    end
+    local okN, nodeIDs = pcall(ct.GetTreeNodes, treeID)
+    if not okN or type(nodeIDs) ~= "table" or #nodeIDs == 0 then
+        J.Say("talex diag: GetTreeNodes returned nothing")
+        return
+    end
+    J.Say(("talex diag: tree %s has %d nodes"):format(tostring(treeID), #nodeIDs))
+
+    -- сравнение: реальный конфиг персонажа против view-конфига
+    local first = nodeIDs[1]
+    J.Say(DumpNode(activeConfig or 0, first, "ACTIVE"))
+    J.Say(DumpNode(ViewConfigID(), first, "VIEW"))
+    -- и типы по всему дереву в обоих режимах
+    local function typeHist(cfg)
+        local h = {}
+        for _, id in ipairs(nodeIDs) do
+            local ok, n = pcall(ct.GetNodeInfo, cfg, id)
+            local t = (ok and type(n) == "table") and (tonumber(n.type) or -1) or -2
+            h[t] = (h[t] or 0) + 1
+        end
+        local out = {}
+        for t, c in pairs(h) do out[#out + 1] = tostring(t) .. ":" .. c end
+        table.sort(out)
+        return table.concat(out, " ")
+    end
+    J.Say("talex diag: ACTIVE types = " .. typeHist(activeConfig or 0))
+    J.Say("talex diag: VIEW types   = " .. typeHist(ViewConfigID()))
+    -- entryInfo — второй источник maxRank/типа
+    local node2 = select(2, pcall(function() return ct.GetNodeInfo(ViewConfigID(), first) end))
+    if type(node2) == "table" and type(node2.entryIDs) == "table" and node2.entryIDs[1] then
+        local e = select(2, pcall(ct.GetEntryInfo, ViewConfigID(), node2.entryIDs[1]))
+        if type(e) == "table" then
+            local ep = {}
+            for k, v in pairs(e) do
+                if type(v) ~= "table" then ep[#ep + 1] = tostring(k) .. "=" .. tostring(v) end
+            end
+            table.sort(ep)
+            J.Say("talex diag: entry " .. tostring(node2.entryIDs[1]) .. " → " .. table.concat(ep, " "):sub(1, 200))
+        end
+    end
+end
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- events (INSPECT_READY arrives on its own frame: the main one handles enough)
 -- ─────────────────────────────────────────────────────────────────────────────

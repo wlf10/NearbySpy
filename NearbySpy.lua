@@ -6113,8 +6113,13 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         --   /nspy talex 40       specific level
         if type(NSP_PROBE) == "table" and type(NSP_PROBE.ExportTalentTrees) == "function" then
             NSP_PROBE.P, NSP_PROBE.GetDB = P, GetDB
-            local okT, errT = pcall(NSP_PROBE.ExportTalentTrees, msg:match("^talex%s+(%d+)$"))
-            if not okT then P("talex: " .. tostring(errT)) end
+            if msg:match("^talex%s+diag") then
+                local okD, errD = pcall(NSP_PROBE.TalexDiag)
+                if not okD then P("talex diag: " .. tostring(errD)) end
+            else
+                local okT, errT = pcall(NSP_PROBE.ExportTalentTrees, msg:match("^talex%s+(%d+)$"))
+                if not okT then P("talex: " .. tostring(errT)) end
+            end
         else
             P("talex: probe module is missing (NearbySpy_Probe.lua not loaded)")
         end
