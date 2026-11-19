@@ -6177,6 +6177,25 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                 P(L("SUGGEST_FAILED") .. tostring(info))
             end
         end
+    elseif msg == "itemnames" or msg:match("^itemnames%s") then
+        -- Имена предметов по ID: спрашиваются у клиента ПО ЗАПРОСУ, потому что
+        -- в SavedVariables экипировка лежит числами, а имя есть только в игре.
+        --   /nspy itemnames         спросить до 800 неизвестных ID
+        --   /nspy itemnames 200     ограничить прогон
+        --   /nspy itemnames show    показать, что уже собрано
+        if type(NSP_ITEMS) ~= "table" then
+            P("itemnames: модуль не загружен (NearbySpy_Items.lua)")
+        else
+            NSP_ITEMS.P, NSP_ITEMS.GetDB = P, GetDB
+            local arg = msg:match("^itemnames%s+(%S+)$")
+            local okI, errI
+            if arg == "show" or arg == "list" then
+                okI, errI = pcall(NSP_ITEMS.Report)
+            else
+                okI, errI = pcall(NSP_ITEMS.Run, arg)
+            end
+            if not okI then P("itemnames: " .. tostring(errI)) end
+        end
     elseif msg == "retain" or msg:match("^retain%s") then
         -- Срок хранения записей в SavedVariables. По умолчанию ЧИСТКИ НЕТ:
         -- файл — единственная локальная копия, и удаление необратимо.
@@ -6735,6 +6754,11 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             -- "how did it go today", not "since installation"
             local okS, errS = pcall(NSP_INSPECT.Start)
             if not okS then DbgErr("inspectStart", errS) end
+        end
+        -- Item name collector: separate chunk behind NSP_ITEMS (same reason as
+        -- the others — the main chunk is at the Lua 5.1 locals ceiling)
+        if type(NSP_ITEMS) == "table" then
+            NSP_ITEMS.P, NSP_ITEMS.GetDB = P, GetDB
         end
         -- Journal (1.5.7): open (or recover) this character's session. P and L
         -- are injected because the journal chunk cannot see this file's locals.
