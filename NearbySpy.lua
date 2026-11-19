@@ -6106,6 +6106,18 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                 if not okG then P("gear: " .. tostring(errG)) end
             end
         end
+    elseif msg == "talex" or msg:match("^talex%s") then
+        -- diagnostic: export the talent tree dictionary (needed to decode the
+        -- import strings offline; the client is the only source of this data)
+        --   /nspy talex          level 60 tree
+        --   /nspy talex 40       specific level
+        if type(NSP_PROBE) == "table" and type(NSP_PROBE.ExportTalentTrees) == "function" then
+            NSP_PROBE.P, NSP_PROBE.GetDB = P, GetDB
+            local okT, errT = pcall(NSP_PROBE.ExportTalentTrees, msg:match("^talex%s+(%d+)$"))
+            if not okT then P("talex: " .. tostring(errT)) end
+        else
+            P("talex: probe module is missing (NearbySpy_Probe.lua not loaded)")
+        end
     elseif msg == "inspecttest" or msg:match("^inspecttest%s") then
         -- diagnostic: can this build show gear and talents of another player?
         --   /nspy inspecttest            target + mouseover + focus

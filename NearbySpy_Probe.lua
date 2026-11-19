@@ -601,6 +601,223 @@ function J.Run(arg)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- talent tree export (/nspy talex)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- WHY: the import string a build comes as is a bit-packed stream (Blizzard
+-- documents it in Blizzard_ClassTalentImportExport.lua). Its HEADER decodes
+-- with no external data at all: 8 bits serialization version, 16 bits specID,
+-- 128 bits tree hash. The CONTENT section, however, is written node by node in
+-- the exact order of C_Traits.GetTreeNodes() and depends on each node's
+-- maxRanks and type — data that exists only inside the client.
+--
+-- So this export captures that dictionary once, and then any import string can
+-- be decoded offline (see the site's talent decoder). Forever is a custom
+-- server with its own specIDs (measured 1482..1491, not the retail 62..267),
+-- so public talent trees from Wowhead do NOT apply — the tree has to come from
+-- this client.
+--
+-- The stream format (from ExportUtil.lua, not guessed):
+--   header  152 bits: version(8) specID(16) treeHash(16 x 8)
+--   content per node: selected(1) [purchased(1) [partial(1) [ranks(6)]
+--                      choice(1) [entryIndex(2)]]]
+-- Each CHARACTER of the string carries 6 bits, least significant first —
+-- which is why an ordinary base64 decoder mangles these strings.
+
+local TALEX_LEVEL = 60          -- level used to initialise the view loadout
+
+-- VIEW_TRAIT_CONFIG_ID is a client constant (documented as -3). Prefer the
+-- real constant when the build exposes it, fall back to the documented value.
+local function ViewConfigID()
+    local c = rawget(_G, "Constants")
+    local t = type(c) == "table" and c.TraitConsts
+    if type(t) == "table" and type(t.VIEW_TRAIT_CONFIG_ID) == "number" then
+        return t.VIEW_TRAIT_CONFIG_ID
+    end
+    return -3
+end
+
+-- Every specID this client knows. Two routes on purpose: the documented
+-- enumeration, and a sweep of the numeric range that the client accepts.
+-- The sweep is what makes the export complete on a custom server: a spec that
+-- GetAllClassIDs does not list would otherwise be missing from the dictionary
+-- and its import strings would stay undecodable.
+local function CollectSpecIDs()
+    local seen, out = {}, {}
+    local function add(id)
+        if type(id) == "number" and id > 0 and not seen[id] then
+            seen[id] = true
+            out[#out + 1] = id
+        end
+    end
+    local cs = rawget(_G, "C_SpecializationInfo")
+    if type(cs) == "table" then
+        local ok, classIDs = pcall(function() return cs.GetAllClassIDs and cs.GetAllClassIDs() end)
+        if ok and type(classIDs) == "table" then
+            for _, classID in ipairs(classIDs) do
+                local okS, specs = pcall(function() return cs.GetSpecIDs and cs.GetSpecIDs(classID) end)
+                if okS and type(specs) == "table" then
+                    for _, specID in ipairs(specs) do add(specID) end
+                end
+            end
+        end
+        -- active spec of the current character. GetSpecialization() returns an
+        -- INDEX, and the specID lives behind GetSpecializationInfo — passing the
+        -- index around would look like a valid id (1..4) and pollute the sweep.
+        local okA, specIndex = pcall(function() return cs.GetSpecialization and cs.GetSpecialization() end)
+        if okA and type(specIndex) == "number" and type(cs.GetSpecializationInfo) == "function" then
+            local okI, specID = pcall(cs.GetSpecializationInfo, specIndex)
+            if okI then add(specID) end
+        end
+    end
+    local nEnum = #out
+    -- numeric sweep: GetTraitTreeForSpec() is the filter that rejects non-specs
+    local cc = rawget(_G, "C_ClassTalents")
+    if type(cc) == "table" and type(cc.GetTraitTreeForSpec) == "function" then
+        for id = 1400, 1600 do
+            if not seen[id] then
+                local ok, treeID = pcall(cc.GetTraitTreeForSpec, id)
+                if ok and type(treeID) == "number" and treeID > 0 then add(id) end
+            end
+        end
+    end
+    return out, nEnum
+end
+
+-- Human name of one trait entry: overrideName first (the client's own label),
+-- then the spell name behind the definition.
+local function EntryName(configID, entryID)
+    local ct = rawget(_G, "C_Traits")
+    if type(ct) ~= "table" then return nil end
+    local okE, entry = pcall(ct.GetEntryInfo, configID, entryID)
+    if not okE or type(entry) ~= "table" or type(entry.definitionID) ~= "number" then
+        return nil
+    end
+    local okD, def = pcall(ct.GetDefinitionInfo, entry.definitionID)
+    if not okD or type(def) ~= "table" then return nil end
+    if type(def.overrideName) == "string" and def.overrideName ~= "" then
+        return def.overrideName
+    end
+    local spellID = def.spellID or def.overriddenSpellID
+    local cs = rawget(_G, "C_Spell")
+    if type(spellID) == "number" and type(cs) == "table" then
+        local okS, nm = pcall(cs.GetSpellName, spellID)
+        if okS and type(nm) == "string" and nm ~= "" then return nm end
+    end
+    return nil
+end
+
+-- One node: the fields the decoder needs, plus names for display.
+local function ReadNode(configID, nodeID)
+    local ct = rawget(_G, "C_Traits")
+    local ok, node = pcall(ct.GetNodeInfo, configID, nodeID)
+    if not ok or type(node) ~= "table" then return nil end
+    local rec = {
+        id = nodeID,
+        max = tonumber(node.maxRanks) or 1,
+        type = tonumber(node.type) or 0,
+        entries = {},
+    }
+    -- entryIDs matter for choice nodes: the string stores an INDEX into this
+    -- list, so the order must be preserved exactly as the client gives it
+    if type(node.entryIDs) == "table" then
+        for i, entryID in ipairs(node.entryIDs) do
+            if i <= 4 then
+                rec.entries[i] = entryID
+                local nm = EntryName(configID, entryID)
+                if nm then rec.name = rec.name or nm end
+            end
+        end
+    end
+    return rec
+end
+
+-- Export the tree of one specID. Returns a record or nil + reason.
+local function ExportOneSpec(specID, level)
+    local cc = rawget(_G, "C_ClassTalents")
+    local ct = rawget(_G, "C_Traits")
+    if type(cc) ~= "table" or type(ct) ~= "table" then return nil, "no API" end
+    local okT, treeID = pcall(cc.GetTraitTreeForSpec, specID)
+    if not okT or type(treeID) ~= "number" or treeID <= 0 then return nil, "no tree" end
+
+    -- The view loadout is the documented way to read a tree without being that
+    -- spec (Blizzard's own ViewLoadout does exactly this).
+    if type(cc.InitializeViewLoadout) == "function" then
+        local okI, err = pcall(cc.InitializeViewLoadout, specID, level or TALEX_LEVEL)
+        if not okI then return nil, "view loadout: " .. tostring(err):sub(1, 60) end
+    end
+    local configID = ViewConfigID()
+
+    local okN, nodeIDs = pcall(ct.GetTreeNodes, treeID)
+    if not okN or type(nodeIDs) ~= "table" or #nodeIDs == 0 then return nil, "no nodes" end
+
+    local nodes, withName = {}, 0
+    for _, nodeID in ipairs(nodeIDs) do
+        local rec = ReadNode(configID, nodeID)
+        if rec then
+            nodes[#nodes + 1] = rec
+            if rec.name then withName = withName + 1 end
+        else
+            -- a node the client refuses to describe would shift every following
+            -- node in the bit stream, so keep a placeholder instead of skipping:
+            -- the decoder needs the POSITION, not the data
+            nodes[#nodes + 1] = { id = nodeID, max = 1, type = 0, entries = {}, missing = true }
+        end
+    end
+    return {
+        treeID = treeID,
+        count = #nodes,
+        named = withName,
+        nodes = nodes,
+    }, nil
+end
+
+function J.ExportTalentTrees(level)
+    local ct = rawget(_G, "C_Traits")
+    local cc = rawget(_G, "C_ClassTalents")
+    if type(ct) ~= "table" or type(cc) ~= "table" then
+        J.Say("talex: C_Traits/C_ClassTalents unavailable in this client")
+        return
+    end
+    level = tonumber(level) or TALEX_LEVEL
+    local specIDs, nEnum = CollectSpecIDs()
+    J.Say(("talex: %d specIDs to try (%d from class enumeration), level=%d, view configID=%d")
+        :format(#specIDs, nEnum, level, ViewConfigID()))
+
+    local db = J.DB()
+    if not db then J.Say("talex: no SavedVariables table") return end
+    db.debug = db.debug or {}
+    local trees, done, failed = {}, 0, {}
+
+    for _, specID in ipairs(specIDs) do
+        local rec, why = ExportOneSpec(specID, level)
+        if rec then
+            trees[tostring(specID)] = rec
+            done = done + 1
+        else
+            failed[#failed + 1] = specID .. ":" .. tostring(why)
+        end
+    end
+
+    db.debug.talentTrees = {
+        at = time(),
+        build = tostring(select(3, GetBuildInfo())),
+        level = level,
+        specs = done,
+        failed = table.concat(failed, ","):sub(1, 400),
+        trees = trees,
+    }
+    local totalNodes, named = 0, 0
+    for _, tr in pairs(trees) do
+        totalNodes = totalNodes + (tr.count or 0)
+        named = named + (tr.named or 0)
+    end
+    J.Say(("talex: exported %d tree(s), %d nodes (%d with names); failed: %s")
+        :format(done, totalNodes, named,
+            (#failed > 0 and table.concat(failed, ","):sub(1, 160)) or "none"))
+    J.Say("talex: dictionary is in SavedVariables → debug.talentTrees (logout to write the file)")
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- events (INSPECT_READY arrives on its own frame: the main one handles enough)
 -- ─────────────────────────────────────────────────────────────────────────────
 
