@@ -42,14 +42,19 @@
 NSP_INSPECT = NSP_INSPECT or {}
 local J = NSP_INSPECT
 
--- Pacing between requests. Field runs 19.11.2026: the queue was saturated
--- (14 queued, 13 sent) so the gap — not the player count — was the bottleneck,
--- while timeouts stayed at 0, i.e. the server was NOT being flooded at 2.5-4.5 s.
--- Tightened to 1.5-3.0 s; if `timeout` starts growing, this is the first knob
--- to turn back.
-local GAP_MIN, GAP_MAX = 1.5, 3.0
+-- Pacing between requests. Полевые замеры 19.11.2026 (счётчики за все сессии):
+--   sent=614, ok=266 → КПД 43%, из потерь timeout всего 24 (3.9%).
+-- То есть сервер НЕ флудится даже на 1.5–3.0 с, а теряются запросы на том,
+-- что игрок уходит между отправкой и ответом (lostAfterEvent=300).
+-- Запас по таймаутам есть, поэтому шаг уменьшен: больше запросов в минуту.
+-- ⚠️ Если `timeout` вырастет выше ~10% от sent — вернуть 1.5/3.0.
+local GAP_MIN, GAP_MAX = 0.9, 1.8
 local PER_PLAYER_COOLDOWN = 6 * 3600   -- same player: at most once per 6 hours
-local MAX_QUEUE = 40                   -- pending requests, rest are dropped
+-- Очередь: сколько запросов копится. Было 40, но при шаге ~1 с это 40 секунд
+-- ожидания для последнего, и он гарантированно уходит до запроса. Подняли до
+-- 80 и ОДНОВРЕМЕННО ужесточили MAX_AGE (см. ниже) — держать длинную очередь
+-- имеет смысл только если старые записи в ней отбрасываются быстро.
+local MAX_QUEUE = 80                   -- pending requests, rest are dropped
 local MAX_PER_SESSION = 200            -- hard stop: never flood the server
 local MAX_GEAR = 2000                  -- snapshots kept in SavedVariables
 local SLOT_FIRST, SLOT_LAST = 1, 19
@@ -58,7 +63,11 @@ local TIMEOUT = 8                      -- seconds to wait for INSPECT_READY
 -- away. Field data 19.11.2026: with 60 s the queue processed ghosts — 35 of 52
 -- queued requests ended as "player gone" and 12 more lost the answer because
 -- the unit vanished between request and INSPECT_READY.
-local MAX_AGE = 20
+-- Запись в очереди живёт 12 с (было 20). Это ключевая правка: замер показал
+-- lostAfterEvent=300 из 348 потерь — сервер отвечает, но игрока уже нет.
+-- Долгая очередь при коротком шаге бессмысленна: к моменту запроса человека
+-- рядом уже нет, и вызов тратится впустую. 12 с = несколько шагов очереди.
+local MAX_AGE = 12
 
 -- Unit tokens worth searching when the token we queued has been reassigned.
 -- Measured 19.11.2026: 78 of 102 queued requests died on "unit changed" because

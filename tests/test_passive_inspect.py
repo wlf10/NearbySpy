@@ -158,11 +158,17 @@ class PassiveInspectTests(unittest.TestCase):
         self.assertEqual(self.notify_count(), 2)
 
     def test_queue_is_bounded(self):
+        # Очередь ограничена (MAX_QUEUE), и лишнее считается, а не копится
+        # молча. Граница вынесена в константу: она уже менялась (40 → 80),
+        # поэтому тест берёт предел ИЗ КОДА, а не дублирует число.
+        import re as _re
+        src = INSPECT_FILE.read_text(encoding="utf-8")
+        cap = int(_re.search(r"local MAX_QUEUE = (\d+)", src).group(1))
         self.g["UNITS"] = self.lua.eval(
             '{ target = { guid = "Player-1-00000001" } }')
-        # 60 distinct players queued while nothing can be processed
+        # cap+20 distinct players queued while nothing can be processed
         self.J["Request"]("target", "Ann-Realm")      # occupies the in-flight slot
-        for i in range(60):
+        for i in range(cap + 20):
             key = "P%d-Realm" % i
             self.db["players"][key] = self.lua.eval('{ name = "x", realm = "Realm" }')
             self.g["UNITS"]["target"]["guid"] = "Player-1-%08d" % (i + 2)
