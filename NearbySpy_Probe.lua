@@ -961,6 +961,94 @@ function J.TalexDiag()
     end
 end
 
+
+-- GROUND TRUTH: my own build string + the per-node ranks that produced it.
+--
+-- Why this exists: the bit layout of an import string cannot be reverse
+-- engineered from strings alone — several plausible layouts "mostly" fit and
+-- then drift. With one string AND its known node ranks, the layout becomes a
+-- solvable question instead of a guess.
+--
+-- The active config (not the view config) is the one that reports ranks:
+-- measured 19.11.2026 — view config returns no node data at all, while the
+-- active config returns ranksPurchased/maxRanks correctly even though its
+-- `type` field comes back 0 for every node (this client does not fill it, and
+-- on a classic tree all nodes ARE single anyway).
+function J.TalexTruth()
+    local ct = rawget(_G, "C_Traits")
+    local cc = rawget(_G, "C_ClassTalents")
+    local cs = rawget(_G, "C_SpecializationInfo")
+    if type(ct) ~= "table" or type(cc) ~= "table" or type(cs) ~= "table" then
+        J.Say("talex truth: API missing")
+        return
+    end
+    local specIndex = select(1, cs.GetSpecialization and cs.GetSpecialization() or nil)
+    local specID = select(1, cs.GetSpecializationInfo and cs.GetSpecializationInfo(specIndex) or nil)
+    local configID = select(1, cc.GetActiveConfigID and cc.GetActiveConfigID() or nil)
+    if type(specID) ~= "number" or type(configID) ~= "number" then
+        J.Say("talex truth: no active spec/config")
+        return
+    end
+    local treeID = select(1, cc.GetTraitTreeForSpec(specID) or nil)
+    if type(treeID) ~= "number" then
+        J.Say("talex truth: no tree for spec " .. tostring(specID))
+        return
+    end
+    -- строка СВОЕГО билда: тем же API, что и у всех
+    local okS, imp = pcall(ct.GenerateImportString, configID)
+    if not okS or type(imp) ~= "string" or imp == "" then
+        J.Say("talex truth: GenerateImportString failed: " .. tostring(imp):sub(1, 80))
+        return
+    end
+    local okN, nodeIDs = pcall(ct.GetTreeNodes, treeID)
+    if not okN or type(nodeIDs) ~= "table" then
+        J.Say("talex truth: GetTreeNodes failed")
+        return
+    end
+    -- ранги по узлам: это эталон для проверки раскладки битов
+    local nodes, totalRanks, selected = {}, 0, 0
+    for _, nodeID in ipairs(nodeIDs) do
+        local okI, n = pcall(ct.GetNodeInfo, configID, nodeID)
+        if okI and type(n) == "table" then
+            local maxR = tonumber(n.maxRanks) or 0
+            local bought = tonumber(n.ranksPurchased) or 0
+            local active = tonumber(n.activeRank) or 0
+            if bought > 0 or active > 0 then selected = selected + 1 end
+            totalRanks = totalRanks + bought + math.max(active - bought, 0)
+            nodes[#nodes + 1] = {
+                id = nodeID, max = maxR, bought = bought, active = active,
+                granted = math.max(active - bought, 0),
+                entries = (type(n.entryIDs) == "table") and n.entryIDs[1] or nil,
+                name = (function()
+                    if type(n.entryIDs) ~= "table" or not n.entryIDs[1] then return nil end
+                    return EntryName(configID, n.entryIDs[1])
+                end)(),
+            }
+        else
+            nodes[#nodes + 1] = { id = nodeID, max = 0, bought = -1, active = -1 }
+        end
+    end
+    local db = J.DB()
+    if db then
+        db.debug = db.debug or {}
+        db.debug.talentTruth = {
+            at = time(),
+            build = tostring(select(3, GetBuildInfo())),
+            specID = specID, treeID = treeID, configID = configID,
+            importString = imp,
+            importLen = #imp,
+            nodeCount = #nodeIDs,
+            selected = selected,
+            totalRanks = totalRanks,
+            nodes = nodes,
+        }
+    end
+    J.Say(("talex truth: spec=%d tree=%d config=%d — %d nodes, %d touched, %d ranks")
+        :format(specID, treeID, configID, #nodeIDs, selected, totalRanks))
+    J.Say("talex truth: own string (" .. #imp .. " chars): " .. imp)
+    J.Say("talex truth: ground truth is in SavedVariables → debug.talentTruth")
+end
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- events (INSPECT_READY arrives on its own frame: the main one handles enough)
 -- ─────────────────────────────────────────────────────────────────────────────
