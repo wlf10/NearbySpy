@@ -22,8 +22,12 @@ NSP_ITEMS = NSP_ITEMS or {}
 local J = NSP_ITEMS
 
 local GAP = 0.12        -- пауза между предметами
-local RETRY = 0.25      -- сколько ждать данные после запроса
-local RETRIES = 3       -- попыток на один предмет
+-- Ожидание данных после запроса. Было 0.25 × 3 попытки = 0.75 с: для чужих
+-- предметов этого мало — данные тянутся с сервера, и прогон успевал прочитать
+-- только имя (оно не требует кэша). Стало ~2.1 с в худшем случае; платят только
+-- те предметы, что не отдались сразу.
+local RETRY = 0.35      -- сколько ждать данные после запроса
+local RETRIES = 6       -- попыток на один предмет
 -- Потолок за один прогон. Изначально стоял 800, и на живых данных это
 -- оказалось мало: предметов в снимках 1460, то есть прогон обрывался на
 -- половине и требовал второго захода. Замер скорости: 800 предметов за 178 с
@@ -130,6 +134,46 @@ end
 
 -- ── чтение имени у клиента ──────────────────────────────────────────────────
 
+-- Тултип предмета: клиент собирает его сам из тех же данных, что показывает
+-- игроку, поэтому это самый надёжный путь к «всем свойствам» — включая броню,
+-- урон и статы. Почему не GetItemStats: он принимает ССЫЛКУ, а GetItemInfo
+-- отдаёт её только для загруженных данных. Имя же доступно через
+-- GetItemNameByID БЕЗ загрузки, из-за чего прежний код считал предмет
+-- собранным и терял свойства навсегда (замер 19.11.2026: stats нет ни у одной
+-- из 1100 записей items).
+--
+-- Формат ответа зависит от билда, поэтому поля читаются защитно: берём любые
+-- непустые текстовые left/right и складываем строки как есть. Разбирать их по
+-- смыслу будет сайт, у аддона нет задачи понимать «+12 к силе».
+local function ReadTooltip(id)
+    local ti = rawget(_G, "C_TooltipInfo")
+    if type(ti) ~= "table" or type(ti.GetItemByID) ~= "function" then return nil, 0 end
+    local ok, data = pcall(ti.GetItemByID, id)
+    if not ok or type(data) ~= "table" then return nil, 0 end
+    local lines = data.lines
+    if type(lines) ~= "table" then return nil, 0 end
+    local out = {}
+    for _, line in ipairs(lines) do
+        if type(line) == "table" then
+            local left = line.leftText or line.text or line.left or line.string
+            local right = line.rightText or line.right
+            if type(left) == "string" and left ~= "" then
+                local txt = left
+                if type(right) == "string" and right ~= "" then
+                    txt = txt .. " | " .. right
+                end
+                -- 200, не 120: строка бонуса комплекта («Комплект (5 |4предмет:…):
+                -- Повышает вероятность…») длиннее 120, и обрезка ломала разбор.
+                out[#out + 1] = txt:sub(1, 200)
+            end
+        end
+    end
+    if #out == 0 then return nil, #lines end
+    -- 2000: замер на 2052 живых тултипах — максимум 524 символа, запас на
+    -- комплектные предметы с шестью бонусами.
+    return table.concat(out, "\n"):sub(1, 2000), #lines
+end
+
 -- Полные свойства предмета по ID: имя + тип/подтип + слот + качество + ilvl.
 --
 -- Два источника и оба нужны:
@@ -204,6 +248,7 @@ local function ReadItem(id)
     if type(ci.GetItemInfo) == "function" and type(ci.GetItemStats) == "function" then
         local okI, _, link = pcall(ci.GetItemInfo, id)
         if okI and type(link) == "string" and link ~= "" then
+            rec.haslink = true
             if not (canaccessvalue and not canaccessvalue(link)) then
                 local okS, stats = pcall(ci.GetItemStats, link)
                 if okS and type(stats) == "table" then
@@ -222,6 +267,15 @@ local function ReadItem(id)
                 end
             end
         end
+    end
+
+    -- Тултип: независимый от кэша путь к свойствам. Пишем всегда, когда клиент
+    -- его отдал, — именно он несёт броню/урон/статы, которых нет в GetItemStats
+    -- без загруженной ссылки.
+    local tip, tipCount = ReadTooltip(id)
+    if tip then
+        rec.tip = tip
+        rec.tipc = tipCount
     end
 
     return rec
@@ -246,7 +300,7 @@ end
 -- Все item_id из снимков экипировки, для которых ещё нет имени.
 -- Источник — сами снимки: аддон уже собрал их при встречах, отдельного
 -- хранилища ID не нужно.
-local function CollectUnknown(db, limit)
+local function CollectUnknown(db, limit, force)
     local names = NamesFor(db, false) or {}
     local props = type(db.itemProps) == "table" and db.itemProps or {}
     local seen, out = {}, {}
@@ -254,11 +308,18 @@ local function CollectUnknown(db, limit)
         if type(p) == "table" and type(p.gear) == "table" and type(p.gear.ids) == "string" then
             for _, idTxt in p.gear.ids:gmatch("(%d+):(%d+)") do
                 local id = tonumber(idTxt)
-                -- спрашиваем, если нет ЛИБО имени, ЛИБО свойств: имена и
-                -- свойства собираются одним запросом, поэтому «нет свойств» —
-                -- такой же повод спросить, как «нет имени»
+                -- Спрашиваем, если нет имени ЛИБО нет ТУЛТИПА. Признак «собрано»
+                -- именно тултип: c/loc (тип и слот) приходят из GetItemInfoInstant
+                -- БЕЗ загрузки данных, поэтому есть у всех и о полноте свойств не
+                -- говорят. На этом уже обожглись (20.11.2026): критерий
+                -- `pr.c or pr.loc` пропустил 1880 предметов из 2036.
+                -- pr.notip — «пробовали, клиент не отдал»: повторно не долбим,
+                -- иначе каждый прогон тратит по 2 с на каждый такой предмет.
                 local key = id and tostring(id)
-                local missing = key and (not names[key] or not props[key])
+                local pr = key and props[key]
+                local hasTip = type(pr) == "table" and pr.tip ~= nil
+                local gaveUp = type(pr) == "table" and pr.notip ~= nil
+                local missing = key and (not names[key] or (not hasTip and not (gaveUp and not force)))
                 if id and id > 0 and not seen[id] and missing then
                     seen[id] = true
                     out[#out + 1] = id
@@ -287,12 +348,23 @@ local function Finish()
             asked = run.asked,
             ok = run.ok,
             fail = run.fail,
+            partial = run.partial or 0,
+            withTip = run.tip or 0,
+            withStats = run.stats or 0,
             total = collected,
             locale = LocaleKey(),
+            hasTooltipInfo = type(rawget(_G, "C_TooltipInfo")) == "table",
         }
     end
-    J.Say(("itemnames: [%s] спрошено %d, получено %d, без имени %d; в словаре %d имён в %d локалях")
-        :format(LocaleKey(), run.asked, run.ok, run.fail, collected, locs))
+    J.Say(("itemnames: [%s] спрошено %d, собрано %d, только имя %d, без ничего %d; в словаре %d имён в %d локалях")
+        :format(LocaleKey(), run.asked, run.ok, run.partial or 0, run.fail, collected, locs))
+    -- Раздельные счётчики нужны, чтобы отличить «тултип не работает» от
+    -- «GetItemStats не отдаёт статы»: без них оба случая выглядят как «пусто».
+    J.Say(("itemnames: из собранных — с тултипом %d, со stats %d")
+        :format(run.tip or 0, run.stats or 0))
+    if (run.tip or 0) == 0 and run.ok > 0 then
+        J.Say("itemnames: тултип не отдал ни строки — свойства придут только через GetItemStats (нужна загрузка данных)")
+    end
     if run.fail > 0 then
         J.Say("itemnames: часть ID клиент не знает — повторный запуск попробует снова")
     end
@@ -337,30 +409,48 @@ Step = function()
 
     local id = pending.id
     local rec = ReadItem(id)
-    -- имя — основной признак успеха: без него запись бесполезна для сайта
-    if rec and rec.name then
-        local db = J.DB()
-        if db then
-            local names = NamesFor(db, true)
-            if names then
-                -- имя отдельным словарём (как раньше), свойства — своим
-                names[tostring(id)] = rec.name
-            end
-            -- свойства предмета: тип, подтип, слот, качество, ilvl.
-            -- Отдельно от имён: имена по локалям, свойства — одинаковы везде.
-            db.itemProps = db.itemProps or {}
-            local props = db.itemProps[tostring(id)] or {}
-            if rec.c then props.c = rec.c end
-            if rec.sc then props.sc = rec.sc end
-            if rec.t then props.t = rec.t end
-            if rec.st then props.st = rec.st end
-            if rec.loc then props.loc = rec.loc end
-            if rec.q then props.q = rec.q end
-            if rec.ilvl then props.ilvl = rec.ilvl end
-            if rec.stats then props.stats = rec.stats end
-            db.itemProps[tostring(id)] = props
-        end
+    local db = J.DB()
+
+    -- Имя сохраняем СРАЗУ, как только оно пришло: GetItemNameByID не требует
+    -- загруженных данных, и терять имя из-за того, что свойства ещё не приехали,
+    -- незачем.
+    if db and rec and rec.name then
+        local names = NamesFor(db, true)
+        if names then names[tostring(id)] = rec.name end
+    end
+
+    -- Свойства НАКАПЛИВАЕМ: каждый проход дописывает то, что клиент успел
+    -- отдать. Раньше props писались только на «успешном» проходе, а успех
+    -- наступал по имени — поэтому проход без загруженного кэша оставлял
+    -- предмет без свойств навсегда.
+    if db and rec then
+        db.itemProps = db.itemProps or {}
+        local props = db.itemProps[tostring(id)] or {}
+        if rec.c then props.c = rec.c end
+        if rec.sc then props.sc = rec.sc end
+        if rec.t then props.t = rec.t end
+        if rec.st then props.st = rec.st end
+        if rec.loc then props.loc = rec.loc end
+        if rec.q then props.q = rec.q end
+        if rec.ilvl then props.ilvl = rec.ilvl end
+        if rec.stats then props.stats = rec.stats end
+        if rec.tip then props.tip = rec.tip end
+        if rec.tipc then props.tipc = rec.tipc end
+        if rec.cached then props.cached = true end
+        props.at = time()
+        db.itemProps[tostring(id)] = props
+    end
+
+    -- «Собрано» = клиент отдал СВОЙСТВА, а не только имя. Иначе прогон
+    -- заканчивался на первом же кадре, когда кэш ещё пуст, и GetItemStats было
+    -- не с чем вызывать (он требует ссылку из GetItemInfo).
+    local haveProps = rec ~= nil and (rec.tip or rec.stats or rec.cached
+        or rec.c or rec.loc)
+
+    if rec and rec.name and haveProps then
         run.ok = run.ok + 1
+        if rec.tip then run.tip = (run.tip or 0) + 1 end
+        if rec.stats then run.stats = (run.stats or 0) + 1 end
         pending = nil
         -- прогресс: прогон на 1500+ предметов идёт минутами, и молчание всё
         -- это время выглядит как зависание
@@ -376,6 +466,23 @@ Step = function()
     if pending.tries < RETRIES then
         RequestData(id)
         After(RETRY, Step)
+        return
+    end
+    -- Попытки кончились. Имя могли получить, свойства — нет: это отдельный
+    -- счётчик, иначе «без свойств» неотличимо от «предмета нет в клиенте».
+    if rec and rec.name then
+        run.partial = (run.partial or 0) + 1
+        -- Помечаем «тултипа не будет»: без метки предмет попадал бы в очередь
+        -- каждого следующего прогона и съедал по ~2 с впустую.
+        if db then
+            db.itemProps = db.itemProps or {}
+            local props = db.itemProps[tostring(id)] or {}
+            props.notip = 1
+            props.at = time()
+            db.itemProps[tostring(id)] = props
+        end
+        pending = nil
+        After(GAP, Step)
         return
     end
     -- клиент не отдал даже имя: считаем пропущенным, но свойства могли прийти
@@ -400,7 +507,9 @@ Step = function()
     After(GAP, Step)
 end
 
--- /nspy itemnames [max] — спросить имена для неизвестных ID
+-- /nspy itemnames [max] — спросить имена и свойства для неизвестных ID
+-- /nspy itemnames all       — без лимита
+-- /nspy itemnames retry     — заново спросить те, что клиент не отдал (notip)
 function J.Run(limit)
     if run then
         run = nil
@@ -416,15 +525,41 @@ function J.Run(limit)
         J.Say("itemnames: в этом клиенте нет C_Item — имена недоступны")
         return
     end
-    local n = tonumber(limit) or MAX_PER_RUN
+    -- Аргументы: число = лимит, "all" = весь справочник, "retry" = переспросить
+    -- помеченные notip (клиент в прошлый раз не отдал тултип).
+    local arg = type(limit) == "string" and limit:lower() or ""
+    local force = arg:find("retry") ~= nil
+    local n
+    if arg:find("all") then
+        -- «all» — явное требование взять весь справочник. Потолок MAX_PER_RUN
+        -- остаётся страховкой от гигантского файла, но не мешает явной команде:
+        -- 2000 на живом цензе (1880 ID) хватает, а с ростом ценза — уже нет.
+        n = 10000
+    else
+        n = tonumber(arg) or MAX_PER_RUN
+    end
     if n < 1 then n = 1 end
-    if n > MAX_PER_RUN then n = MAX_PER_RUN end
-    queue = CollectUnknown(db, n)
+    if not arg:find("all") and n > MAX_PER_RUN then n = MAX_PER_RUN end
+    if force then
+        -- Снимаем метки: иначе retry не нашёл бы ни одного предмета
+        local props = type(db.itemProps) == "table" and db.itemProps or nil
+        local cleared = 0
+        if props then
+            for _, pr in pairs(props) do
+                if type(pr) == "table" and pr.notip then
+                    pr.notip = nil
+                    cleared = cleared + 1
+                end
+            end
+        end
+        J.Say(("itemnames: снято меток notip %d — переспрошу"):format(cleared))
+    end
+    queue = CollectUnknown(db, n, force)
     if #queue == 0 then
-        J.Say("itemnames: все известные ID уже имеют имена")
+        J.Say("itemnames: все известные ID уже имеют имена и свойства (retry — переспросить неотдавшиеся)")
         return
     end
-    run = { asked = 0, ok = 0, fail = 0 }
+    run = { asked = 0, ok = 0, fail = 0, partial = 0, tip = 0, stats = 0 }
     local have = 0
     local cur = NamesFor(db, false)
     if cur then for _ in pairs(cur) do have = have + 1 end end

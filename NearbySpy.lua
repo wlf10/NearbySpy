@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.5.7
+    NearbySpy 1.5.10
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -6180,8 +6180,10 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     elseif msg == "itemnames" or msg:match("^itemnames%s") then
         -- Имена предметов по ID: спрашиваются у клиента ПО ЗАПРОСУ, потому что
         -- в SavedVariables экипировка лежит числами, а имя есть только в игре.
-        --   /nspy itemnames         спросить до 800 неизвестных ID
+        --   /nspy itemnames         спросить неизвестные ID (до 2000)
         --   /nspy itemnames 200     ограничить прогон
+        --   /nspy itemnames all     весь справочник, без потолка
+        --   /nspy itemnames retry   переспросить тех, кто не отдал тултип
         --   /nspy itemnames show    показать, что уже собрано
         if type(NSP_ITEMS) ~= "table" then
             P("itemnames: модуль не загружен (NearbySpy_Items.lua)")
