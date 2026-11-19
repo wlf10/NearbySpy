@@ -732,6 +732,13 @@ local function ReadNode(configID, nodeID)
 end
 
 -- Export the tree of one specID. Returns a record or nil + reason.
+--
+-- ⚠️ View loadout is ASYNCHRONOUS: InitializeViewLoadout() only STARTS the
+-- switch, and reading GetNodeInfo in the same frame returns the PREVIOUS config
+-- (measured 19.11.2026: every node came back with type=0 and a single entryID,
+-- which is the "not ready" shape — real trees have Tiered and Selection nodes).
+-- So this is called one spec at a time from a paced loop (see J.ExportTalentTrees),
+-- never in a tight for-loop.
 local function ExportOneSpec(specID, level)
     local cc = rawget(_G, "C_ClassTalents")
     local ct = rawget(_G, "C_Traits")
@@ -739,38 +746,57 @@ local function ExportOneSpec(specID, level)
     local okT, treeID = pcall(cc.GetTraitTreeForSpec, specID)
     if not okT or type(treeID) ~= "number" or treeID <= 0 then return nil, "no tree" end
 
-    -- The view loadout is the documented way to read a tree without being that
-    -- spec (Blizzard's own ViewLoadout does exactly this).
-    if type(cc.InitializeViewLoadout) == "function" then
-        local okI, err = pcall(cc.InitializeViewLoadout, specID, level or TALEX_LEVEL)
-        if not okI then return nil, "view loadout: " .. tostring(err):sub(1, 60) end
-    end
     local configID = ViewConfigID()
-
     local okN, nodeIDs = pcall(ct.GetTreeNodes, treeID)
     if not okN or type(nodeIDs) ~= "table" or #nodeIDs == 0 then return nil, "no nodes" end
 
-    local nodes, withName = {}, 0
+    local nodes, withName, types = {}, 0, {}
     for _, nodeID in ipairs(nodeIDs) do
         local rec = ReadNode(configID, nodeID)
         if rec then
             nodes[#nodes + 1] = rec
             if rec.name then withName = withName + 1 end
+            types[rec.type] = (types[rec.type] or 0) + 1
         else
             -- a node the client refuses to describe would shift every following
             -- node in the bit stream, so keep a placeholder instead of skipping:
             -- the decoder needs the POSITION, not the data
             nodes[#nodes + 1] = { id = nodeID, max = 1, type = 0, entries = {}, missing = true }
+            types.missing = (types.missing or 0) + 1
         end
     end
+    -- типы одним полем: по нему видно, отдал ли клиент настоящие Tiered/Selection
+    local typeList = {}
+    for t, n in pairs(types) do typeList[#typeList + 1] = tostring(t) .. ":" .. n end
+    table.sort(typeList)
     return {
         treeID = treeID,
         count = #nodes,
         named = withName,
+        types = table.concat(typeList, " "),
         nodes = nodes,
     }, nil
 end
 
+-- Enum values, so the export says what the numbers MEAN instead of leaving a
+-- bare 0/1/2 that has to be guessed later.
+local function TypeEnumDump()
+    local e = rawget(_G, "Enum")
+    local t = type(e) == "table" and e.TraitNodeType
+    if type(t) ~= "table" then return "no Enum.TraitNodeType" end
+    local parts = {}
+    for k, v in pairs(t) do
+        if type(v) == "number" then parts[#parts + 1] = k .. "=" .. v end
+    end
+    table.sort(parts)
+    return table.concat(parts, " ")
+end
+
+local TALEX_GAP = 0.4      -- seconds between specs: the view switch must settle
+
+-- Paced export: one spec per timer tick. A tight loop reads the previous
+-- config for every spec (see the note above ExportOneSpec), which silently
+-- produces trees with no Tiered/Selection nodes.
 function J.ExportTalentTrees(level)
     local ct = rawget(_G, "C_Traits")
     local cc = rawget(_G, "C_ClassTalents")
@@ -780,41 +806,64 @@ function J.ExportTalentTrees(level)
     end
     level = tonumber(level) or TALEX_LEVEL
     local specIDs, nEnum = CollectSpecIDs()
-    J.Say(("talex: %d specIDs to try (%d from class enumeration), level=%d, view configID=%d")
-        :format(#specIDs, nEnum, level, ViewConfigID()))
+    J.Say(("talex: %d specIDs (%d from class enumeration), level=%d, config=%d, gap=%.1fs — ~%.0fs total")
+        :format(#specIDs, nEnum, level, ViewConfigID(), TALEX_GAP, #specIDs * TALEX_GAP))
+    J.Say("talex: node types in this client — " .. TypeEnumDump())
 
     local db = J.DB()
     if not db then J.Say("talex: no SavedVariables table") return end
     db.debug = db.debug or {}
-    local trees, done, failed = {}, 0, {}
+    local state = { trees = {}, failed = {}, i = 0, level = level,
+                    specIDs = specIDs, done = 0 }
 
-    for _, specID in ipairs(specIDs) do
-        local rec, why = ExportOneSpec(specID, level)
-        if rec then
-            trees[tostring(specID)] = rec
-            done = done + 1
-        else
-            failed[#failed + 1] = specID .. ":" .. tostring(why)
+    local function finish()
+        local totalNodes, named = 0, 0
+        for _, tr in pairs(state.trees) do
+            totalNodes = totalNodes + (tr.count or 0)
+            named = named + (tr.named or 0)
+        end
+        db.debug.talentTrees = {
+            at = time(),
+            build = tostring(select(3, GetBuildInfo())),
+            level = state.level,
+            types = TypeEnumDump(),
+            specs = state.done,
+            failed = table.concat(state.failed, ","):sub(1, 400),
+            trees = state.trees,
+        }
+        J.Say(("talex: exported %d tree(s), %d nodes (%d named)")
+            :format(state.done, totalNodes, named))
+        J.Say("talex: dictionary is in SavedVariables → debug.talentTrees (logout writes the file)")
+        if #state.failed > 0 then
+            J.Say("talex: failed — " .. table.concat(state.failed, ","):sub(1, 200))
         end
     end
 
-    db.debug.talentTrees = {
-        at = time(),
-        build = tostring(select(3, GetBuildInfo())),
-        level = level,
-        specs = done,
-        failed = table.concat(failed, ","):sub(1, 400),
-        trees = trees,
-    }
-    local totalNodes, named = 0, 0
-    for _, tr in pairs(trees) do
-        totalNodes = totalNodes + (tr.count or 0)
-        named = named + (tr.named or 0)
+    local step      -- forward
+    step = function()
+        state.i = state.i + 1
+        local specID = state.specIDs[state.i]
+        if not specID then finish() return end
+
+        local okInit, errInit = pcall(cc.InitializeViewLoadout, specID, state.level)
+        if not okInit then
+            state.failed[#state.failed + 1] = specID .. ":init"
+            After(TALEX_GAP, step)
+            return
+        end
+        -- the switch needs a frame (or several) to land before the nodes are read
+        After(TALEX_GAP, function()
+            local rec, why = ExportOneSpec(specID, state.level)
+            if rec then
+                state.trees[tostring(specID)] = rec
+                state.done = state.done + 1
+            else
+                state.failed[#state.failed + 1] = specID .. ":" .. tostring(why)
+            end
+            step()
+        end)
     end
-    J.Say(("talex: exported %d tree(s), %d nodes (%d with names); failed: %s")
-        :format(done, totalNodes, named,
-            (#failed > 0 and table.concat(failed, ","):sub(1, 160)) or "none"))
-    J.Say("talex: dictionary is in SavedVariables → debug.talentTrees (logout to write the file)")
+    step()
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
