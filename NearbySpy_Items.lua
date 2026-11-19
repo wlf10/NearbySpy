@@ -196,6 +196,34 @@ local function ReadItem(id)
         rec.cached = ok and cached == true
     end
 
+    -- Статы: C_Item.GetItemStats принимает ССЫЛКУ, не ID. Ссылку даёт
+    -- GetItemInfo (второй возврат). Ключи статов — числа внутреннего enum
+    -- клиента, названий в исходниках нет: на Forever значения могут отличаться
+    -- от retail, поэтому ключи сохраняются как есть, а их смысл выясняется по
+    -- собранным данным (см. /nspy itemstats).
+    if type(ci.GetItemInfo) == "function" and type(ci.GetItemStats) == "function" then
+        local okI, _, link = pcall(ci.GetItemInfo, id)
+        if okI and type(link) == "string" and link ~= "" then
+            if not (canaccessvalue and not canaccessvalue(link)) then
+                local okS, stats = pcall(ci.GetItemStats, link)
+                if okS and type(stats) == "table" then
+                    local list = {}
+                    for k, v in pairs(stats) do
+                        -- ключ — число (enum) или строка; значение — число
+                        if type(v) == "number" and v ~= 0 then
+                            local key = (type(k) == "number") and k or nil
+                            if key then list[#list + 1] = key .. ":" .. v end
+                        end
+                    end
+                    if #list > 0 then
+                        table.sort(list)
+                        rec.stats = table.concat(list, ","):sub(1, 200)
+                    end
+                end
+            end
+        end
+    end
+
     return rec
 end
 
@@ -329,6 +357,7 @@ Step = function()
             if rec.loc then props.loc = rec.loc end
             if rec.q then props.q = rec.q end
             if rec.ilvl then props.ilvl = rec.ilvl end
+            if rec.stats then props.stats = rec.stats end
             db.itemProps[tostring(id)] = props
         end
         run.ok = run.ok + 1
@@ -362,6 +391,7 @@ Step = function()
             if rec.loc then props.loc = rec.loc end
             if rec.q then props.q = rec.q end
             if rec.ilvl then props.ilvl = rec.ilvl end
+            if rec.stats then props.stats = rec.stats end
             db.itemProps[tostring(id)] = props
         end
     end
@@ -401,6 +431,135 @@ function J.Run(limit)
     J.Say(("itemnames: [%s] неизвестных %d, в этой локали уже %d; ~%.0f мин")
         :format(LocaleKey(), #queue, have, #queue * GAP / 60))
     Step()
+end
+
+
+
+-- /nspy itemstats probe — ЧТО реально возвращает GetItemStats.
+--
+-- Первый прогон дал «статов нет ни у одного»: сбор писал только числовые ключи
+-- (type(k)=="number"), и если клиент отдаёт ключи СТРОКАМИ ("ITEM_MOD_...")
+-- или таблицу другой формы, всё молча отбрасывалось. Эта проба печатает
+-- сырой ответ на живом предмете — форма, ключи, типы.
+function J.ProbeStats()
+    local ci = rawget(_G, "C_Item")
+    if type(ci) ~= "table" or type(ci.GetItemStats) ~= "function" then
+        J.Say("probe: C_Item.GetItemStats отсутствует")
+        return
+    end
+    local db = J.DB()
+    -- берём любой предмет из снимков, лучше надетый на игрока
+    local id
+    for _, p in pairs(type(db) == "table" and db.players or {}) do
+        if type(p) == "table" and type(p.gear) == "table" and type(p.gear.ids) == "string" then
+            local first = p.gear.ids:match("%d+:(%d+)")
+            if first then id = tonumber(first) break end
+        end
+    end
+    if not id then J.Say("probe: нет снимков одежды") return end
+
+    J.Say("probe: предмет id=" .. id)
+
+    -- 1. ссылка
+    local link
+    if type(ci.GetItemInfo) == "function" then
+        local ok, _, l = pcall(ci.GetItemInfo, id)
+        if ok and type(l) == "string" then link = l end
+    end
+    if not link then
+        J.Say("probe: GetItemInfo не дал ссылку (данные не загружены?)")
+        return
+    end
+    J.Say("probe: ссылка = " .. link:sub(1, 90))
+
+    -- 2. что вернёт GetItemStats
+    local ok, stats = pcall(ci.GetItemStats, link)
+    if not ok then
+        J.Say("probe: ошибка GetItemStats: " .. tostring(stats):sub(1, 120))
+        return
+    end
+    if type(stats) ~= "table" then
+        J.Say("probe: GetItemStats вернул " .. type(stats) .. ", не таблицу")
+        return
+    end
+    local n = 0
+    local shown = 0
+    for k, v in pairs(stats) do
+        n = n + 1
+        if shown < 12 then
+            shown = shown + 1
+            J.Say(("probe:   ключ [%s] %s = [%s] %s")
+                :format(type(k), tostring(k), type(v), tostring(v):sub(0, 40)))
+        end
+    end
+    J.Say(("probe: всего записей в таблице: %d"):format(n))
+    if n == 0 then
+        J.Say("probe: таблица ПУСТАЯ — GetItemStats на этом клиенте не отдаёт статов")
+    end
+end
+
+-- /nspy itemstats — разбор ключей статов по собранным данным.
+--
+-- Зачем: C_Item.GetItemStats отдаёт таблицу «ключ enum клиента → значение», и
+-- НАЗВАНИЙ этих ключей в клиенте нет. На retail известно, что 3=Agility,
+-- 4=Strength, 7=Stamina, но Forever — кастомный сервер, и слепо переносить
+-- retail-таблицу нельзя: при ошибке статы на сайте будут перепутаны.
+--
+-- Поэтому смотрим ФАКТЫ: какие ключи реально встречаются, с какими пределами
+-- значений и на каких предметах. По этим данным ключ опознаётся однозначно:
+--   * Strength/Agility/Stamina/Intellect/Spirit — десятки на высоких уровнях;
+--   * крит/хаст/меткость — небольшие числа;
+--   * броня — сотни, только на броне.
+function J.ReportStats()
+    local db = J.DB()
+    if not db or type(db.itemProps) ~= "table" then
+        J.Say("itemstats: свойств ещё нет — запусти /nspy itemnames")
+        return
+    end
+    local names = NamesFor(db, false) or {}
+    local byKey = {}   -- key → { count, max, sample={id=value} }
+    local total, withStats = 0, 0
+    for id, pr in pairs(db.itemProps) do
+        if type(pr) == "table" then
+            total = total + 1
+            local s = pr.stats
+            if type(s) == "string" and s ~= "" then
+                withStats = withStats + 1
+                for pair in s:gmatch("[^,]+") do
+                    local k, v = pair:match("^(%d+):(%-?%d+)$")
+                    if k then
+                        k, v = tonumber(k), tonumber(v)
+                        local e = byKey[k]
+                        if not e then e = { count = 0, max = 0, min = 1e9, sample = {} }
+                            byKey[k] = e end
+                        e.count = e.count + 1
+                        if v > e.max then e.max = v end
+                        if v < e.min then e.min = v end
+                        if #e.sample < 3 then
+                            e.sample[#e.sample + 1] = (names[tostring(id)] or ("#" .. id)) .. "=" .. v
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if withStats == 0 then
+        J.Say(("itemstats: свойств %d, но статов нет ни у одного — API не отдал"):format(total))
+        return
+    end
+    local keys = {}
+    for k in pairs(byKey) do keys[#keys + 1] = k end
+    table.sort(keys)
+    J.Say(("itemstats: предметов со статами %d из %d, разных ключей %d")
+        :format(withStats, total, #keys))
+    for _, k in ipairs(keys) do
+        local e = byKey[k]
+        J.Say(("  ключ %2d: предметов %3d, значения %d..%d, примеры: %s")
+            :format(k, e.count, e.min, e.max, table.concat(e.sample, "; ")))
+    end
+    if db.debug then
+        db.debug.itemStatsKeys = { at = time(), keys = #keys, withStats = withStats }
+    end
 end
 
 -- Отчёт без запросов: что уже собрано

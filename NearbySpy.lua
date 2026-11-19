@@ -6191,6 +6191,12 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             local okI, errI
             if arg == "show" or arg == "list" then
                 okI, errI = pcall(NSP_ITEMS.Report)
+            elseif arg == "stats" then
+                -- разбор ключей статов: какие enum-ключи реально приходят
+                okI, errI = pcall(NSP_ITEMS.ReportStats)
+            elseif arg == "probe" then
+                -- что ФАКТИЧЕСКИ возвращает GetItemStats (форма и типы ключей)
+                okI, errI = pcall(NSP_ITEMS.ProbeStats)
             else
                 okI, errI = pcall(NSP_ITEMS.Run, arg)
             end
