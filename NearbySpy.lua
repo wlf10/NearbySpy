@@ -2263,6 +2263,15 @@ local function Record(unit)
         y = y,
         source = "unit",
     })
+
+    -- Passive inspection (1.6.0): ask for this player's gear and talent build
+    -- in the background. Request() is cheap and idempotent — the real
+    -- NotifyInspect is queued and paced by NSP_INSPECT, because the server
+    -- drops inspect data when requests are flooded.
+    if NSP_INSPECT and type(NSP_INSPECT.Request) == "function" then
+        local okI, errI = pcall(NSP_INSPECT.Request, unit, name .. "-" .. realm)
+        if not okI then DbgErr("inspectRequest", errI) end
+    end
 end
 
 -- ============ passive world collection (1.5.0 — main mode) ============
@@ -6077,6 +6086,38 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         --   /nspy whotest              three send paths, 15 s each
         --   /nspy whotest gap 150 4    four button clicks, 150 s apart
         StartWhoTest(msg:match("^whotest%s+(.*)$"))
+    elseif msg == "gear" or msg:match("^gear%s") then
+        -- passive gear/talent snapshots taken on encounters (no window opened)
+        --   /nspy gear           status + counters
+        --   /nspy gear on|off    toggle collection
+        if type(NSP_INSPECT) ~= "table" then
+            P("gear: module is missing (NearbySpy_Inspect.lua not loaded)")
+        else
+            NSP_INSPECT.P, NSP_INSPECT.GetDB, NSP_INSPECT.DbgErr = P, GetDB, DbgErr
+            local mode = msg:match("^gear%s+(%a+)$")
+            if mode == "on" then
+                local okG, errG = pcall(NSP_INSPECT.Toggle, true)
+                if not okG then P("gear: " .. tostring(errG)) end
+            elseif mode == "off" then
+                local okG, errG = pcall(NSP_INSPECT.Toggle, false)
+                if not okG then P("gear: " .. tostring(errG)) end
+            else
+                local okG, errG = pcall(NSP_INSPECT.Report)
+                if not okG then P("gear: " .. tostring(errG)) end
+            end
+        end
+    elseif msg == "inspecttest" or msg:match("^inspecttest%s") then
+        -- diagnostic: can this build show gear and talents of another player?
+        --   /nspy inspecttest            target + mouseover + focus
+        --   /nspy inspecttest all        + nameplates + party, gap 2 max 10
+        -- Results: chat summary + full matrix in SV -> debug.inspect
+        if type(NSP_PROBE) == "table" and type(NSP_PROBE.Run) == "function" then
+            NSP_PROBE.P, NSP_PROBE.GetDB = P, GetDB
+            local okP, errP = pcall(NSP_PROBE.Run, msg:match("^inspecttest%s+(.*)$"))
+            if not okP then P("inspecttest: " .. tostring(errP)) end
+        else
+            P("inspecttest: probe module is missing (NearbySpy_Probe.lua not loaded)")
+        end
     elseif msg == "whostop" then
         if whoScan then
             FinishZoneScan("stopped manually")
@@ -6530,6 +6571,20 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         local db = GetDB()
         EnsureNameplates(db)
         ScheduleTick()
+        -- Inspect probe (/nspy inspecttest) is a separate chunk: it cannot see
+        -- this file's locals, so P and GetDB are injected the same way as the
+        -- journal's (see NearbySpy_Probe.lua header).
+        if type(NSP_PROBE) == "table" then
+            NSP_PROBE.P, NSP_PROBE.GetDB = P, GetDB
+        end
+        -- Passive inspector: same injection pattern (no UI, runs on encounters)
+        if type(NSP_INSPECT) == "table" then
+            NSP_INSPECT.P, NSP_INSPECT.GetDB, NSP_INSPECT.DbgErr = P, GetDB, DbgErr
+            -- counters are per session (see J.Start): /nspy gear then answers
+            -- "how did it go today", not "since installation"
+            local okS, errS = pcall(NSP_INSPECT.Start)
+            if not okS then DbgErr("inspectStart", errS) end
+        end
         -- Journal (1.5.7): open (or recover) this character's session. P and L
         -- are injected because the journal chunk cannot see this file's locals.
         if NSP_JOURNAL then
