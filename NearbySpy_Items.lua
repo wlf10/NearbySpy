@@ -24,7 +24,12 @@ local J = NSP_ITEMS
 local GAP = 0.12        -- пауза между предметами
 local RETRY = 0.25      -- сколько ждать данные после запроса
 local RETRIES = 3       -- попыток на один предмет
-local MAX_PER_RUN = 800 -- предохранитель: один запуск не должен висеть вечно
+-- Потолок за один прогон. Изначально стоял 800, и на живых данных это
+-- оказалось мало: предметов в снимках 1460, то есть прогон обрывался на
+-- половине и требовал второго захода. Замер скорости: 800 предметов за 178 с
+-- (~4.5/с), значит 2000 — это ~7 минут, приемлемо для явной команды.
+-- Потолок всё равно нужен: он страхует от зависания на гигантском файле.
+local MAX_PER_RUN = 2000
 
 local queue = {}        -- ID, которые надо спросить
 local pending = nil     -- {id=..., tries=...}
@@ -125,29 +130,73 @@ end
 
 -- ── чтение имени у клиента ──────────────────────────────────────────────────
 
--- Имя по ID. Оба пути в pcall: набор функций отличается от билда к билду,
--- и падать на отсутствующей не надо. Дополнительно снимаем привязку к
--- формату ссылки — она может быть секретной строкой в этом клиенте.
-local function NameOf(id)
+-- Полные свойства предмета по ID: имя + тип/подтип + слот + качество + ilvl.
+--
+-- Два источника и оба нужны:
+--   * C_Item.GetItemInfoInstant даёт тип/подтип/слот/иконку СРАЗУ, без загрузки
+--     данных — то есть «ткань/кожа/латы» и слот известны даже без кэша;
+--   * C_Item.GetItemNameByID / GetItemQualityByID / GetDetailedItemLevelInfo
+--     требуют загруженных данных, поэтому читаются внутри ContinueOnItemLoad.
+--
+-- subClassID — то, ради чего всё: 1=Cloth, 2=Leather, 3=Mail, 4=Plate для
+-- брони (classID=4). Строковый itemSubType локализован («Ткань»), поэтому
+-- едут оба: число для логики и фильтров, строка для показа.
+local function ReadItem(id)
     local ci = rawget(_G, "C_Item")
     if type(ci) ~= "table" then return nil end
+
+    local rec = { id = id }
+
+    -- мгновенная часть: не требует загрузки
+    if type(ci.GetItemInfoInstant) == "function" then
+        local ok, _, itemType, itemSubType, equipLoc, _, classID, subClassID =
+            pcall(ci.GetItemInfoInstant, id)
+        if ok then
+            if type(itemType) == "string" and itemType ~= "" then rec.t = itemType end
+            if type(itemSubType) == "string" and itemSubType ~= "" then rec.st = itemSubType end
+            if type(equipLoc) == "string" and equipLoc ~= "" then rec.loc = equipLoc end
+            if type(classID) == "number" and classID > 0 then rec.c = classID end
+            if type(subClassID) == "number" and subClassID > 0 then rec.sc = subClassID end
+        end
+    end
+
+    -- имя: несколько путей, набор отличается от билда к билду
     if type(ci.GetItemNameByID) == "function" then
         local ok, name = pcall(ci.GetItemNameByID, id)
         if ok and type(name) == "string" and name ~= "" then
             if not (canaccessvalue and not canaccessvalue(name)) then
-                return name
+                rec.name = name:sub(1, 120)
+                rec.iname = name:sub(1, 120)   -- совместимость с прежним полем
             end
         end
     end
-    if type(ci.GetItemInfo) == "function" then
+    if not rec.name and type(ci.GetItemInfo) == "function" then
         local ok, name = pcall(ci.GetItemInfo, id)
         if ok and type(name) == "string" and name ~= "" then
             if not (canaccessvalue and not canaccessvalue(name)) then
-                return name
+                rec.name = name:sub(1, 120)
+                rec.iname = name:sub(1, 120)
             end
         end
     end
-    return nil
+
+    -- качество и ilvl: тоже доступны по ID
+    if type(ci.GetItemQualityByID) == "function" then
+        local ok, q = pcall(ci.GetItemQualityByID, id)
+        if ok and type(q) == "number" and q >= 0 and q <= 7 then rec.q = q end
+    end
+    if type(ci.GetDetailedItemLevelInfo) == "function" then
+        local ok, lvl = pcall(ci.GetDetailedItemLevelInfo, id)
+        if ok and type(lvl) == "number" and lvl > 0 then rec.ilvl = lvl end
+    end
+
+    -- признак «данные загружены»: по нему решаем, ждать ли колбэка
+    if type(ci.IsItemDataCachedByID) == "function" then
+        local ok, cached = pcall(ci.IsItemDataCachedByID, id)
+        rec.cached = ok and cached == true
+    end
+
+    return rec
 end
 
 local function RequestData(id)
@@ -171,12 +220,18 @@ end
 -- хранилища ID не нужно.
 local function CollectUnknown(db, limit)
     local names = NamesFor(db, false) or {}
+    local props = type(db.itemProps) == "table" and db.itemProps or {}
     local seen, out = {}, {}
     for _, p in pairs(type(db.players) == "table" and db.players or {}) do
         if type(p) == "table" and type(p.gear) == "table" and type(p.gear.ids) == "string" then
             for _, idTxt in p.gear.ids:gmatch("(%d+):(%d+)") do
                 local id = tonumber(idTxt)
-                if id and id > 0 and not seen[id] and not names[tostring(id)] then
+                -- спрашиваем, если нет ЛИБО имени, ЛИБО свойств: имена и
+                -- свойства собираются одним запросом, поэтому «нет свойств» —
+                -- такой же повод спросить, как «нет имени»
+                local key = id and tostring(id)
+                local missing = key and (not names[key] or not props[key])
+                if id and id > 0 and not seen[id] and missing then
                     seen[id] = true
                     out[#out + 1] = id
                     if limit and #out >= limit then return out end
@@ -230,31 +285,86 @@ Step = function()
         run.asked = run.asked + 1
         RequestData(id)
         pending = { id = id, tries = 0 }
-        After(RETRY, Step)     -- данные приходят не мгновенно
+        -- ContinueOnItemLoad — официальный колбэк «данные предмета загружены»:
+        -- срабатывает и сразу, если уже в кэше, и позже, когда клиент догрузит.
+        -- Он надёжнее таймера с повторами (таймер оставлен ниже как страховка
+        -- на случай, если объект Item в билде отсутствует).
+        local used = false
+        local itemProto = rawget(_G, "Item")
+        if type(itemProto) == "table" and type(itemProto.CreateFromItemID) == "function" then
+            local okC, obj = pcall(itemProto.CreateFromItemID, itemProto, id)
+            if okC and type(obj) == "table" and type(obj.ContinueOnItemLoad) == "function" then
+                local okK = pcall(obj.ContinueOnItemLoad, obj, function()
+                    if not run or not pending or pending.id ~= id then return end
+                    After(0.05, Step)
+                end)
+                used = okK
+            end
+        end
+        if not used then
+            After(RETRY, Step)     -- страховка без объекта Item
+        end
         return
     end
 
     local id = pending.id
-    local name = NameOf(id)
-    if name then
+    local rec = ReadItem(id)
+    -- имя — основной признак успеха: без него запись бесполезна для сайта
+    if rec and rec.name then
         local db = J.DB()
         if db then
             local names = NamesFor(db, true)
-            if names then names[tostring(id)] = name:sub(1, 120) end
+            if names then
+                -- имя отдельным словарём (как раньше), свойства — своим
+                names[tostring(id)] = rec.name
+            end
+            -- свойства предмета: тип, подтип, слот, качество, ilvl.
+            -- Отдельно от имён: имена по локалям, свойства — одинаковы везде.
+            db.itemProps = db.itemProps or {}
+            local props = db.itemProps[tostring(id)] or {}
+            if rec.c then props.c = rec.c end
+            if rec.sc then props.sc = rec.sc end
+            if rec.t then props.t = rec.t end
+            if rec.st then props.st = rec.st end
+            if rec.loc then props.loc = rec.loc end
+            if rec.q then props.q = rec.q end
+            if rec.ilvl then props.ilvl = rec.ilvl end
+            db.itemProps[tostring(id)] = props
         end
         run.ok = run.ok + 1
         pending = nil
+        -- прогресс: прогон на 1500+ предметов идёт минутами, и молчание всё
+        -- это время выглядит как зависание
+        if run.ok % 200 == 0 then
+            local left = #queue
+            J.Say(("itemnames: собрано %d, в очереди осталось %d"):format(run.ok, left))
+        end
         After(GAP, Step)
         return
     end
 
     pending.tries = pending.tries + 1
     if pending.tries < RETRIES then
-        RequestData(id)        -- попросить ещё раз и подождать
+        RequestData(id)
         After(RETRY, Step)
         return
     end
-    -- клиент так и не отдал имя: ID не существует или данные недоступны
+    -- клиент не отдал даже имя: считаем пропущенным, но свойства могли прийти
+    if rec and (rec.c or rec.loc) then
+        local db = J.DB()
+        if db then
+            db.itemProps = db.itemProps or {}
+            local props = db.itemProps[tostring(id)] or {}
+            if rec.c then props.c = rec.c end
+            if rec.sc then props.sc = rec.sc end
+            if rec.t then props.t = rec.t end
+            if rec.st then props.st = rec.st end
+            if rec.loc then props.loc = rec.loc end
+            if rec.q then props.q = rec.q end
+            if rec.ilvl then props.ilvl = rec.ilvl end
+            db.itemProps[tostring(id)] = props
+        end
+    end
     run.fail = run.fail + 1
     pending = nil
     After(GAP, Step)
@@ -288,8 +398,8 @@ function J.Run(limit)
     local have = 0
     local cur = NamesFor(db, false)
     if cur then for _ in pairs(cur) do have = have + 1 end end
-    J.Say(("itemnames: [%s] неизвестных %d, в этой локали уже %d; иду по одному, ~%.0f с")
-        :format(LocaleKey(), #queue, have, #queue * (GAP + RETRY)))
+    J.Say(("itemnames: [%s] неизвестных %d, в этой локали уже %d; ~%.0f мин")
+        :format(LocaleKey(), #queue, have, #queue * GAP / 60))
     Step()
 end
 
@@ -319,8 +429,20 @@ function J.Report()
         end
         table.sort(per)
     end
+    local propsN, withType, withSlot = 0, 0, 0
+    if db and type(db.itemProps) == "table" then
+        for _, pr in pairs(db.itemProps) do
+            if type(pr) == "table" then
+                propsN = propsN + 1
+                if pr.sc or pr.c then withType = withType + 1 end
+                if pr.loc then withSlot = withSlot + 1 end
+            end
+        end
+    end
     J.Say(("itemnames: [%s] собрано %d, неизвестных %d; всего %d в %d локалях")
         :format(LocaleKey(), have, unknown, total, locs))
+    J.Say(("itemprops: свойств %d (тип %d, слот %d)")
+        :format(propsN, withType, withSlot))
     if #per > 0 then J.Say("itemnames: по локалям — " .. table.concat(per, ", ")) end
     if unknown > 0 then
         J.Say("itemnames: другая локаль добирается запуском команды на клиенте с тем языком")
