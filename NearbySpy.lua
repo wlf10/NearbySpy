@@ -6180,6 +6180,24 @@ SlashCmdList["NEARBYSPY"] = function(msg)
     elseif msg == "count" then
         P(L("COUNT"):format(
             CountPlayers(), newThisSession, db.announce and L("ON") or L("OFF")))
+        -- Размер базы в SavedVariables. Нужен, чтобы игрок видел реальную
+        -- картину, а не узнавал о ней отказом загрузки на сайте: файл растёт
+        -- с числом встреченных игроков, и умолчание об этом — плохой способ
+        -- сообщить о пределе.
+        do
+            local n = CountPlayers()
+            -- ~378 байт на запись с экипировкой; оценка нужна без обхода
+            -- всех ключей и сериализации, поэтому берём по числу записей
+            local est = math.floor(n * 380 / 1024)
+            local kb, mb = est, est / 1024
+            local sizeTxt
+            if mb >= 1 then
+                sizeTxt = ("%.1f MB"):format(mb)
+            else
+                sizeTxt = ("%d KB"):format(kb)
+            end
+            P(("db size: ~%s (%d records)"):format(sizeTxt, n))
+        end
         P(DebugSummary(db))
         -- Блокировки гейта: свои отдельно от чужих, плюс клавиатура в бою и
         -- отправки, совпавшие с отказом (15.11.2026).
