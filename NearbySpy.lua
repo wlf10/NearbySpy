@@ -6119,6 +6119,9 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             elseif msg:match("^talex%s+truth") then
                 local okR, errR = pcall(NSP_PROBE.TalexTruth)
                 if not okR then P("talex truth: " .. tostring(errR)) end
+            elseif msg:match("^talex%s+solve") then
+                local okV, errV = pcall(NSP_PROBE.TalexSolve)
+                if not okV then P("talex solve: " .. tostring(errV)) end
             else
                 local okT, errT = pcall(NSP_PROBE.ExportTalentTrees, msg:match("^talex%s+(%d+)$"))
                 if not okT then P("talex: " .. tostring(errT)) end

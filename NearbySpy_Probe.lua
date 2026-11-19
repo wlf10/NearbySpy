@@ -1049,6 +1049,190 @@ function J.TalexTruth()
     J.Say("talex truth: ground truth is in SavedVariables → debug.talentTruth")
 end
 
+
+-- DECODER SOLVER: find the real layout by brute force ON THE CLIENT.
+--
+-- Why here and not offline: the bit layout depends on the ORDER of the nodes in
+-- the stream, and measurements show it is NOT the order of C_Traits.GetTreeNodes
+-- (the touched nodes land on different positions than their ranks say). The
+-- client is the only place that has both the string and the per-node truth, so
+-- the search runs here — one command, no more round trips.
+--
+-- Everything under test: node ordering (5 candidates), header length, rank width,
+-- and whether a "purchased" bit exists. A combination wins only if it reproduces
+-- the recorded ranks EXACTLY for every node.
+
+local TALEX_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local ALPHA_IDX = {}
+for i = 1, #TALEX_ALPHA do ALPHA_IDX[TALEX_ALPHA:sub(i, i)] = i - 1 end
+
+-- The string is 6 bits per character, least significant bit first (ExportUtil).
+local function ToBits(str)
+    local bits = {}
+    for i = 1, #str do
+        local v = ALPHA_IDX[str:sub(i, i)]
+        if not v then return nil end
+        for k = 0, 5 do
+            bits[#bits + 1] = math.floor(v / (2 ^ k)) % 2
+        end
+    end
+    return bits
+end
+
+local function Extract(bits, pos, width)
+    local out = 0
+    for k = 0, width - 1 do
+        local b = bits[pos + k + 1]
+        if b == nil then return nil end
+        out = out + b * (2 ^ k)
+    end
+    return out
+end
+
+-- Decode with one grammar. Returns a map nodeID -> ranks, or nil on a
+-- malformed read (a rank above maxRanks means the stream has drifted).
+local function DecodeWith(imp, order, header, rankWidth, readPurchased)
+    local bits = ToBits(imp)
+    if not bits then return nil, "bad chars" end
+    local pos = header
+    local out = {}
+    for _, n in ipairs(order) do
+        local sel = Extract(bits, pos, 1)
+        if sel == nil then return nil, "eof" end
+        pos = pos + 1
+        if sel == 1 then
+            local purchased = 1
+            if readPurchased then
+                purchased = Extract(bits, pos, 1)
+                if purchased == nil then return nil, "eof" end
+                pos = pos + 1
+            end
+            if purchased == 1 then
+                local r = Extract(bits, pos, rankWidth)
+                if r == nil then return nil, "eof" end
+                pos = pos + rankWidth
+                if r < 1 or r > (n.max or 1) then return nil, "rank>max" end
+                out[n.id] = r
+            else
+                out[n.id] = 1     -- granted, no rank bits
+            end
+        end
+    end
+    return out, nil
+end
+
+function J.TalexSolve()
+    local ct = rawget(_G, "C_Traits")
+    local cc = rawget(_G, "C_ClassTalents")
+    local cs = rawget(_G, "C_SpecializationInfo")
+    if type(ct) ~= "table" or type(cc) ~= "table" then J.Say("talex solve: API missing") return end
+    local specIndex = select(1, cs.GetSpecialization and cs.GetSpecialization() or nil)
+    local specID = select(1, cs.GetSpecializationInfo and cs.GetSpecializationInfo(specIndex) or nil)
+    local configID = select(1, cc.GetActiveConfigID and cc.GetActiveConfigID() or nil)
+    local treeID = specID and select(1, cc.GetTraitTreeForSpec(specID) or nil)
+    if type(treeID) ~= "number" or type(configID) ~= "number" then
+        J.Say("talex solve: no active spec/config") return
+    end
+    local okS, imp = pcall(ct.GenerateImportString, configID)
+    if not okS or type(imp) ~= "string" or imp == "" then
+        J.Say("talex solve: no import string") return
+    end
+    local okN, nodeIDs = pcall(ct.GetTreeNodes, treeID)
+    if not okN or type(nodeIDs) ~= "table" then J.Say("talex solve: no nodes") return end
+
+    -- truth + geometry (posX/posY) for every node, read from the ACTIVE config
+    local all, truth = {}, {}
+    for _, nodeID in ipairs(nodeIDs) do
+        local ok, n = pcall(ct.GetNodeInfo, configID, nodeID)
+        if ok and type(n) == "table" then
+            local rec = {
+                id = nodeID,
+                max = tonumber(n.maxRanks) or 1,
+                x = tonumber(n.posX) or 0,
+                y = tonumber(n.posY) or 0,
+            }
+            -- granted ranks count too: the stream writes them as selected
+            local bought = tonumber(n.ranksPurchased) or 0
+            local active = tonumber(n.activeRank) or 0
+            local granted = math.max(active - bought, 0)
+            rec.ranks = bought + granted
+            all[#all + 1] = rec
+            if rec.ranks > 0 then truth[nodeID] = rec.ranks end
+        end
+    end
+    J.Say(("talex solve: spec=%d tree=%d — %d nodes, %d touched, string %d chars")
+        :format(specID, treeID, #all, (function() local c = 0 for _ in pairs(truth) do c = c + 1 end return c end)(), #imp))
+    if next(truth) == nil then
+        J.Say("talex solve: no talents on this character — stand on a character WITH talents")
+        return
+    end
+
+    -- node orderings to try: the API order, and by position on the tree
+    local orders = {}
+    orders[#orders + 1] = { name = "api", list = all }
+    local byY = {}; for i, n in ipairs(all) do byY[i] = n end
+    table.sort(byY, function(a, b)
+        if a.y ~= b.y then return a.y < b.y end
+        if a.x ~= b.x then return a.x < b.x end
+        return a.id < b.id
+    end)
+    orders[#orders + 1] = { name = "y,x", list = byY }
+    local byX = {}; for i, n in ipairs(all) do byX[i] = n end
+    table.sort(byX, function(a, b)
+        if a.x ~= b.x then return a.x < b.x end
+        if a.y ~= b.y then return a.y < b.y end
+        return a.id < b.id
+    end)
+    orders[#orders + 1] = { name = "x,y", list = byX }
+    local byIDdesc = {}; for i, n in ipairs(all) do byIDdesc[i] = n end
+    table.sort(byIDdesc, function(a, b) return a.id > b.id end)
+    orders[#orders + 1] = { name = "id desc", list = byIDdesc }
+
+    local wins = {}
+    for _, ord in ipairs(orders) do
+        for header = 0, 200 do
+            for rw = 4, 8 do
+                for rp = 0, 1 do
+                    local got = DecodeWith(imp, ord.list, header, rw, rp == 1)
+                    if got then
+                        local same, diff = 0, 0
+                        for id, r in pairs(truth) do
+                            if got[id] == r then same = same + 1 else diff = diff + 1 end
+                        end
+                        for id in pairs(got) do
+                            if truth[id] == nil then diff = diff + 1 end
+                        end
+                        if diff == 0 and same > 0 then
+                            wins[#wins + 1] = ("%s|hdr=%d|rw=%d|purch=%d|hits=%d")
+                                :format(ord.name, header, rw, rp, same)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local db = J.DB()
+    if db then
+        db.debug = db.debug or {}
+        db.debug.talentSolve = {
+            at = time(), specID = specID, treeID = treeID,
+            importString = imp,
+            truthCount = (function() local c = 0 for _ in pairs(truth) do c = c + 1 end return c end)(),
+            wins = table.concat(wins, ","):sub(1, 400),
+            nodes = all,
+        }
+    end
+    if #wins == 0 then
+        J.Say("talex solve: NO combination reproduces the ranks — the stream layout differs from the documented one")
+    else
+        J.Say(("talex solve: %d combination(s) reproduce ALL %d ranks: %s")
+            :format(#wins, (function() local c = 0 for _ in pairs(truth) do c = c + 1 end return c end)(),
+                table.concat(wins, " ; "):sub(1, 260)))
+    end
+    J.Say("talex solve: details in SavedVariables → debug.talentSolve")
+end
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- events (INSPECT_READY arrives on its own frame: the main one handles enough)
 -- ─────────────────────────────────────────────────────────────────────────────
