@@ -6177,6 +6177,52 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                 P(L("SUGGEST_FAILED") .. tostring(info))
             end
         end
+    elseif msg == "retain" or msg:match("^retain%s") then
+        -- Срок хранения записей в SavedVariables. По умолчанию ЧИСТКИ НЕТ:
+        -- файл — единственная локальная копия, и удаление необратимо.
+        --   /nspy retain           — показать настройку и что будет удалено
+        --   /nspy retain 14        — хранить 14 дней (чистка на выходе из игры)
+        --   /nspy retain off       — не чистить (по умолчанию)
+        local arg = msg:match("^retain%s+(%S+)$")
+        if arg == "off" or arg == "0" then
+            db.retainDays = nil
+            P("retain: чистка выключена, записи не удаляются")
+        elseif arg and tonumber(arg) then
+            local days = math.floor(tonumber(arg))
+            if days < 1 then days = 1 end
+            db.retainDays = days
+            P(("retain: хранить %d дн.; чистка выполняется при выходе из игры"):format(days))
+        else
+            local days = tonumber(db.retainDays) or 0
+            if days > 0 then
+                P(("retain: %d дн. (чистка при выходе включена)"):format(days))
+            else
+                P("retain: чистка выключена — записи не удаляются")
+            end
+        end
+        -- сухой прогон: считаем, что удалилось бы, НЕ удаляя
+        do
+            local total = CountPlayers()
+            local days = tonumber(db.retainDays)
+            if days and days > 0 then
+                local now = time()
+                local cutoff = now - days * 86400
+                local dead = 0
+                for _, p in pairs(db.players) do
+                    if type(p) == "table" then
+                        local seen = tonumber(p.lastSeen) or 0
+                        local peer = tonumber(p.peerAt) or 0
+                        if peer > seen then seen = peer end
+                        if seen <= 0 then seen = tonumber(p.firstSeen) or 0 end
+                        if seen > 0 and seen < cutoff then dead = dead + 1 end
+                    else
+                        dead = dead + 1
+                    end
+                end
+                P(("retain: удалилось бы %d из %d записей (~%.0f КБ)"):format(
+                    dead, total, dead * 300 / 1024))
+            end
+        end
     elseif msg == "count" then
         P(L("COUNT"):format(
             CountPlayers(), newThisSession, db.announce and L("ON") or L("OFF")))
@@ -6574,6 +6620,70 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
     if not okP then DbgErr("chat", errP) end
 end)
 
+-- ── Чистка старых записей (по желанию владельца) ───────────────────────────
+-- ПО УМОЛЧАНИЮ ВЫКЛЮЧЕНА и ничего не удаляет, пока не включена командой.
+--
+-- Зачем нужна: файл растёт с каждой встречей. Замер 19.11.2026 на живом файле
+-- (57 284 записи, 18.4 МБ в players): приток 1659 своих + 3271 peer в день,
+-- то есть ~1.6 МБ/день. Без чистки 48-мегабайтный лимит сайта упирается
+-- примерно за 19 дней.
+--
+-- Что здесь НЕ удаляется ни при каких настройках:
+--   * мир (world: торговцы, уловы) и learn — справочники, они малы и
+--     накапливаются по смыслу;
+--   * журнал персонажа (journal) — своя история игры;
+--   * debug — диагностика, её чистят отдельно и вручную.
+--
+-- Правило простое и по времени наблюдения: запись удаляется, только если её
+-- последнее наблюдение старше N дней. Крон на хосте выгружает файл каждые
+-- 30 минут, поэтому «старше N дней» при N >= 3 гарантированно означает
+-- «давно уехало на сайт» — локальная копия там уже не единственная.
+--
+-- ⚠️ Обратная сторона, которую надо знать: peer-записи НЕ пересылаются
+-- повторно. Если сайт потеряет данные, восстановить их из старого файла
+-- нельзя — только собрать заново игрой.
+function NspPrune(db, retainDays, now)
+    if not db or type(db.players) ~= "table" then return 0, 0 end
+    if type(retainDays) ~= "number" or retainDays <= 0 then return 0, 0 end
+    now = now or time()
+    local cutoff = now - retainDays * 86400
+    local removed, kept = 0, 0
+    local dead = {}
+    for key, p in pairs(db.players) do
+        if type(p) ~= "table" then
+            dead[#dead + 1] = key
+            removed = removed + 1
+        else
+            -- время последнего наблюдения: своя встреча или пакет канала
+            local seen = tonumber(p.lastSeen) or 0
+            local peer = tonumber(p.peerAt) or 0
+            if peer > seen then seen = peer end
+            local first = tonumber(p.firstSeen) or 0
+            if seen <= 0 then seen = first end
+            if seen > 0 and seen < cutoff then
+                dead[#dead + 1] = key
+                removed = removed + 1
+            else
+                kept = kept + 1
+            end
+        end
+    end
+    for _, key in ipairs(dead) do db.players[key] = nil end
+    -- кольцо экипировки ссылается на ключи игроков: подчищаем висячие ссылки,
+    -- иначе gearRing копит ключи удалённых записей
+    if type(db.gearRing) == "table" then
+        local alive = {}
+        for _, key in ipairs(db.gearRing) do
+            if db.players[key] then alive[#alive + 1] = key end
+        end
+        db.gearRing = alive
+    end
+    db.debug = db.debug or {}
+    db.debug.pruned = (db.debug.pruned or 0) + removed
+    db.debug.prunedAt = now
+    return removed, kept
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
@@ -6696,6 +6806,18 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             if not okJ then DbgErr("journalDeath", errJ) end
         end
     elseif event == "PLAYER_LOGOUT" then
+        -- Чистка старых записей: только если владелец включил её командой
+        -- /nspy retain N. По умолчанию retainDays = nil → ничего не удаляется.
+        do
+            local dbL = GetDB()
+            local days = tonumber(dbL.retainDays)
+            if days and days > 0 then
+                local okP, removed = pcall(NspPrune, dbL, days)
+                if okP and removed and removed > 0 then
+                    D(("prune: удалено старых записей: %d (старше %d дн.)"):format(removed, days))
+                end
+            end
+        end
         -- SavedVariables are written right after this event, so the session is
         -- finalised here (/reload fires it too).
         if NSP_JOURNAL then
