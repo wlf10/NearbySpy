@@ -1819,7 +1819,7 @@ function PeerDrainGear(db)
                 :format(PeerChannelName(), #q))
             PeerSync()
         end
-        return
+        return false
     end
     local sender = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
     if not sender then return end
@@ -1829,13 +1829,13 @@ function PeerDrainGear(db)
         local bad = table.remove(q, 1)
         peerStats.gearEmpty = (peerStats.gearEmpty or 0) + 1
         D(("Peer gear skipped: %s (nothing to pack)"):format(PeerEsc(bad and bad.name or "?", 40)))
-        return
+        return false
     end
     if payload:find("|", 1, true) then
         db.debug.peerSendError = "gear payload contains '|' (server rejects it)"
         table.remove(q, 1)
         peerStats.gearEmpty = (peerStats.gearEmpty or 0) + 1
-        return
+        return false
     end
     local ok, result = pcall(sender, payload, "CHANNEL", nil, channel)
     if NspNoteSendRet(db, ok, result, nowT) then
@@ -1846,7 +1846,7 @@ function PeerDrainGear(db)
         db.debug.peerSendError = tostring(result):sub(1, 150)
         D(("Peer gear send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
         PeerSync()
-        return
+        return false
     end
     local it = table.remove(q, 1)
     local sent = peerStats.gearSent
@@ -1857,6 +1857,7 @@ function PeerDrainGear(db)
     D(("Peer gear sent: %s (%d bytes) q=%d"):format(
         PeerEsc(it.name, 40), #payload, #q))
     PeerSync()
+    return true
 end
 
 -- Замер возврата канала (15.11.2026). Гейт клиента сообщает о себе СОБЫТИЕМ
@@ -1912,11 +1913,35 @@ end
 local function DrainPeerQueue()
     local db = GetDB()
     if not db.peerEnabled then return end
-    -- Экипировка уходит ТОЛЬКО когда обычная очередь пуста: канал держит ~10
-    -- сообщений в минуту, и снапшот в 130 байт не имеет права вытеснять
-    -- встречи (их много, они дешёвые и важнее). Порядок такой же, как у
-    -- обновлений против новых записей.
-    if #peerQueue == 0 then return PeerDrainGear(db) end
+    -- ── Очерёдность «встречи или экипировка» (20.11.2026, второй заход) ────
+    -- Сначала gear отправлялся ТОЛЬКО при пустой очереди встреч. На живом
+    -- прогоне это оказалось голоданием: очередь встреч стояла на 55 из 60 и не
+    -- пустела, поэтому gear не уходил НИКОГДА (gearSent=0, gearQueued=24/24,
+    -- gearDropped=48 — вытеснено из переполненной очереди).
+    --
+    -- Причина не в канале: отправок было 1.6/мин при серверном лимите ~10/мин.
+    -- Узкое место — hardware-гейт: отправка идёт только на клик по миру, и
+    -- пока кликов мало, очередь встреч не разгружается до нуля.
+    --
+    -- Правило теперь: gear получает КАЖДЫЙ ТРЕТИЙ слот (при переполнении своей
+    -- очереди — каждый второй), а при пустой очереди встреч — сразу. Вытеснение
+    -- из полной очереди gear означает гарантированную потерю, тогда как встреча
+    -- ещё подождёт в очереди (PEER_TTL = 600 с). Один слот, отданный gear,
+    -- встречи не убивает — они разгружаются на следующем клике.
+    peerStats.sendTurns = (peerStats.sendTurns or 0) + 1
+    local gearQ = peerStats.gearQueue
+    local gearLen = (type(gearQ) == "table") and #gearQ or 0
+    if gearLen > 0 then
+        local full = gearLen >= PEER_GEAR_QUEUE_MAX
+        local every = full and 2 or 3
+        if #peerQueue == 0 or full or (peerStats.sendTurns % every == 0) then
+            -- PeerDrainGear возвращает true, только если реально отправил
+            -- (например, gap ещё не прошёл) — иначе слот не тратим и отдаём
+            -- его встречам.
+            if PeerDrainGear(db) then return end
+        end
+    end
+    if #peerQueue == 0 then return end
     local nowT = time()
     -- Адаптивный интервал: при большой очереди отправляем чаще, иначе канал
     -- захлёбывается после /who-скана. Но если сервер только что отказал
