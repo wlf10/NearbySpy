@@ -317,6 +317,51 @@ class GearSendTests(unittest.TestCase):
         self.assertEqual(1000, self.g["peerStats"]["gearSent"][key])
 
 
+class GearDiagnosticsTests(unittest.TestCase):
+    """Счётчики gear обязаны доезжать до SavedVariables.
+
+    Живой прогон 20.11.2026 поймал ровно этот дефект: gear отправлялся
+    (`Peer gear sent: Mr Defense (100 bytes)` в кольце), а в SV не было ни
+    одного gear-поля — PeerSync писал фиксированный набор ключей. Диагностика,
+    которой нельзя воспользоваться после логаута, не диагностика: то же самое
+    уже случалось с `throttled`.
+    """
+
+    def setUp(self):
+        src = SOURCE.read_text(encoding="utf-8")
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        block = src[src.index("PeerSync = function()"):src.index("-- Untrusted chat text")]
+        self.lua.execute(CONST_PRELUDE + "\n" + SEND_HARNESS + "\n"
+                         + "peerChatVisible = false\n" + block + "\n"
+                         "TestSync = PeerSync\n")
+
+    def test_every_gear_counter_reaches_the_saved_variables(self):
+        self.lua.execute("""
+            peerStats.gearQueue = { {}, {} }
+            peerStats.gearSentCount = 3
+            peerStats.gearIn = 4
+            peerStats.gearOrphan = 5
+            peerStats.gearStale = 6
+            peerStats.gearBad = 7
+            peerStats.gearEmpty = 8
+            peerStats.gearExpired = 9
+            peerStats.gearDropped = 10
+            DB.peerGearOff = false
+            TestSync()
+        """)
+        peer = self.lua.globals()["DB"]["debug"]["peer"]
+        expect = {"gearQueued": 2, "gearSent": 3, "gearIn": 4, "gearOrphan": 5,
+                  "gearStale": 6, "gearBad": 7, "gearEmpty": 8, "gearExpired": 9,
+                  "gearDropped": 10}
+        for key, value in expect.items():
+            self.assertIn(key, list(peer.keys()), "поля %s нет в SV-снимке" % key)
+            self.assertEqual(value, peer[key], "поле %s не доехало до SV" % key)
+
+    def test_gear_switch_is_visible_in_the_saved_variables(self):
+        self.lua.execute("DB.peerGearOff = true; TestSync()")
+        self.assertTrue(self.lua.globals()["DB"]["debug"]["peer"]["gearOff"])
+
+
 class GearReceiveTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)

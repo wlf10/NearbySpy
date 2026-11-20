@@ -1251,6 +1251,21 @@ PeerSync = function()
         throttleUntil = peerStats.throttleUntil,
         lastSender = peerStats.lastSender,
         chat = peerChatVisible and true or false,
+        -- Снапшоты экипировки/билда (20.11.2026). Без этих полей вся
+        -- диагностика gear жила только в памяти: в SV не было видно ни
+        -- отправленных, ни принятых, ни причин отказа — ровно та же ошибка,
+        -- что была с throttled. Длину очереди берём из peerStats, а не из
+        -- локального peerQueue: очередь gear лежит там же.
+        gearQueued = (type(peerStats.gearQueue) == "table") and #peerStats.gearQueue or 0,
+        gearSent = peerStats.gearSentCount or 0,
+        gearIn = peerStats.gearIn or 0,
+        gearOrphan = peerStats.gearOrphan or 0,
+        gearStale = peerStats.gearStale or 0,
+        gearBad = peerStats.gearBad or 0,
+        gearEmpty = peerStats.gearEmpty or 0,
+        gearExpired = peerStats.gearExpired or 0,
+        gearDropped = peerStats.gearDropped or 0,
+        gearOff = db.peerGearOff and true or false,
     }
 end
 
