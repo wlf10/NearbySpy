@@ -207,6 +207,12 @@ local function Store(key, snapshot)
     return true
 end
 
+-- Тот же путь записи нужен приёму peer-снапшотов (NearbySpy.lua): снапшот от
+-- пира обязан попадать в gearRing, иначе вытеснение его не видит и файл растёт.
+-- Объявление стоит ПОСЛЕ local function Store: ссылка выше него разрешилась бы
+-- в nil-глобал (Lua 5.1 видит только уже объявленные локалы).
+J.Store = function(key, snapshot) return Store(key, snapshot) end
+
 local function RecentGear(key)
     local db = J.DB()
     if not db or type(db.players) ~= "table" then return nil end
@@ -406,7 +412,15 @@ function J.OnInspectReady(guid)
                 end
             end
         end
-        if Store(p.key, snapshot) then Counter("ok") else Counter("noRecord") end
+        if Store(p.key, snapshot) then
+            Counter("ok")
+            -- Отдать снапшот в peer-канал (экипировка + билд). Функция приходит
+            -- из NearbySpy.lua инъекцией: этот файл не знает ни очередей, ни
+            -- протокола, и при выключенном обмене её просто нет.
+            if J.QueuePeerGear then pcall(J.QueuePeerGear, p.key, snapshot) end
+        else
+            Counter("noRecord")
+        end
     end)
     if not ok then Err("inspectRead", err) end
     After(GAP_MIN + math.random() * (GAP_MAX - GAP_MIN), NextStep)

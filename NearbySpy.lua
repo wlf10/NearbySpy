@@ -1160,6 +1160,9 @@ local PEER_PROTO = "N7"
 -- физически не успевают за две минуты). 600 с покрывают всплеск после /who-скана
 -- и остаются конечными: зависшая запись всё равно не копится в очереди вечно.
 local PEER_QUEUE_MAX, PEER_TTL = 60, 600
+-- Очередь снапшотов экипировки: короче, чем у встреч, потому что пакет весит
+-- втрое больше (133 против 47 байт) и разгружается только в простое канала.
+local PEER_GEAR_QUEUE_MAX = 24
 -- Интервал между сообщениями. Обычно 10 сек (не спамим канал зря), но при
 -- большой очереди — 4 сек: /who-скан выдаёт десятки записей залпом, а при
 -- 10 сек уходит лишь 24/мин, и очередь переполнялась (живой лог 10.11.2026:
@@ -1196,7 +1199,7 @@ local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- top-level local breaks the whole addon at compile time.
 local peerStats = {sent = 0, received = 0, merged = 0, dropped = 0, seen = 0, valid = 0, rejected = 0,
     foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, lastSend = 0, rejectLogged = {}, lastNoChannel = 0,
-    leftStale = nil, zoneSent = {}}
+    leftStale = nil, zoneSent = {}, gearQueue = {}, gearSent = {}}
 
 -- PeerThrottled — сервер отказал принимать сообщения так часто
 -- ("THROTTLED" в CHANNEL_MSG_CHANNEL_NOTICE). Реагируем на СИГНАЛ сервера, а не
@@ -1411,6 +1414,122 @@ function PeerTimeValue(s)
     return tonumber(s, 36)
 end
 
+-- ── Экипировка в пакете: base64 над битовым потоком (20.11.2026) ───────────
+-- Здесь base64 наконец оправдан, и только здесь. Строка «1:20521,2:276740,…»
+-- тратит байты на десятичные цифры и на НОМЕР СЛОТА у каждого предмета: замер
+-- по 849 живым снапшотам — 115 символов в среднем. В битовом потоке слот не
+-- нужен вовсе (его задаёт карта занятости), а номер предмета — 20 бит:
+-- 19 бит карты слотов + 8 бит ilvl + 20 бит на предмет = 51 символ (×2.2).
+--
+-- Таланты, наоборот, перекодировать НЕЛЬЗЯ: import-строка уже собрана из
+-- base64-алфавита (6 бит на символ), то есть плотнее её сделать нечем —
+-- любая упаковка вернёт те же биты. Она едет текстом как есть.
+--
+-- Пределы (проверены на живых данных): слотов 1..19, itemID до 287073 (20 бит
+-- покрывают 1 048 575 — запас на будущие предметы), ilvl до 60 (8 бит = 255).
+local PEER_B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+NSP_B64_INDEX = {}
+for i = 1, #PEER_B64 do NSP_B64_INDEX[PEER_B64:sub(i, i)] = i - 1 end
+
+-- Битовый писатель. В Lua 5.1 нет побитовых операций, поэтому сдвиг — это
+-- умножение и деление на степень двойки; double точен до 2^53, а аккумулятор
+-- здесь не превышает 26 бит (6 + максимум 20).
+function PeerBitsNew() return {acc = 0, n = 0, out = {}} end
+
+function PeerBitsPut(w, v, width)
+    w.acc = w.acc * (2 ^ width) + (tonumber(v) or 0)
+    w.n = w.n + width
+    while w.n >= 6 do
+        w.n = w.n - 6
+        local shift = 2 ^ w.n
+        local d = math.floor(w.acc / shift)
+        w.out[#w.out + 1] = PEER_B64:sub(d + 1, d + 1)
+        w.acc = w.acc - d * shift
+    end
+end
+
+function PeerBitsFlush(w)
+    if w.n > 0 then PeerBitsPut(w, 0, 6 - w.n) end
+    return table.concat(w.out)
+end
+
+function PeerBitsReader(s)
+    return {s = s, pos = 0, acc = 0, n = 0}
+end
+
+function PeerBitsGet(r, width)
+    while r.n < width do
+        r.pos = r.pos + 1
+        local ch = r.s:sub(r.pos, r.pos)
+        local idx = NSP_B64_INDEX[ch]
+        -- Символ вне алфавита = испорченный пакет: вернуть nil, а не мусор.
+        -- У пакованного формата нет ресинхронизации по разделителю, поэтому
+        -- единственная защита — отбросить запись целиком.
+        if not idx then return nil end
+        r.acc = r.acc * 64 + idx
+        r.n = r.n + 6
+    end
+    local shift = 2 ^ (r.n - width)
+    local v = math.floor(r.acc / shift)
+    r.acc = r.acc - v * shift
+    r.n = r.n - width
+    return v
+end
+
+-- ── Упаковка экипировки ────────────────────────────────────────────────────
+-- Вход — строка снапшота из NearbySpy_Inspect.lua: "slot:id,slot:id,…".
+-- Слоты упорядочены по возрастанию, иначе карта занятости не совпадёт с
+-- порядком id в потоке (получатель читает id именно в порядке слотов).
+function PeerGearPack(ids, ilvl)
+    if type(ids) ~= "string" or ids == "" then return nil end
+    local slots = {}
+    for part in (ids .. ","):gmatch("(.-),") do
+        if part ~= "" then
+            local s, id = part:match("^(%d+):(%d+)$")
+            s, id = tonumber(s), tonumber(id)
+            -- Мусор в снапшоте не должен ломать пакет: пропускаем элемент,
+            -- а не отправляем битый поток (у него нет ресинхронизации).
+            if s and id and s >= 1 and s <= 19 and id > 0 and id < 1048576 then
+                slots[#slots + 1] = {s = s, id = id}
+            end
+        end
+    end
+    if #slots == 0 then return nil end
+    table.sort(slots, function(a, b) return a.s < b.s end)
+    local map = 0
+    for _, p in ipairs(slots) do map = map + 2 ^ (p.s - 1) end
+    local w = PeerBitsNew()
+    PeerBitsPut(w, map, 19)
+    local lvl = tonumber(ilvl) or 0
+    if lvl < 0 then lvl = 0 end
+    if lvl > 255 then lvl = 255 end
+    PeerBitsPut(w, lvl, 8)
+    for _, p in ipairs(slots) do PeerBitsPut(w, p.id, 20) end
+    return PeerBitsFlush(w)
+end
+
+-- Обратное: строка "slot:id,…", ilvl, число слотов. nil при любом мусоре —
+-- вызывающий обязан отбросить запись целиком, половинчатый разбор запрещён.
+function PeerGearUnpack(b64)
+    if type(b64) ~= "string" or b64 == "" or #b64 > 200 then return nil end
+    local r = PeerBitsReader(b64)
+    local map = PeerBitsGet(r, 19)
+    local ilvl = PeerBitsGet(r, 8)
+    if not map or not ilvl or map == 0 then return nil end
+    local parts = {}
+    for slot = 1, 19 do
+        if math.floor(map / 2 ^ (slot - 1)) % 2 == 1 then
+            local id = PeerBitsGet(r, 20)
+            if not id or id <= 0 then return nil end
+            parts[#parts + 1] = slot .. ":" .. id
+        end
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, ","), ilvl, #parts
+end
+
+
+
 
 -- Peers now carry the place as well (protocol N3, fields 9-12). A chat message
 -- is capped by the client at 255 bytes, so the payload is built with a budget and
@@ -1580,6 +1699,146 @@ QueuePeerNew = function(db, data)
     PeerSync()
 end
 
+-- ── Экипировка и билд в канал (20.11.2026) ─────────────────────────────────
+-- Отдельная очередь и отдельный тип пакета G7: у записи о встрече и у снапшота
+-- разная цена (133 байта против 47) и разная частота, поэтому общая очередь
+-- означала бы либо голод встреч, либо переполнение канала вещами.
+--
+-- Что НЕ отправляется никогда:
+--   • чужой снапшот, полученный по каналу (иначе релей, как и у встреч);
+--   • снапшот, который мы уже отправили в этой сессии (дедуп по ключу + at).
+function PeerQueueGear(key, snapshot)
+    local db = GetDB()
+    if not db.peerEnabled or db.peerGearOff then return end
+    if type(key) ~= "string" or key == "" or type(snapshot) ~= "table" then return end
+    if type(snapshot.ids) ~= "string" or snapshot.ids == "" then return end
+    local entry = db.players and db.players[key]
+    if type(entry) ~= "table" then return end
+    -- Снапшот, полученный от пира, помечен gearFrom и обратно не уходит.
+    if snapshot.from then return end
+    local at = tonumber(snapshot.at) or 0
+    local q = peerStats.gearQueue
+    if type(q) ~= "table" then q = {}; peerStats.gearQueue = q end
+    local sent = peerStats.gearSent
+    if type(sent) ~= "table" then sent = {}; peerStats.gearSent = sent end
+    if sent[key] == at then return end
+    for i = 1, #q do
+        if q[i].key == key and q[i].snapAt == at then return end
+    end
+    -- Очередь вещей короткая: она разгружается медленнее встреч, и копить
+    -- сотни снапшотов бессмысленно — они устареют раньше, чем дойдут.
+    while #q >= PEER_GEAR_QUEUE_MAX do
+        local old = table.remove(q, 1)
+        peerStats.gearDropped = (peerStats.gearDropped or 0) + 1
+        if old then D(("Peer gear queue full: dropped %s"):format(PeerEsc(old.name or "?", 40))) end
+    end
+    q[#q + 1] = {
+        key = key, name = entry.name or "?", realm = entry.realm or PlayerRealm(),
+        game = db.game, at = time(), snapAt = at,
+        ids = snapshot.ids, ilvl = tonumber(snapshot.ilvl) or 0,
+        imp = type(snapshot.imp) == "string" and snapshot.imp or nil,
+        gearFromPeer = snapshot.from and true or nil,
+    }
+    D(("Peer gear queued: %s (%s, %d slots) q=%d"):format(
+        PeerEsc(entry.name, 40), PeerEsc(db.game, 12), (snapshot.slots or tonumber(
+            (snapshot.ids:gsub("[^,]", "")):len()) or 0) + 1, #q))
+    PeerSync()
+end
+
+function PeerGearPayload(db, it)
+    local gearB64 = PeerGearPack(it.ids, it.ilvl)
+    local imp = it.imp
+    if type(imp) ~= "string" or imp == "" then imp = nil end
+    -- Таланты: только символы алфавита import-строки. Чужой текст в этом поле
+    -- не должен ни удлинять пакет, ни ломать разбор у получателя.
+    if imp and not imp:match("^[%w+/]+$") then imp = nil end
+    if imp and #imp > 64 then imp = nil end
+    if not gearB64 and not imp then return nil end
+
+    local game = PeerEncode("game", it.game)
+    if game == PEER_CODE_UNKNOWN or game == PEER_CODE_NONE then game = it.game end
+    local realm = PeerRealmCode(it.realm) or it.realm
+    local stamp = PeerTimeCode(it.snapAt > 0 and it.snapAt or it.at)
+
+    local function Build(withGear, withTalents)
+        local flags = (withGear and "g" or "") .. (withTalents and "t" or "")
+        local parts = {"G7", game, realm, it.name, stamp, flags}
+        if withGear then parts[#parts + 1] = gearB64 end
+        if withTalents then parts[#parts + 1] = imp end
+        return table.concat(parts, ";")
+    end
+    local payload = Build(gearB64 ~= nil, imp ~= nil)
+    -- Деградация в фиксированном порядке: сначала таланты (их можно прислать
+    -- отдельным пакетом позже), потом уже вся запись не годится.
+    if #payload > PEER_PAYLOAD_MAX and imp then payload = Build(gearB64 ~= nil, false) end
+    if #payload > PEER_PAYLOAD_MAX and gearB64 then payload = Build(false, imp ~= nil) end
+    if #payload > PEER_PAYLOAD_MAX then return nil end
+    return payload
+end
+
+function PeerDrainGear(db)
+    local q = peerStats.gearQueue
+    if type(q) ~= "table" or #q == 0 then return end
+    local nowT = time()
+    local gap = PEER_GAP
+    if peerStats.throttleUntil and nowT < peerStats.throttleUntil then
+        gap = PEER_GAP_THROTTLED
+    end
+    if nowT - peerStats.lastSend < gap then return end
+    while #q > 0 and nowT - q[1].at > PEER_TTL do
+        local old = table.remove(q, 1)
+        peerStats.gearExpired = (peerStats.gearExpired or 0) + 1
+        D(("Peer gear expired before send: %s"):format(PeerEsc(old and old.name or "?", 40)))
+    end
+    if #q == 0 then return end
+    local channel = GetChannelName(PeerChannelName())
+    if not channel or channel == 0 then
+        if nowT - peerStats.lastNoChannel >= 60 then
+            peerStats.lastNoChannel = nowT
+            D(("Peer gear send blocked: channel %s not joined, q=%d")
+                :format(PeerChannelName(), #q))
+            PeerSync()
+        end
+        return
+    end
+    local sender = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
+    if not sender then return end
+    local payload = PeerGearPayload(db, q[1])
+    if not payload then
+        -- Нечего отправлять (мусор в снапшоте) — запись не должна стоять вечно.
+        local bad = table.remove(q, 1)
+        peerStats.gearEmpty = (peerStats.gearEmpty or 0) + 1
+        D(("Peer gear skipped: %s (nothing to pack)"):format(PeerEsc(bad and bad.name or "?", 40)))
+        return
+    end
+    if payload:find("|", 1, true) then
+        db.debug.peerSendError = "gear payload contains '|' (server rejects it)"
+        table.remove(q, 1)
+        peerStats.gearEmpty = (peerStats.gearEmpty or 0) + 1
+        return
+    end
+    local ok, result = pcall(sender, payload, "CHANNEL", nil, channel)
+    if NspNoteSendRet(db, ok, result, nowT) then
+        D(("Peer gate: a block fired with this gear send (total %d)")
+            :format(db.debug.peerGate or 0))
+    end
+    if not ok or result == false then
+        db.debug.peerSendError = tostring(result):sub(1, 150)
+        D(("Peer gear send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
+        PeerSync()
+        return
+    end
+    local it = table.remove(q, 1)
+    local sent = peerStats.gearSent
+    if type(sent) ~= "table" then sent = {}; peerStats.gearSent = sent end
+    sent[it.key] = it.snapAt
+    peerStats.lastSend = nowT
+    peerStats.gearSentCount = (peerStats.gearSentCount or 0) + 1
+    D(("Peer gear sent: %s (%d bytes) q=%d"):format(
+        PeerEsc(it.name, 40), #payload, #q))
+    PeerSync()
+end
+
 -- Замер возврата канала (15.11.2026). Гейт клиента сообщает о себе СОБЫТИЕМ
 -- ADDON_ACTION_BLOCKED, а не результатом вызова, поэтому заблокированная
 -- отправка выглядела ровно как успешная: в живом SV три строки BLOCKED стояли
@@ -1632,7 +1891,12 @@ end
 
 local function DrainPeerQueue()
     local db = GetDB()
-    if not db.peerEnabled or #peerQueue == 0 then return end
+    if not db.peerEnabled then return end
+    -- Экипировка уходит ТОЛЬКО когда обычная очередь пуста: канал держит ~10
+    -- сообщений в минуту, и снапшот в 130 байт не имеет права вытеснять
+    -- встречи (их много, они дешёвые и важнее). Порядок такой же, как у
+    -- обновлений против новых записей.
+    if #peerQueue == 0 then return PeerDrainGear(db) end
     local nowT = time()
     -- Адаптивный интервал: при большой очереди отправляем чаще, иначе канал
     -- захлёбывается после /who-скана. Но если сервер только что отказал
@@ -1832,6 +2096,14 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     if peerStats.inCount > 120 then return Reject("rate limit") end
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
+
+    -- Снапшот экипировки/билда — отдельный тип пакета G7 (20.11.2026). Разбор
+    -- вынесен в свою функцию, но живёт в этом же чанке, поэтому видит все
+    -- локальные константы. Проверяется ДО валидации протокола: у G7 не 13
+    -- полей, и старый чек «field count» отверг бы его как мусор.
+    if fields[1] == "G7" then
+        return ReceivePeerGear(fields, sender)
+    end
 
     -- Признак пачки — разделитель PEER_BATCH_SEP (запятая). Он ЗАПРЕЩЁН в
     -- имени, зоне, мире и хвостовом тексте (PeerField), поэтому в одиночном
@@ -2086,6 +2358,97 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         PeerEsc(name), PeerEsc(class, 20), level, PeerEsc(faction, 10),
         isNew and "new" or "merged",
         foreign and (" [realm=" .. PeerEsc(realm, 40) .. "]") or ""))
+    PeerSync()
+end
+
+-- ── Приём снапшота экипировки/билда (пакет G7, 20.11.2026) ─────────────────
+-- Формат: G7;game;realm;name;time;flags;gear[;talents]
+--   flags: 'g' — есть упакованный gear, 't' — есть import-строка талантов
+--   gear  — base64 битового потока (см. PeerGearPack), таланты — текстом
+--
+-- Три правила, без которых этот приём портит данные:
+--   1) СВЕЖЕСТЬ: пакет применяется только если он новее уже сохранённого
+--      снапшота. Иначе чужой старый пакет затрёт наш собственный инспект,
+--      сделанный минуту назад.
+--   2) РЕЛЕЙ ЗАПРЕЩЁН: записанный снапшот помечается from = отправитель, и
+--      PeerQueueGear такой снапшот обратно не отправляет.
+--   3) ПОЛОВИНЧАТЫЙ РАЗБОР ЗАПРЕЩЁН: битый gear → отказ целиком. У пакованного
+--      потока нет ресинхронизации, «сколько успели» — это мусор в базе.
+function ReceivePeerGear(fields, sender)
+    local db = GetDB()
+    if not db.peerEnabled or db.peerGearOff then return end
+    local game = fields[2]
+    if type(game) ~= "string" or game == "" then return end
+    if #game == 1 then game = PeerDecode("game", game) or game end
+    if game ~= db.game then return end
+    local realm = PeerRealmName(fields[3]) or fields[3]
+    local name = fields[4]
+    if not PeerField(name, 60) or not PeerField(realm, 100) then return end
+    local ts = PeerTimeValue(fields[5])
+    if not ts or ts <= 0 then return end
+    if ts > time() + PEER_CLOCK_SKEW then return end
+    local flags = fields[6] or ""
+    local wantGear = flags:find("g", 1, true) ~= nil
+    local wantTalents = flags:find("t", 1, true) ~= nil
+    if not wantGear and not wantTalents then return end
+    local idx = 7
+    local ids, ilvl, slots
+    if wantGear then
+        local packed = fields[idx]
+        idx = idx + 1
+        ids, ilvl, slots = PeerGearUnpack(packed)
+        if not ids then
+            peerStats.gearBad = (peerStats.gearBad or 0) + 1
+            D(("Peer gear rejected: corrupted payload from %s"):format(PeerEsc(sender or "?", 40)))
+            PeerSync()
+            return
+        end
+    end
+    local imp
+    if wantTalents then
+        local t = fields[idx]
+        -- Только алфавит import-строки и разумная длина: чужой текст в этом
+        -- поле не должен ни попасть в SV, ни сломать сайт.
+        if type(t) == "string" and #t > 0 and #t <= 64 and t:match("^[%w+/]+$") then imp = t end
+    end
+    if not ids and not imp then return end
+    local key = name .. "-" .. realm
+    local entry = db.players and db.players[key]
+    if type(entry) ~= "table" then
+        -- Игрока ещё нет в базе: прикрепить снапшот не к чему. Создавать
+        -- строку из одного снапшота нельзя — она придёт на сайт без класса и
+        -- уровня. Считаем такие случаи: по счётчику видно, теряем ли мы данные.
+        peerStats.gearOrphan = (peerStats.gearOrphan or 0) + 1
+        return
+    end
+    local have = type(entry.gear) == "table" and entry.gear or nil
+    local haveAt = have and tonumber(have.at) or 0
+    if haveAt >= ts then
+        peerStats.gearStale = (peerStats.gearStale or 0) + 1
+        return
+    end
+    local snap = {
+        at = ts,
+        from = sender,                  -- релей-защита: такой снапшот не уходит
+        ids = ids or (have and have.ids) or nil,
+        slots = slots or (have and have.slots) or nil,
+        ilvl = ilvl or (have and have.ilvl) or nil,
+        imp = imp or (have and have.imp) or nil,
+    }
+    if type(snap.ids) ~= "string" and type(snap.imp) ~= "string" then return end
+    -- Пишем ТЕМ ЖЕ путём, что и собственный инспект: он ведёт кольцо вытеснения
+    -- (db.gearRing). Обойти его — значит растить файл без границы.
+    local okStore = false
+    if NSP_INSPECT and type(NSP_INSPECT.Store) == "function" then
+        local okc, res = pcall(NSP_INSPECT.Store, key, snap)
+        okStore = okc and res and true or false
+    end
+    if not okStore then entry.gear = snap end
+    peerStats.gearIn = (peerStats.gearIn or 0) + 1
+    D(("Peer gear in: %s %s %s from %s"):format(
+        PeerEsc(name, 40), PeerEsc(game, 12),
+        (snap.ids and ((snap.slots or "?") .. " slots") or "talents only"),
+        PeerEsc(sender or "?", 40)))
     PeerSync()
 end
 
@@ -6511,6 +6874,53 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         db.peerProto = PEER_PROTO
         P(("Peer protocol: %s (приём N2-N7 работает всегда)"):format(PEER_PROTO))
         if PeerSync then pcall(PeerSync) end
+    elseif msg == "peer gear" or msg:match("^peer gear%s") or msg:match("^peer seed%s") then
+        -- Экипировка и билды в канале (20.11.2026).
+        --   /nspy peer gear            статус + счётчики
+        --   /nspy peer gear on|off     включить/выключить отправку
+        --   /nspy peer seed N          догрузить N уже собранных снапшотов
+        -- Флаг ХРАНИТСЯ ИНВЕРТИРОВАННО (peerGearOff): старая SV без ключа
+        -- означает «включено», а прямая запись нового поля сбросила бы настройку
+        -- у всех, у кого файл уже есть.
+        local db = GetDB()
+        local q = peerStats.gearQueue
+        local qn = (type(q) == "table") and #q or 0
+        local mode = msg:match("^peer gear%s+(%a+)$") or msg:match("^peer seed%s+(%d+)$")
+        if msg:match("^peer seed%s+(%d+)$") then
+            local want = math.floor(tonumber(msg:match("^peer seed%s+(%d+)$")) or 0)
+            if want < 1 then want = 1 end
+            if want > 200 then want = 200 end
+            local n, total = 0, 0
+            if type(db.gearRing) == "table" then
+                total = #db.gearRing
+                for _, key in ipairs(db.gearRing) do
+                    if n >= want then break end
+                    local entry = db.players and db.players[key]
+                    local snap = entry and entry.gear
+                    if type(snap) == "table" and not snap.from then
+                        local before = #peerStats.gearQueue
+                        PeerQueueGear(key, snap)
+                        if #peerStats.gearQueue > before then n = n + 1 end
+                    end
+                end
+            end
+            P(("peer: %d of %d stored snapshots queued (ring has %d)")
+                :format(n, want, total))
+        elseif mode == "on" then
+            db.peerGearOff = nil
+            P("peer gear: on (gear and builds are shared)")
+        elseif mode == "off" then
+            db.peerGearOff = true
+            peerStats.gearQueue = {}
+            P("peer gear: off (nothing more is sent or accepted)")
+        else
+            P(("peer gear: %s, queued=%d, sent=%d, in=%d, orphan=%d, stale=%d, bad=%d")
+                :format(db.peerGearOff and "off" or "on", qn,
+                        peerStats.gearSentCount or 0, peerStats.gearIn or 0,
+                        peerStats.gearOrphan or 0, peerStats.gearStale or 0,
+                        peerStats.gearBad or 0))
+        end
+        if PeerSync then pcall(PeerSync) end
     elseif msg == "peer send" then
         -- Ручная разгрузка очереди. Очередь штатно уходит только по клику в
         -- 3D-мир (hardware gate беты: WorldFrame OnMouseDown). Если этот гейт
@@ -6896,6 +7306,9 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- Passive inspector: same injection pattern (no UI, runs on encounters)
         if type(NSP_INSPECT) == "table" then
             NSP_INSPECT.P, NSP_INSPECT.GetDB, NSP_INSPECT.DbgErr = P, GetDB, DbgErr
+            -- Хук наружу: инспект отдаёт снапшот в peer-канал (экипировка +
+            -- билд), сам он про протокол и очереди ничего не знает.
+            NSP_INSPECT.QueuePeerGear = PeerQueueGear
             -- counters are per session (see J.Start): /nspy gear then answers
             -- "how did it go today", not "since installation"
             local okS, errS = pcall(NSP_INSPECT.Start)

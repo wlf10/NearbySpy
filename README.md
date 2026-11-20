@@ -129,6 +129,33 @@ been updated keeps working in both directions; `/nspy peer proto` switches
 sending back to **N5** (text fields) if the channel still has old clients. A
 packet in a newer format is ignored by an old client instead of being
 half-parsed.
+
+### Gear and builds travel the same channel
+
+A second packet type **G7** carries what the passive inspector already collects
+for players you meet — the equipped items and the talent build:
+
+```
+G7;game;realm;name;time;flags;gear[;talents]
+```
+
+`flags` is `g` (gear present), `t` (build present) or `gt`. `gear` is a bit
+stream in base64: a 19-bit bitmap of which slots are filled, 8 bits of item
+level and 20 bits per item id, in ascending slot order — the slot number is not
+sent because the bitmap already carries it. Measured on 849 live snapshots, the
+text form (`1:20521,2:276740,…`) takes 115 characters and this one 51, which is
+what keeps the worst real snapshot inside a single 240-byte message (151 bytes).
+
+The talent import string is *not* re-encoded: it is already built from the
+base64 alphabet, so any repacking would return the same bits.
+
+Gear packets are queued separately and only sent while the encounter queue is
+empty — a 133-byte snapshot must never push out the 47-byte encounters, and the
+server allows roughly ten messages a minute on this channel. A snapshot from a
+peer is never re-sent, and an incoming snapshot is applied only when it is newer
+than the one already stored, so a stale packet cannot overwrite your own
+inspection. `/nspy peer gear` shows the counters, `/nspy peer gear on|off`
+toggles sharing, `/nspy peer seed N` re-queues N already collected snapshots.
 Queue limit: 60; age limit: 120 seconds; at most one send per 10 seconds,
 on a mouse click. Messages are hidden from ordinary chat windows but visible
 to channel members and the game server. Peer data is untrusted and can be
