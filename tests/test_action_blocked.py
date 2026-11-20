@@ -109,16 +109,30 @@ end
 
     # --- the drain triggers that only produced refusals -------------------
 
-    def test_movement_no_longer_triggers_a_send_attempt(self):
-        # The client gates channel sends to hardware events. PLAYER_STARTED_MOVING
-        # is not one: 16.11.2026 the user confirmed the "Interface action failed
-        # because of an AddOn" popup appeared when he moved. Those two events gave
-        # no successful sends (2869 + 2869 attempts, 156 refusals), so they are
-        # unregistered. A test, not a comment, keeps them from creeping back.
-        registered = re.findall(r'peerInput:RegisterEvent\("([A-Z_]+)"\)', SRC)
-        self.assertNotIn("PLAYER_STARTED_MOVING", registered)
-        self.assertNotIn("PLAYER_STOPPED_MOVING", registered)
-        self.assertIn("PLAYER_TARGET_CHANGED", registered, "a working trigger was removed too")
+    def test_no_event_trigger_makes_a_send_attempt(self):
+        # The client gates channel sends to REAL hardware events, and only the
+        # world click qualifies. History in two steps:
+        #   16.11.2026 — PLAYER_STARTED/STOPPED_MOVING removed: the user saw the
+        #                "Interface action failed because of an AddOn" popup when
+        #                he moved (2869+2869 attempts, 156 refusals, 0 sends).
+        #   20.11.2026 — the three remaining events removed too. Live counters
+        #                from one run: world 34 598 attempts / 0 refusals, while
+        #                PLAYER_TARGET_CHANGED gave 8 822 / 106 refusals,
+        #                UNIT_SPELLCAST_START 1 498 / 27 and START_LOOT_ROLL
+        #                102 / 1. All 16 messages of that run went out on a world
+        #                click, so those 134 refusals bought nothing but popups.
+        # A test, not a comment, keeps them from creeping back.
+        # Ищем только триггеры ОТПРАВКИ (peerInput). Главный фрейм тоже слушает
+        # PLAYER_TARGET_CHANGED — но там это СБОР встречи (Record("target")), он
+        # ничего не отправляет и обязан остаться.
+        self.assertNotIn("peerInput", SRC,
+                         "фрейм peerInput вернулся: его события давали только "
+                         "отказы гейта и попап «ошибка интерфейса»")
+        # а вот единственный рабочий триггер обязан остаться
+        self.assertIn('HookScript("OnMouseDown"', SRC)
+        # сбор данных по цели обязан остаться на главном фрейме
+        self.assertIn('pcall(Record, "target")', SRC,
+                      "сбор встречи по смене цели пропал вместе с триггерами отправки")
 
     def test_the_world_click_trigger_is_still_hooked(self):
         # this is the one real hardware event we have — losing it would stall the

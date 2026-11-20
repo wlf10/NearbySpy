@@ -7154,27 +7154,33 @@ if WorldFrame and WorldFrame.HookScript then
     WorldFrame:HookScript("OnMouseDown", function() PeerTryDrain("world") end)
 end
 
--- События, по которым пробуем разгрузить очередь.
+-- Разгрузка очереди по игровым событиям — СНЯТА (20.11.2026).
 --
--- ⚠️ 16.11.2026: движение ОТСЮДА УБРАНО. Клиент пускает SendChatMessage в канал
--- только из hardware-события, а PLAYER_STARTED_MOVING/STOPPED_MOVING таковым не
--- является — на них гейт отвечал ADDON_ACTION_BLOCKED, и игрок видел попап
--- «Интерфейсная операция недоступна из-за модификации» (подтверждено им в игре:
--- ошибка появляется при нажатии движения). Отправок эти события всё равно не
--- давали, только отказы: за сессию 2869+2869 вызовов при 156 блокировках.
--- Клик по миру (OnMouseDown ниже) — настоящее hardware-событие и работает.
--- Остальные оставлены под замер: db.debug.gateWhy покажет, дают ли они отправки
--- или тоже только отказы; по нему их можно будет снять так же.
-local peerInput = CreateFrame("Frame")
-peerInput:RegisterEvent("UNIT_SPELLCAST_START")
-peerInput:RegisterEvent("PLAYER_TARGET_CHANGED")
-peerInput:RegisterEvent("START_LOOT_ROLL")
-peerInput:SetScript("OnEvent", function(_, event, arg1)
-    -- UNIT_SPELLCAST_START приходит для любого юнита: нас интересует только
-    -- действие самого игрока, иначе чужие касты в группе будут дёргать очередь.
-    if event == "UNIT_SPELLCAST_START" and arg1 ~= "player" then return end
-    PeerTryDrain(event)
-end)
+-- История: 16.11.2026 отсюда убрали движение (PLAYER_STARTED_MOVING /
+-- STOPPED_MOVING): клиент пускает SendChatMessage в канал только из
+-- hardware-события, а движение таковым не является — на нём гейт отвечал
+-- ADDON_ACTION_BLOCKED, и игрок видел попап «Интерфейсная операция недоступна
+-- из-за модификации». Три оставшихся события (UNIT_SPELLCAST_START,
+-- PLAYER_TARGET_CHANGED, START_LOOT_ROLL) держались «под замер».
+--
+-- Замер закончен, живые счётчики одного прогона:
+--
+--   триггер                  попыток   отказов гейта
+--   world (клик по миру)      34 598        0        ← единственный рабочий
+--   PLAYER_TARGET_CHANGED      8 822      106
+--   UNIT_SPELLCAST_START       1 498       27
+--   START_LOOT_ROLL              102        1
+--
+-- 134 отказа = 134 попапа об ошибке интерфейса при НУЛЕВОМ вкладе в отправку:
+-- за тот же прогон отправлено 16 сообщений, и все — по клику по миру.
+-- Поэтому события сняты целиком, а не приглушены: отказ приходит на сам вызов,
+-- и «пробовать реже» не уменьшило бы показ попапа, только его частоту.
+--
+-- Если понадобится вернуть источник отправок — возвращать НЕ эти события, а
+-- искать другой настоящий hardware-ввод (варианты под замер: нажатие клавиши
+-- через модификатор, клик по юнитфрейму). Проверять данными: db.debug.peerDrain
+-- против db.debug.gateWhy, а не по названию события.
+
 chatFrame:RegisterEvent("CHAT_MSG_SAY")
 chatFrame:RegisterEvent("CHAT_MSG_YELL")
 chatFrame:RegisterEvent("CHAT_MSG_CHANNEL")
@@ -7494,7 +7500,8 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         D(("BLOCKED[%s]: %s → %s"):format(event, addon, func))
         -- Только свои блокировки идут в blocked/blockedAt: общий счётчик смешивал
         -- нас с чужими аддонами и не отвечал ни на один вопрос (см. NspNoteBlock).
-        if NspNoteBlock(GetDB(), addon, func, time(), event) then
+        local dbB = GetDB()
+        if NspNoteBlock(dbB, addon, func, time(), event) then
             D(("client blocked our call: %s (%s)"):format(func, event))
             -- Интерфейсная ошибка «Interface action failed because of an AddOn»
             -- — это и есть попап ADDON_ACTION_BLOCKED/FORBIDDEN. Он всплывает на
@@ -7509,6 +7516,27 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
                 -- Близзард показывает попап по тому же событию и может сделать это
                 -- ПОСЛЕ нас: повторяем хайд на следующем кадре, иначе диалог
                 -- остаётся на экране и жалоба возвращается.
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, function()
+                        pcall(StaticPopup_Hide, "ADDON_ACTION_BLOCKED")
+                        pcall(StaticPopup_Hide, "ADDON_ACTION_FORBIDDEN")
+                    end)
+                end
+            end
+        elseif addon == "UNKNOWN()" or addon == "" or addon == "nil" then
+            -- ⚠️ Клиент НЕ ВСЕГДА называет виновника: в живом SV 315 блокировок
+            -- пришли как `blocked["UNKNOWN()"]`, то есть arg1 = "UNKNOWN()".
+            -- Такая запись не содержит имени аддона, NspNoteBlock относит её к
+            -- чужим, и попап НЕ гасится — игрок видит «ошибку интерфейса»,
+            -- которую мы же и вызвали. Атрибуция по времени: если наш вызов
+            -- отправки был в пределах секунды, это почти наверняка мы (так же
+            -- рассуждает NspNoteSendRet). Чужие блокировки без имени не трогаем,
+            -- только когда рядом нет нашей отправки.
+            local at = type(dbB.debug) == "table" and tonumber(dbB.debug.sendRetAt)
+            if at and (time() - at) <= 1 and StaticPopup_Hide then
+                D("client blocked an unnamed call right after our send — popup suppressed")
+                pcall(StaticPopup_Hide, "ADDON_ACTION_BLOCKED")
+                pcall(StaticPopup_Hide, "ADDON_ACTION_FORBIDDEN")
                 if C_Timer and C_Timer.After then
                     C_Timer.After(0, function()
                         pcall(StaticPopup_Hide, "ADDON_ACTION_BLOCKED")
