@@ -81,11 +81,16 @@ class PeerPlaceTests(unittest.TestCase):
         sent = [str(p) for p in self.lua.globals()["QUEUED"].values()]
         self.assertEqual(1, len(sent))
         parts = sent[0].split(";")
-        # N6 = 13 полей: name;cls;lvl;race;fac;zoneId;x;y;time;хвост
+        # N7 = 13 полей: name;cls;lvl;race;fac;zoneId;x;y;time;хвост
         # zoneId — ОСНОВНОЙ ключ, имя зоны едет РАСШИРЕНИЕМ в хвосте
-        # (последним, после 'z'-значений).
+        # (последним, после 'z'-значений) — и теперь только ПЕРВОЙ записью зоны
+        # за сессию: 19.5 байта кириллического имени в каждой записи не стоили
+        # того (см. N7 в NearbySpy.lua).
         self.assertEqual(13, len(parts))
-        self.assertEqual("N6", parts[0])
+        self.assertEqual("N7", parts[0])
+        # Мир — кодом из NSP_REALM_CODES (22 байта имени в каждом сообщении):
+        # "CAMWOW EU5 Realm 1 PvE" — 11-я строка таблицы, base36(10) = "a".
+        self.assertEqual("a", parts[2], "мир должен уйти кодом, а не именем")
         self.assertEqual(1, len(parts[4]), "класс не закодирован: %r" % parts[4])
         self.assertEqual("1429", parts[8], "zoneId — основной ключ")
         self.assertEqual("0.5231", parts[9], "x")
@@ -93,7 +98,12 @@ class PeerPlaceTests(unittest.TestCase):
         # Время — момент НАБЛЮДЕНИЯ (1000, когда запись попала в очередь), а не
         # отправки (1100): пакет может пролежать в очереди минуты, и получатель
         # должен видеть, когда игрока видели, а не когда канал его пропустил.
-        self.assertEqual("1000", parts[11], "время наблюдения — после координат")
+        # Формат — base36 (6 байт вместо 10), но точность до секунды сохранена,
+        # иначе 1000 и 1100 склеились бы в одну минуту.
+        decode = self.lua.globals()["PeerTimeValue"]
+        self.assertEqual(1000, decode(parts[11]),
+                         "время наблюдения — после координат, base36")
+        self.assertLess(len(parts[11]), 10, "время должно ужаться")
         self.assertIn("Таверна", parts[12], "имя зоны — расширение в хвосте")
 
     def test_absent_race_does_not_steal_the_zone_text(self):

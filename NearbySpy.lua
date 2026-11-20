@@ -1138,13 +1138,20 @@ function PeerChannelName()
     -- фракция неизвестна (ранний вызов, нестандартный сервер) — общий канал
     return PEER_CHANNEL_BASE
 end
--- Протокол отправки — N6. Он кодирует ОДНИМ СИМВОЛОМ и класс/расу/фракцию
--- (в записи), и игру (в заголовке): обе — конечные множества.
--- N5 — переходный режим: пачки с текстовыми полями, включается настройкой,
--- если в канале остались клиенты, которые кодов не понимают.
--- Приём поддерживает ВСЁ от N2 до N6, поэтому старые клиенты продолжают
--- работать в обе стороны: мы их слышим, они нас — пока мы в режиме N5.
-local PEER_PROTO = "N6"
+-- Протокол отправки — N7: компактные поля (20.11.2026).
+-- N6 кодировал одним символом класс/расу/фракцию и игру; N7 делает то же с
+-- миром (код вместо 22 байт имени в КАЖДОМ сообщении) и временем (base36
+-- вместо 10 цифр unix-тайма), а имя зоны отправляет один раз на зону за сессию.
+-- Замер по живому SV (34 581 peer-запись): сообщение с одной записью 90 → 45
+-- байт, записей в 240-байтовое сообщение 2.7 → 5.3 при том же интервале.
+-- N5 — переходный режим для старых клиентов: поля текстом, мир текстом.
+-- ⚠️ Отправки в формате N6 больше НЕТ: раскладка записи у N6 и N7 одна, и
+-- «N6 с новыми полями» старый клиент прочитал бы как мир "a" вместо имени —
+-- то есть испортил бы данные, а не просто не понял их. Выбор для старых
+-- клиентов — N7 (поймут те, кто обновился) или N5 (поймут все): /nspy peer proto.
+-- Приём у нас держит ВСЁ от N2 до N7, поэтому чужие записи слышны в любой
+-- раскладке, включая N6 от клиентов прошлой версии.
+local PEER_PROTO = "N7"
 
 -- PEER_TTL: сколько секунд запись ждёт своей отправки, прежде чем сгореть.
 -- Было 120, и этого не хватало (живой SV 15.11.2026: пять записей «expired
@@ -1189,7 +1196,7 @@ local peerQueue, peerQueued, peerSent = {}, {}, {}
 -- top-level local breaks the whole addon at compile time.
 local peerStats = {sent = 0, received = 0, merged = 0, dropped = 0, seen = 0, valid = 0, rejected = 0,
     foreign = 0, selfEcho = 0, inStart = 0, inCount = 0, lastSend = 0, rejectLogged = {}, lastNoChannel = 0,
-    leftStale = nil}
+    leftStale = nil, zoneSent = {}}
 
 -- PeerThrottled — сервер отказал принимать сообщения так часто
 -- ("THROTTLED" в CHANNEL_MSG_CHANNEL_NOTICE). Реагируем на СИГНАЛ сервера, а не
@@ -1336,6 +1343,75 @@ function PeerDecode(kind, code, text)
     return NSP_PEER_CODES[kind][code or ""]
 end
 
+-- ── Компактные поля N7: мир и время (20.11.2026) ───────────────────────────
+-- Мир стоит 22 байта в КАЖДОМ сообщении ("CAMWOW EU4 Realm 6 PvP"), а миров в
+-- кластере полтора десятка (живой SV 20.11.2026: 14 разных на 34 581 запись).
+-- Код — base36-индекс в таблице: 1 байт вместо 22.
+-- ⚠️ Таблица ТОЛЬКО ДОПОЛНЯЕТСЯ В КОНЕЦ: индекс уезжает по сети, и перестановка
+-- строк переименовала бы мир у всех получателей. Новый мир = новая строка
+-- последней; менять порядок = менять протокол.
+-- Мир вне таблицы уходит ТЕКСТОМ — приём отличает код от имени по длине и
+-- алфавиту (код: 1-2 символа из [0-9a-z]).
+NSP_REALM_CODES = {
+    "CAMWOW EU4 Realm 6 PvP", "CAMWOW EU5 Realm 2 PvP", "CAMWOW EU4 Realm 8 PvP",
+    "CAMWOW EU5 Realm 6 PvP", "CAMWOW EU5 Realm 4 PvP", "CAMWOW EU5 Realm 8 PvP",
+    "CAMWOW EU4 Realm 2 PvP", "CAMWOW EU4 Realm 4 PvP", "CAMWOW EU5 Realm 5 PvE",
+    "CAMWOW EU5 Realm 7 PvE", "CAMWOW EU5 Realm 1 PvE", "CAMWOW EU4 Realm 5 PvE",
+    "CAMWOW EU5 Realm 9 RP PvP", "CAMWOW EU4 Realm 9 RP PvP",
+}
+
+-- Base36. tonumber(s, 36) в Lua 5.1 есть, обратной функции нет.
+function PeerB36(n)
+    n = tonumber(n) or 0
+    if n <= 0 then return "0" end
+    local digits, s = "0123456789abcdefghijklmnopqrstuvwxyz", ""
+    while n > 0 do
+        local d = n % 36
+        s = digits:sub(d + 1, d + 1) .. s
+        n = math.floor(n / 36)
+    end
+    return s
+end
+
+-- PeerRealmCode(realm) -> код или nil, если мира нет в таблице.
+function PeerRealmCode(realm)
+    if type(realm) ~= "string" or realm == "" then return nil end
+    for i = 1, #NSP_REALM_CODES do
+        if NSP_REALM_CODES[i] == realm then return PeerB36(i - 1) end
+    end
+    return nil
+end
+
+-- PeerRealmName(token) -> имя мира. Код распознаётся по длине и алфавиту, всё
+-- остальное возвращается как есть: так понимаются и старые отправители
+-- (полное имя), и новые миры, которых нет в таблице.
+function PeerRealmName(token)
+    if type(token) ~= "string" or token == "" then return nil end
+    if #token > 2 or not token:match("^[0-9a-z]+$") then return token end
+    local idx = tonumber(token, 36)
+    if not idx then return token end
+    return NSP_REALM_CODES[idx + 1] or token
+end
+
+-- Время наблюдения: 10 байт unix-тайма — второе по стоимости поле записи.
+-- В base36 это 6 байт (в 2085 году — 7, признак формата всё равно по длине).
+-- Секунды СОХРАНЕНЫ намеренно: минутная точность склеила бы «наблюдение» и
+-- «отправку» внутри одной минуты (запись ждёт в очереди до PEER_TTL = 600 с),
+-- и смысл поля — когда игрока ВИДЕЛИ — пропал бы ради одного байта.
+-- Приём различает форматы по длине: 8+ цифр = старый unix-тайм, иначе base36.
+function PeerTimeCode(ts)
+    local n = tonumber(ts)
+    if not n or n <= 0 then return "0" end
+    return PeerB36(math.floor(n))
+end
+
+function PeerTimeValue(s)
+    if type(s) ~= "string" or s == "" then return nil end
+    if #s >= 8 and s:match("^%d+$") then return tonumber(s) end
+    return tonumber(s, 36)
+end
+
+
 -- Peers now carry the place as well (protocol N3, fields 9-12). A chat message
 -- is capped by the client at 255 bytes, so the payload is built with a budget and
 -- loses its optional parts in a fixed order instead of being dropped whole:
@@ -1437,15 +1513,29 @@ QueuePeerNew = function(db, data)
     --  2) поэтому имя — запасной вариант, а не второй равноправный ключ.
     -- Приём отличает зону от 'z'-значений по количеству: он знает, сколько
     -- слотов помечено 'z', всё сверх этого — имя зоны.
+    -- Имя зоны — один раз на зону за сессию, а не в каждой записи (20.11.2026).
+    -- Кириллическая зона — 19.5 байта в UTF-8 (замер по 34 581 живой записи):
+    -- четверть сообщения, при том что zoneId уже едет и резолвится у получателя
+    -- ЕГО клиентом. Имя остаётся страховкой для тех, чей клиент id не знает:
+    -- объявляем его первой записью зоны в сессии, и всегда — когда id нет вовсе.
+    -- Счётчик живёт в peerStats, а не отдельным local: главный чанк стоит у
+    -- потолка Lua 5.1 в 200 локалов. Инициализация ленивая: peerStats — общая
+    -- сессионная таблица, её может пересоздать любой сброс состояния.
+    local zoneSent = peerStats.zoneSent
+    if type(zoneSent) ~= "table" then zoneSent = {}; peerStats.zoneSent = zoneSent end
     local zoneInTail = (zoneName ~= "" and zoneName ~= "?" and PeerField(zoneName, 60))
-    if zoneInTail then extra[#extra + 1] = cleanText(zoneName) end
+        and (zoneId == 0 or not zoneSent[zoneId])
+    if zoneInTail then
+        extra[#extra + 1] = cleanText(zoneName)
+        if zoneId > 0 then zoneSent[zoneId] = true end
+    end
 
     -- Запись N6: имя;класс;уровень;раса;фракция;zoneId;x;y;время[;хвост]
     -- Хвост = текстовые значения для 'z'-слотов + имя зоны последним.
     local function BuildRec(cx, cy, withZone)
         local rec = table.concat({data.name,
             clsCode, tostring(level), raceCode, facCode,
-            tostring(zoneId), cx, cy, tostring(tonumber(data.observedAt) or time())}, ";")
+            tostring(zoneId), cx, cy, PeerTimeCode(data.observedAt or time())}, ";")
         local tail = extra
         if not withZone and zoneInTail and #extra > 0 then
             -- отбрасываем именно зону (последний элемент), прочие 'z' остаются
@@ -1599,7 +1689,13 @@ local function DrainPeerQueue()
     -- Заголовок "N6;game;realm;" входит в лимит сообщения, поэтому считается
     -- сразу: без него пачка вылезала за PEER_PAYLOAD_MAX (живой прогон теста:
     -- 252 байта при лимите 240).
-    local headerLen = #PEER_PROTO + 1 + #headGame + 1 + #head.realm + 1
+    -- Мир в заголовке — КОДОМ (20.11.2026): 1 байт вместо 22 у "CAMWOW EU4
+    -- Realm 6 PvP". В режиме N5 мир уходит ТЕКСТОМ: старый клиент код не
+    -- поймёт, а он для этого режима и нужен. Мир вне таблицы уходит текстом в
+    -- любом режиме — приём различает код и имя по длине.
+    local headRealm = head.realm
+    if PEER_PROTO ~= "N5" then headRealm = PeerRealmCode(head.realm) or head.realm end
+    local headerLen = #PEER_PROTO + 1 + #headGame + 1 + #headRealm + 1
     local batch, batchLen = { head }, headerLen + #head.rec
     local i = 2
     while i <= #peerQueue and #batch < PEER_BATCH_MAX do
@@ -1620,11 +1716,11 @@ local function DrainPeerQueue()
     -- В переходном режиме N5 игра тоже текстом: старый клиент кода не поймёт.
     local gameForWire = (PEER_PROTO == "N5") and head.game or headGame
     if #batch == 1 then
-        payload = PEER_PROTO .. ";" .. gameForWire .. ";" .. head.realm .. ";" .. recFor(head)
+        payload = PEER_PROTO .. ";" .. gameForWire .. ";" .. headRealm .. ";" .. recFor(head)
     else
         local parts = {}
         for k = 1, #batch do parts[k] = recFor(batch[k]) end
-        payload = PEER_PROTO .. ";" .. gameForWire .. ";" .. head.realm .. ";" .. table.concat(parts, PEER_BATCH_SEP)
+        payload = PEER_PROTO .. ";" .. gameForWire .. ";" .. headRealm .. ";" .. table.concat(parts, PEER_BATCH_SEP)
     end
 
     -- Последняя защита перед отправкой: сервер отклоняет сообщение с '|' как
@@ -1745,7 +1841,7 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     --
     -- Раньше признаком был '|', но с ним сервер отклонял сообщение целиком
     -- («Invalid escape code in chat message»), поэтому разделитель заменён.
-    if (fields[1] == "N6" or fields[1] == "N5")
+    if (fields[1] == "N7" or fields[1] == "N6" or fields[1] == "N5")
         and type(message) == "string" and message:find(PEER_BATCH_SEP, 1, true) then
         local proto = fields[1]
         if not fields[2] or not fields[3] then return Reject("batch header") end
@@ -1774,15 +1870,21 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     -- N5 = 13 (N4 с текстовыми классом/расой/фракцией),
     -- N6 = 13 или 14 (класс/раса/фракция и игра — кодами; имя зоны рядом с id;
     --      14-е поле — хвост с текстовыми значениями для слотов 'z').
+    -- N7 = 13 или 14 — как N6, но мир кодом, время base36-минутами и имя зоны
+    --      только при неизвестном zoneId (20.11.2026).
     -- Приём держит ВСЕ версии: старый клиент в канале не должен замолчать.
     if #fields ~= 8 and #fields ~= 12 and #fields ~= 13 and #fields ~= 14 then
         return Reject("field count")
     end
     local proto = fields[1]
     if proto ~= "N2" and proto ~= "N3" and proto ~= "N4"
-        and proto ~= "N5" and proto ~= "N6" then
+        and proto ~= "N5" and proto ~= "N6" and proto ~= "N7" then
         return Reject("unknown protocol " .. PeerEsc(proto, 8))
     end
+    -- «Компактная» раскладка: код класса/расы/фракции и хвост 'z'-значений.
+    -- Одна переменная вместо сверки с каждой версией в трёх местах ниже — N7
+    -- отличается от N6 только содержимым полей, а не структурой.
+    local compact = (proto == "N6" or proto == "N7")
     -- Игру принимаем В ОБОИХ видах: кодом (N6) и именем (N2…N5). Признак кода —
     -- длина 1. Если такой код неизвестен, значение остаётся как есть, чтобы
     -- новая игра не потерялась до добавления в таблицу.
@@ -1794,7 +1896,13 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         return Reject(("game mismatch got=%s want=%s")
             :format(PeerEsc(tostring(wireGame), 12), PeerEsc(db.game, 12)))
     end
-    if fields[3] ~= PlayerRealm() then
+    -- Мир тоже может прийти кодом (N7): 1 байт вместо 22. PeerRealmName
+    -- распознаёт код по длине и алфавиту и возвращает имя как есть, если это не
+    -- код, — поэтому старый отправитель с полным именем понимается тем же
+    -- вызовом. Сравнение с PlayerRealm() идёт уже по имени, иначе свой же
+    -- пакет выглядел бы «чужим миром».
+    local wireRealm = PeerRealmName(fields[3]) or fields[3]
+    if wireRealm ~= PlayerRealm() then
         -- The channel is shared across the whole cluster (observed
         -- 09.11.2026: our CAMWOW EU5 Realm 1 PvE next to CAMWOW EU4 Realm 6
         -- PvP), so a foreign realm is expected data, not noise. It is accepted
@@ -1806,11 +1914,11 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         if db.peerAllRealms == false then return Reject("foreign realm disabled") end
         peerStats.foreign = peerStats.foreign + 1
     end
-    local realm, name, class = fields[3], fields[4], fields[5]
+    local realm, name, class = wireRealm, fields[4], fields[5]
     local race, faction
     local tail = {}          -- хвост записи N6: 'z'-значения + имя зоны последним
     local tailZone           -- имя зоны из хвоста (расширение к zoneId)
-    if proto == "N6" then
+    if compact then
         -- класс/раса/фракция — односимвольные коды; 'z' означает «не из
         -- таблицы», тогда значения идут текстом в хвосте (13-е поле).
         if not PeerField(name, 60) or not PeerField(realm, 100)
@@ -1844,7 +1952,7 @@ local function ReceivePeerMessage(message, sender, fromBatch)
             if z ~= "" and PeerField(z, 60) then tailZone = z end
         end
     end
-    if proto ~= "N6" then
+    if not compact then
         if not PeerField(name, 60) or not PeerField(realm, 100)
             or not class:match("^[A-Z]+$") or #class > 32 then return Reject("bad name/class") end
         race = fields[7]
@@ -1887,8 +1995,10 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     --   N2: нет места вообще
     --   N3/N4/N5: zoneId;зона;x;y[;время] — имя полем
     --   N6:       zoneId;x;y;время[;хвост] — имя только в хвосте (расширение)
+    --   N7:       как N6, но время — base36-минуты (PeerTimeValue понимает и
+    --             старый unix-тайм, поэтому строка одна на оба протокола)
     local zoneId, zoneName, px, py, observedAt
-    if proto == "N6" then
+    if compact then
         zoneId = tonumber(fields[9])
         if not zoneId or zoneId < 0 or zoneId % 1 ~= 0 or zoneId > 100000 then
             return Reject("bad zone id")
@@ -1901,7 +2011,7 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         else
             px, py = nil, nil
         end
-        observedAt = tonumber(fields[12])
+        observedAt = PeerTimeValue(fields[12])
         if not observedAt or observedAt <= 0 then return Reject("bad time") end
         if observedAt > time() + PEER_CLOCK_SKEW then return Reject("time in future") end
         -- Имя: сначала свой клиент по id (тогда оно на языке получателя), и
@@ -1925,7 +2035,7 @@ local function ReceivePeerMessage(message, sender, fromBatch)
             px, py = nil, nil
         end
         if proto == "N4" then
-            observedAt = tonumber(fields[13])
+            observedAt = PeerTimeValue(fields[13])
             -- Время наблюдения: отрицательное или абсурдно далёкое будущее —
             -- отказ. Часы у отправителя могут врать, но не на годы; иначе
             -- один пакет «из 2030 года» навсегда перебивал бы все обновления.
@@ -6392,12 +6502,14 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         P(("zones: name lookup '%s' -> %s"):format(
             PlayerZone() or "?", tostring(byName[PlayerZone() or ""] or "нет")))
     elseif msg == "peer proto" then
-        -- Переходный режим: N6 экономит 19 байт на запись, но клиент старой
-        -- версии его не поймёт. Команда позволяет вернуться на N5 (те же пачки,
-        -- поля текстом) без переустановки аддона.
-        PEER_PROTO = (PEER_PROTO == "N6") and "N5" or "N6"
+        -- Переходный режим для старых клиентов в канале: без переустановки
+        -- аддона. Цикл N7 ↔ N5. N7 — плотный формат; N5 — поля текстом, его
+        -- понимает ЛЮБОЙ клиент, включая версии до N6. Отправки N6 нет
+        -- намеренно: запись у N6 и N7 одной раскладки, и старый клиент принял
+        -- бы код мира за имя (то есть испортил бы запись, а не пропустил её).
+        PEER_PROTO = (PEER_PROTO == "N7") and "N5" or "N7"
         db.peerProto = PEER_PROTO
-        P(("Peer protocol: %s (приём N2-N6 работает всегда)"):format(PEER_PROTO))
+        P(("Peer protocol: %s (приём N2-N7 работает всегда)"):format(PEER_PROTO))
         if PeerSync then pcall(PeerSync) end
     elseif msg == "peer send" then
         -- Ручная разгрузка очереди. Очередь штатно уходит только по клику в

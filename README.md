@@ -102,21 +102,33 @@ The channel is joined automatically on login (`/nspy peer off` opts out).
 locally discovered record with a known class and level is queued; subsequent
 updates and records received from peers are not sent.
 
-Message format, protocol **N3** (12 fields, `;`-separated):
+Message format, protocol **N7** (13 or 14 fields, `;`-separated; the 14th is a
+tail of values that did not fit a code):
 
 ```
-N3;game;realm;name;class;level;race;faction;zoneId;zone;x;y
+N7;game;realm;name;class;level;race;faction;zoneId;x;y;time[;tail]
 ```
 
-`zoneId` is the map id (a number, identical in every client language), `zone` is
-the localized zone name as the sender saw it, `x`/`y` are map coordinates 0..1.
-`0`, `?` and `-` mean "the sender did not know" — nothing is invented. No chat
-text is ever sent, and the packet is capped at 240 bytes (a chat message is
-limited to 255 bytes by the client). An oversized packet loses the zone name
-first, then the coordinates, instead of being dropped whole.
+`class`, `race`, `faction`, `game` and `realm` travel as one-character codes
+(finite sets); a value outside the built-in table is sent as text in the tail,
+so a new realm or a custom race is never lost. `realm` is a base36 index into
+the realm table, and `time` is the observation moment in base36 seconds — both
+exist to keep records small: a 240-byte message carries 5 records instead of 2,
+which doubles the channel throughput at the same send interval.
 
-The older **N2** format (8 fields, no place) is still accepted, so a client that
-has not been updated keeps working in both directions.
+`zoneId` is the map id (a number, identical in every client language), `x`/`y`
+are map coordinates 0..1. The localized zone name travels once per zone per
+session, as a fallback for clients that cannot resolve the id. `0`, `?` and `-`
+mean "the sender did not know" — nothing is invented. No chat text is ever
+sent, and the packet is capped at 240 bytes (a chat message is limited to 255
+bytes by the client). An oversized packet loses the zone name first, then the
+coordinates, instead of being dropped whole.
+
+Every older format (**N2** … **N6**) is still accepted, so a client that has not
+been updated keeps working in both directions; `/nspy peer proto` switches
+sending back to **N5** (text fields) if the channel still has old clients. A
+packet in a newer format is ignored by an old client instead of being
+half-parsed.
 Queue limit: 60; age limit: 120 seconds; at most one send per 10 seconds,
 on a mouse click. Messages are hidden from ordinary chat windows but visible
 to channel members and the game server. Peer data is untrusted and can be
