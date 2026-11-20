@@ -481,11 +481,12 @@ function ZoneNameById(id)
     -- Сначала прямой запрос: он не требует обхода и работает всегда.
     if C_Map and C_Map.GetMapInfo then
         local ok, info = pcall(C_Map.GetMapInfo, n)
-        if ok and type(info) == "table" and type(info.name) == "string"
-            and info.name ~= "" then
-            if not (canaccessvalue and not canaccessvalue(info.name)) then
-                return info.name
-            end
+        -- Гейт секретной строки идёт ПЕРЕД `info.name ~= ""`: сравнение с
+        -- пустой строкой — строковая операция и на секретном значении бросает
+        -- (тот же класс дефекта, что был в обработчике чата).
+        if ok and type(info) == "table" and type(info.name) == "string" then
+            local secret = canaccessvalue and not canaccessvalue(info.name)
+            if not secret and info.name ~= "" then return info.name end
         end
     end
     local _, byId = ZoneMapInit()
@@ -6804,7 +6805,14 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             P("errors: none recorded")
         else
             for _, src in ipairs(errKeys) do
-                P(("error[%s] x%d: %s"):format(src, tonumber(db.debug.errCount[src]) or 0,
+                -- Возраст обязателен: errLast переживает логаут и остаётся в SV
+                -- навсегда, поэтому починенная два дня назад ошибка читалась
+                -- как «живая» (живой случай 20.11.2026: обе строки errLast были
+                -- от 16 и 19 ноября, то есть до сегодняшнего прогона). Без метки
+                -- времени команда отвечает не на тот вопрос, который задают.
+                local at = type(db.debug.errAt) == "table" and db.debug.errAt[src]
+                P(("error[%s] x%d (%s): %s"):format(src, tonumber(db.debug.errCount[src]) or 0,
+                    TimeAgo(tonumber(at)),
                     PeerEsc(tostring((db.debug.errLast or {})[src] or "?"), 110)))
             end
         end
@@ -7183,8 +7191,14 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
             return -- peer speaker is not a new encounter; no rebroadcast
         end
         local speaker = select(2, ...)
-        if type(speaker) ~= "string" or speaker == "" or
-            (canaccessvalue and not canaccessvalue(speaker)) then return end
+        -- ⚠️ Порядок проверок здесь не косметика: клиент может прислать
+        -- говорящего СЕКРЕТНОЙ строкой (Midnight-стиль), а `speaker == ""` —
+        -- это уже строковая операция, которая на такой строке бросает
+        -- «attempt to compare local 'speaker' (a secret string value)».
+        -- Гейт обязан стоять ПЕРВЫМ, до любого сравнения и до type() —
+        -- type() секретную строку пропускает, поэтому его одного мало.
+        if canaccessvalue and type(speaker) == "string" and not canaccessvalue(speaker) then return end
+        if type(speaker) ~= "string" or speaker == "" then return end
         local me, surname = UnitName("player")
         if me and (speaker == me or (surname and surname ~= "" and speaker == me .. " " .. surname)
             or speaker == me .. "-" .. PlayerRealm()) then return end
