@@ -415,8 +415,12 @@ Step = function()
     if not pending then
         local id = table.remove(queue, 1)
         if not id then Finish() return end
-        if run.asked >= MAX_PER_RUN then
-            J.Say(("itemnames: достигнут предел %d за прогон, останавливаюсь"):format(MAX_PER_RUN))
+        -- Предел берём из САМОГО ПРОГОНА (run.limit), а не из константы:
+        -- иначе `refresh`/`all`, поднявшие лимит, всё равно обрывались бы на
+        -- MAX_PER_RUN — так и вышло 20.11.2026 (asked 2000 из 2763).
+        local cap = run.limit or MAX_PER_RUN
+        if run.asked >= cap then
+            J.Say(("itemnames: достигнут предел %d за прогон, останавливаюсь"):format(cap))
             Finish()
             return
         end
@@ -603,7 +607,7 @@ function J.Run(limit)
         J.Say("itemnames: все известные ID уже имеют имена и свойства (retry — переспросить неотдавшиеся)")
         return
     end
-    run = { asked = 0, ok = 0, fail = 0, partial = 0, tip = 0, stats = 0 }
+    run = { asked = 0, ok = 0, fail = 0, partial = 0, tip = 0, stats = 0, limit = n }
     local have = 0
     local cur = NamesFor(db, false)
     if cur then for _ in pairs(cur) do have = have + 1 end end
