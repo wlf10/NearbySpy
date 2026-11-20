@@ -373,5 +373,73 @@ class SpeedPersistenceTest(unittest.TestCase):
                          "tier/kind теряются при сохранении очереди: %s" % got)
 
 
+class LevelFirstRaceSplitTest(unittest.TestCase):
+    """Расовое дробление в level-first плане (/nspy who, режим по умолчанию).
+
+    Дефект 20.11.2026: переполненный срез «класс × уровень» дробился по ВСЕМ
+    расам фракции, а не по тем, что реально бывают у класса — в очередь попадали
+    пары вида «Друид × Орк», которых на сервере нет. Плюс при делении среза по
+    уровням терялся файл-ключ класса (`cls`), поэтому фильтровать было нечем.
+    SCAN.RaceNames — общий список рас для обеих воронок.
+    """
+
+    BACK = [("WARRIOR", r) for r in ALL_RACES]
+
+    def names(self, cls_lua):
+        rows = "\n".join('{class="%s", race="%s"},' % (c, r)
+                         for c, r in ClassRaceCombosTest.REAL_PAIRS + self.BACK
+                         for _ in range(120))
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        chunk = (
+            PRELUDE + scan_block()
+            + "\nlocal db = {learn = LEARN, players = { %s }}\n" % rows
+            + "local out = {}\n"
+            + "for _, n in ipairs(SCAN.RaceNames(db, %s)) do out[#out+1] = n end\n" % cls_lua
+            + "return out\n"
+        )
+        return {str(x) for x in lua.execute(chunk).values()}
+
+    def test_known_class_skips_impossible_pairs(self):
+        """Друид Орды: только Таурен — Орк/Нежить/Тролль отсечены."""
+        got = self.names("'DRUID'")
+        self.assertEqual(got, {"Таурен"},
+                         "level-first спрашивает расы, у которых друида нет: %s" % got)
+
+    def test_nil_class_keeps_old_behaviour(self):
+        """План из старого SV без cls: не сужаем, берём все расы фракции."""
+        got = self.names("nil")
+        self.assertEqual(got, {"Нежить", "Орк", "Таурен", "Тролль"},
+                         "без класса список рас сломан: %s" % got)
+
+    def test_level_split_carries_the_class(self):
+        """Деление среза по уровням обязано переносить cls в оба дочерних среза."""
+        src = SOURCE.read_text(encoding="utf-8")
+        i = src.index("local mid = math.floor((q.lo + q.hi) / 2)")
+        j = src.index("whoScan.splits = (whoScan.splits or 0) + 1", i)
+        block = src[i:j]
+        self.assertEqual(block.count("cls = q.cls"), 2,
+                         "дочерние срезы теряют класс:\n%s" % block)
+
+    def test_class_split_carries_the_class(self):
+        """Классовые срезы из широкого ответа тоже обязаны нести cls."""
+        src = SOURCE.read_text(encoding="utf-8")
+        i = src.index("elseif not (q.base and q.base:find(WHO_TOKEN_CLASS, 1, true)) then")
+        j = src.index("whoScan.splits = (whoScan.splits or 0) + 1", i)
+        block = src[i:j]
+        self.assertIn("cls = cls", block,
+                      "классовый срез без файл-ключа класса:\n%s" % block)
+
+    def test_race_split_filters_by_class(self):
+        """Расовый срез level-first берёт список из SCAN.RaceNames, а не из RaceFilterNames."""
+        src = SOURCE.read_text(encoding="utf-8")
+        i = src.index("elseif not q.race and q.base then")
+        j = src.index("whoScan.raceSplits = (whoScan.raceSplits or 0) + 1", i)
+        block = src[i:j]
+        self.assertIn("SCAN.RaceNames(db, q.cls)", block,
+                      "расовый срез не фильтруется по классу:\n%s" % block)
+        self.assertNotIn("RaceFilterNames", block,
+                         "расовый срез снова берёт все расы фракции:\n%s" % block)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

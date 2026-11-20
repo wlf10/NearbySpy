@@ -3277,25 +3277,39 @@ function SCAN.RaceObs(db)
     return out
 end
 
--- SCAN.SpeedRaces — ступень 3: расы для одного среза класса и полосы уровней.
--- Раса-фильтр тот же, что у whorace: фракция + локаль клиента.
-function SCAN.SpeedRaces(db, q)
-    -- расы, разрешённые фракцией и локалью
+-- SCAN.RaceNames — локализованные имена рас для расового среза КЛАССА.
+--
+-- Общий список для ОБЕИХ воронок: speed-ступень 3 (SCAN.SpeedRaces) и расовое
+-- дробление переполненного среза в level-first плане (режим /nspy who).
+-- Держать их на одном источнике обязательно: level-first раньше брал ВСЕ расы
+-- фракции, и в очередь попадали пары вида «Друид × Орк», которых на сервере
+-- нет (замечание пользователя 20.11.2026).
+--
+--   cls ~= nil → только расы, реально наблюдавшиеся ИМЕННО с этим классом,
+--                плюс вылет для редких рас (см. SCAN.RACE_MIN_OBS);
+--   cls == nil → все расы фракции (план из старого SV, класс не сохранён).
+function SCAN.RaceNames(db, cls)
     local allowed = RaceFilterNames(db, PlayerFaction())
-    -- и только те, что реально встречались с ЭТИМ классом
-    local observed = SCAN.ClassRaces(db, q.cls)
-    local obsCount = SCAN.RaceObs(db)
+    local observed = cls and SCAN.ClassRaces(db, cls) or nil
+    local hasObs = observed ~= nil and next(observed) ~= nil
+    local obsCount = hasObs and SCAN.RaceObs(db) or nil
     local names = {}
     for locName in pairs(allowed) do
         -- Раса попадает в срез, если пара «класс × раса» уже наблюдалась ИЛИ
         -- выборка по расе слишком мала, чтобы судить (тогда лишний запрос
         -- дешевле пропущенной расы).
-        if next(observed) == nil or observed[locName]
+        if not hasObs or observed[locName]
             or (obsCount[locName] or 0) < SCAN.RACE_MIN_OBS then
             names[#names + 1] = locName
         end
     end
     table.sort(names)
+    return names
+end
+
+-- SCAN.SpeedRaces — ступень 3: расы для одного среза класса и полосы уровней.
+function SCAN.SpeedRaces(db, q)
+    local names = SCAN.RaceNames(db, q.cls)
     local out = {}
     for _, locName in ipairs(names) do
         out[#out + 1] = { base = q.base, race = locName,
@@ -3640,11 +3654,13 @@ local function HandleWhoList()
                     num, q.base or "level", q.lo, q.hi))
             elseif not (q.base and q.base:find(WHO_TOKEN_CLASS, 1, true)) then
                 -- wide reply: split by CLASS first (a class is the smallest
-                -- filter that is known to work everywhere)
+                -- filter that is known to work everywhere). The file key rides
+                -- along: a class slice that later overflows a single level is
+                -- split by race, and that split filters races by this key.
                 local sub = 0
-                for _, locName in pairs(LOCALIZED_CLASS_NAMES_MALE or {}) do
-                    table.insert(whoQueue, 1, { base = WHO_TOKEN_CLASS .. "\"" .. locName .. "\"",
-                        lo = q.lo, hi = q.hi, parentSet = names })
+                for cls, locName in pairs(LOCALIZED_CLASS_NAMES_MALE or {}) do
+                    table.insert(whoQueue, 1, { base = WHO_TOKEN_CLASS .. '"' .. locName .. '"',
+                        cls = cls, lo = q.lo, hi = q.hi, parentSet = names })
                     sub = sub + 1
                 end
                 D(("/who: %d (cap) — splitting %d-%d into %d class slices"):format(num, q.lo, q.hi, sub))
@@ -3667,9 +3683,13 @@ local function HandleWhoList()
                 else
                     local mid = math.floor((q.lo + q.hi) / 2)
                     -- depth-first: the lower half goes first, so a partial run
-                    -- still covers the levels most players actually occupy
-                    table.insert(whoQueue, 1, { base = q.base, lo = mid + 1, hi = q.hi, parentSet = names })
-                    table.insert(whoQueue, 1, { base = q.base, lo = q.lo, hi = mid, parentSet = names })
+                    -- still covers the levels most players actually occupy.
+                    -- cls MUST travel with the halves: the race split below
+                    -- filters races by the class, and without it the branch
+                    -- degrades to "every race of the faction" — pairs such as
+                    -- Друид × Орк that the server does not have.
+                    table.insert(whoQueue, 1, { base = q.base, cls = q.cls, lo = mid + 1, hi = q.hi, parentSet = names })
+                    table.insert(whoQueue, 1, { base = q.base, cls = q.cls, lo = q.lo, hi = mid, parentSet = names })
                     whoScan.splits = (whoScan.splits or 0) + 1
                     D(("/who: %d (cap) — %s %d-%d → %d-%d + %d-%d")
                         :format(num, q.base or "?", q.lo, q.hi, q.lo, mid, mid + 1, q.hi))
@@ -3679,16 +3699,21 @@ local function HandleWhoList()
                 -- handful of pairs are that dense (measured max 78 players for
                 -- one class on one level), so this tier costs ~10 extra queries
                 -- and closes the last gap in coverage.
-                local races = RaceFilterNames(db, PlayerFaction())
+                --
+                -- Races come from SCAN.RaceNames(db, q.cls): only the ones that
+                -- actually occur with THIS class. Taking every faction race here
+                -- produced queries for pairs the server does not have (Друид ×
+                -- Орк) — each of them burns a click and a throttling slot.
+                local races = SCAN.RaceNames(db, q.cls)
                 local sub = 0
-                for locName in pairs(races) do
-                    table.insert(whoQueue, 1, { base = q.base, race = locName,
+                for _, locName in ipairs(races) do
+                    table.insert(whoQueue, 1, { base = q.base, cls = q.cls, race = locName,
                         lo = q.lo, hi = q.hi, parentSet = names })
                     sub = sub + 1
                 end
                 whoScan.raceSplits = (whoScan.raceSplits or 0) + 1
-                D(("/who: %d (cap) — %s level %d → %d race slices")
-                    :format(num, q.base, q.lo, sub))
+                D(("/who: %d (cap) — %s level %d → %d race slices (%s)")
+                    :format(num, q.base, q.lo, sub, table.concat(races, ", ")))
             else
                 -- race slice overflowed too: nothing narrower exists
                 D(("/who: %d (cap) — %s level %d alone is overfull, taking what we get")
