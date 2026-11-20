@@ -1267,6 +1267,10 @@ PeerSync = function()
         gearExpired = peerStats.gearExpired or 0,
         gearDropped = peerStats.gearDropped or 0,
         gearOff = db.peerGearOff and true or false,
+        -- Записи, приехавшие ВНУТРИ пачек. Без этого поля «seen» (сообщения)
+        -- и «valid» (записи) расходились без объяснения, а счётчик жил только
+        -- в памяти — тот же дефект, что был у gear-полей и throttled.
+        batchIn = peerStats.batchIn or 0,
     }
 end
 
@@ -7187,7 +7191,14 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
         end
         if ev == "CHAT_MSG_CHANNEL" and
             (IsPeerChannel(select(9, ...)) or IsPeerChannel(select(4, ...))) then
-            ReceivePeerMessage(select(1, ...), select(2, ...))
+            -- ⚠️ Скобки обязательны. `select(1, ...)` в СПИСКЕ АРГУМЕНТОВ
+            -- разворачивается во ВСЕ значения от первого, поэтому вызов получал
+            -- не два аргумента, а пять, и третий параметр (fromBatch) получал
+            -- имя языка — всегда truthy. Следствие в живом SV 20.11.2026:
+            -- seen=0 при valid=161, то есть счётчик «сколько сообщений
+            -- получено» врал на ноль и живой канал читался как мёртвый.
+            -- Скобки вокруг select берут РОВНО одно значение.
+            ReceivePeerMessage((select(1, ...)), (select(2, ...)))
             return -- peer speaker is not a new encounter; no rebroadcast
         end
         local speaker = select(2, ...)

@@ -362,6 +362,29 @@ class GearDiagnosticsTests(unittest.TestCase):
         self.assertTrue(self.lua.globals()["DB"]["debug"]["peer"]["gearOff"])
 
 
+class PeerCounterReachTests(unittest.TestCase):
+    """seen и batchIn: «канал мёртв» не должно следовать из нулевого счётчика.
+
+    Живой случай 20.11.2026: в SV лежало seen=0 при valid=161. Все записи
+    приехали ПАЧКАМИ, а seen увеличивался только для одиночных пакетов, поэтому
+    по файлу канал выглядел мёртвым. batchIn существовал в памяти, но в SV не
+    писался вовсе.
+    """
+
+    def setUp(self):
+        src = SOURCE.read_text(encoding="utf-8")
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        block = src[src.index("PeerSync = function()"):src.index("-- Untrusted chat text")]
+        self.lua.execute(CONST_PRELUDE + "\n" + SEND_HARNESS + "\n"
+                         + "peerChatVisible = false\n" + block + "\n"
+                         "TestSync = PeerSync\n")
+
+    def test_batch_counter_reaches_the_saved_variables(self):
+        self.lua.execute("peerStats.batchIn = 42; TestSync()")
+        peer = self.lua.globals()["DB"]["debug"]["peer"]
+        self.assertEqual(42, peer["batchIn"], "batchIn не доехал до SV")
+
+
 class GearReceiveTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
