@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.5.10
+    NearbySpy 1.5.11
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -6209,6 +6209,7 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         --   /nspy itemnames 200     ограничить прогон
         --   /nspy itemnames all     весь справочник, без потолка
         --   /nspy itemnames retry   переспросить тех, кто не отдал тултип
+        --   /nspy itemnames refresh переспросить ВСЁ (после смены формата записи)
         --   /nspy itemnames show    показать, что уже собрано
         if type(NSP_ITEMS) ~= "table" then
             P("itemnames: модуль не загружен (NearbySpy_Items.lua)")

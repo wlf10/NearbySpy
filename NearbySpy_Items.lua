@@ -145,6 +145,39 @@ end
 -- Формат ответа зависит от билда, поэтому поля читаются защитно: берём любые
 -- непустые текстовые left/right и складываем строки как есть. Разбирать их по
 -- смыслу будет сайт, у аддона нет задачи понимать «+12 к силе».
+-- CutChars — обрезать строку по СИМВОЛАМ, а не по байтам.
+--
+-- ⚠️ string.sub в Lua считает БАЙТЫ, а кириллица в UTF-8 занимает два байта на
+-- букву. Обрезка `txt:sub(1, 120)` резала русский текст на 60-й букве и
+-- оставляла половину слова: на проде 390 строк эффектов пришли оборванными
+-- («…увеличивает урон и силу исцеления магических э») и ещё 29 — на лимите 200.
+-- Здесь режем по кодовым точкам через utf8.offset (он есть во всех живых
+-- клиентах), и никогда не оставляем битый UTF-8.
+local function CutChars(s, limit)
+    if type(s) ~= "string" or limit <= 0 then return "" end
+    local u = rawget(_G, "utf8")
+    if type(u) == "table" and type(u.offset) == "function" then
+        local clear = u.len(s)
+        if type(clear) == "number" and clear > limit then
+            local idx = u.offset(s, limit + 1)
+            if type(idx) == "number" and idx > 1 then
+                return s:sub(1, idx - 1)
+            end
+        end
+        return s
+    end
+    -- Клиент без utf8: считаем байты, но половину символа не отдаём.
+    if #s <= limit then return s end
+    local cut = limit
+    -- байт-продолжение имеет старшие биты 0x80..0xBF (0x80 = 128, 0xC0 = 192)
+    while cut > 0 do
+        local b = s:byte(cut + 1)
+        if not b or b < 0x80 or b >= 0xC0 then break end
+        cut = cut - 1
+    end
+    return s:sub(1, cut)
+end
+
 local function ReadTooltip(id)
     local ti = rawget(_G, "C_TooltipInfo")
     if type(ti) ~= "table" or type(ti.GetItemByID) ~= "function" then return nil, 0 end
@@ -162,16 +195,16 @@ local function ReadTooltip(id)
                 if type(right) == "string" and right ~= "" then
                     txt = txt .. " | " .. right
                 end
-                -- 200, не 120: строка бонуса комплекта («Комплект (5 |4предмет:…):
-                -- Повышает вероятность…») длиннее 120, и обрезка ломала разбор.
-                out[#out + 1] = txt:sub(1, 200)
+                -- 300 СИМВОЛОВ на строку: самое длинное живое — строка эффекта
+                -- (~95) и бонус комплекта (~120). Запас, а не подгонка.
+                out[#out + 1] = CutChars(txt, 300)
             end
         end
     end
     if #out == 0 then return nil, #lines end
-    -- 2000: замер на 2052 живых тултипах — максимум 524 символа, запас на
-    -- комплектные предметы с шестью бонусами.
-    return table.concat(out, "\n"):sub(1, 2000), #lines
+    -- 4000 символов на весь тултип: замер — 524 у обычного предмета, до 900 у
+    -- комплектного. Больше не режем, иначе теряется хвост бонусов.
+    return CutChars(table.concat(out, "\n"), 4000), #lines
 end
 
 -- Полные свойства предмета по ID: имя + тип/подтип + слот + качество + ilvl.
@@ -300,7 +333,7 @@ end
 -- Все item_id из снимков экипировки, для которых ещё нет имени.
 -- Источник — сами снимки: аддон уже собрал их при встречах, отдельного
 -- хранилища ID не нужно.
-local function CollectUnknown(db, limit, force)
+local function CollectUnknown(db, limit, force, refresh)
     local names = NamesFor(db, false) or {}
     local props = type(db.itemProps) == "table" and db.itemProps or {}
     local seen, out = {}, {}
@@ -319,7 +352,12 @@ local function CollectUnknown(db, limit, force)
                 local pr = key and props[key]
                 local hasTip = type(pr) == "table" and pr.tip ~= nil
                 local gaveUp = type(pr) == "table" and pr.notip ~= nil
-                local missing = key and (not names[key] or (not hasTip and not (gaveUp and not force)))
+                -- refresh: переспросить ВСЁ, включая уже собранное. Нужен после
+                -- правки формата записи (20.11.2026 — обрезка строк по байтам):
+                -- иначе собранные ранее обрезанные тултипы остались бы такими
+                -- навсегда, потому что «тултип уже есть» их из очереди убирает.
+                local missing = refresh
+                    or (key and (not names[key] or (not hasTip and not (gaveUp and not force))))
                 if id and id > 0 and not seen[id] and missing then
                     seen[id] = true
                     out[#out + 1] = id
@@ -529,6 +567,7 @@ function J.Run(limit)
     -- помеченные notip (клиент в прошлый раз не отдал тултип).
     local arg = type(limit) == "string" and limit:lower() or ""
     local force = arg:find("retry") ~= nil
+    local refresh = arg:find("refresh") ~= nil
     local n
     if arg:find("all") then
         -- «all» — явное требование взять весь справочник. Потолок MAX_PER_RUN
@@ -554,7 +593,12 @@ function J.Run(limit)
         end
         J.Say(("itemnames: снято меток notip %d — переспрошу"):format(cleared))
     end
-    queue = CollectUnknown(db, n, force)
+    if refresh then
+        -- refresh — переспросить всё заново: формат записи мог измениться
+        -- (обрезка строк, новые поля), и «уже собрано» больше не значит «годно».
+        n = 10000
+    end
+    queue = CollectUnknown(db, n, force, refresh)
     if #queue == 0 then
         J.Say("itemnames: все известные ID уже имеют имена и свойства (retry — переспросить неотдавшиеся)")
         return
