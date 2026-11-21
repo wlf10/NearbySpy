@@ -177,6 +177,9 @@ GetDB = function()
     -- расы. Глобал может быть ещё не объявлен, если GetDB позвали во время
     -- загрузки файла — проверка на nil это покрывает.
     if NspMigrateRaces then NspMigrateRaces(db) end
+    -- Мир у записей без него (22.11.2026). Глобал объявлен ниже по файлу —
+    -- проверка на nil покрывает вызов во время загрузки.
+    if NspMigrateRealms then NspMigrateRealms(db) end
     return db
 end
 
@@ -2723,6 +2726,73 @@ function NspMigrateRaces(db)
         db.debug.raceJunkCleared = junk
         db.debug.raceCanonicalised = canonical
         R(("race migration: %d junk cleared, %d canonicalised"):format(junk, canonical))
+    end
+end
+
+-- ── Миграция записей без мира (22.11.2026) ─────────────────────────────────
+-- GetRealmName() в клиенте Forever иногда возвращает "" — и `x or fallback`,
+-- потому что пустая строка в Lua истинна, оставлял realm="". Такие записи
+-- получили ключ "Имя-" (живой SV: 729 штук, у 54 имён был дубль с настоящим
+-- миром) и, что хуже, снапшоты экипировки уходили в канал пакетами
+-- "G7;f;;Имя;…", которые отбивал каждый получатель.
+--
+-- Миграция одноразовая (флаг db.realmFixed) и НЕ выдумывает мир: если клиент и
+-- SavedVariables не дают непустого имени мира, записи остаются как есть.
+-- Глобальная функция, а не local: главный чанк стоит у потолка Lua 5.1 в 200
+-- локалах (замер: 195).
+function NspMigrateRealms(db)
+    if type(db) ~= "table" or db.realmFixed then return end
+    local r = GetRealmName and GetRealmName() or nil
+    if type(r) ~= "string" or r == "" then r = db.realm end
+    if type(r) ~= "string" or r == "" or r == "?" then return end
+    if type(db.players) ~= "table" then return end
+    db.realmFixed = true
+
+    local out, fixed, merged = {}, 0, 0
+    for k, p in pairs(db.players) do
+        if type(p) == "table" and type(p.name) == "string" and p.name ~= "" then
+            local pr = p.realm
+            if type(pr) ~= "string" or pr == "" or pr == "?" then
+                p.realm = r
+                fixed = fixed + 1
+            end
+            local nk = p.name .. "-" .. p.realm
+            local ex = out[nk]
+            if ex then
+                -- Тот же игрок уже есть под правильным ключом: сливаем, не теряя
+                -- ни встреч, ни снимков. Счётчик встреч складываем, границы
+                -- времени берём крайние, пустые поля заполняем.
+                ex.count = (ex.count or 0) + (p.count or 0)
+                local f1, f2 = tonumber(ex.firstSeen), tonumber(p.firstSeen)
+                if f2 and f2 > 0 and (not f1 or f1 <= 0 or f2 < f1) then ex.firstSeen = f2 end
+                local l1, l2 = tonumber(ex.lastSeen), tonumber(p.lastSeen)
+                if l2 and l2 > 0 and (not l1 or l2 > l1) then ex.lastSeen = l2 end
+                for _, f in ipairs({"class", "classLoc", "race", "faction", "zone",
+                        "zoneId", "guid", "x", "y", "peerAt", "peerFrom", "peerRealm"}) do
+                    if (ex[f] == nil or ex[f] == "") and p[f] ~= nil and p[f] ~= "" then
+                        ex[f] = p[f]
+                    end
+                end
+                -- Снимок экипировки: берём более свежий из двух.
+                local g1, g2 = ex.gear, p.gear
+                if type(g2) == "table" and (type(g1) ~= "table"
+                    or (tonumber(g2.at) or 0) > (tonumber(g1.at) or 0)) then
+                    ex.gear = g2
+                end
+                merged = merged + 1
+            else
+                p.key = nk
+                out[nk] = p
+            end
+        elseif type(p) == "table" then
+            db.debug.realmMigDropped = (db.debug.realmMigDropped or 0) + 1
+        end
+    end
+    db.players = out
+    if fixed > 0 or merged > 0 then
+        db.debug.realmMigFixed = fixed
+        db.debug.realmMigMerged = merged
+        R(("realm migration: %d records got %s, %d merged"):format(fixed, r, merged))
     end
 end
 
