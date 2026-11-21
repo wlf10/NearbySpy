@@ -244,10 +244,31 @@ local function DbgErr(src, err)
     end
 end
 
+-- Последнее НЕПУСТОЕ имя мира, увиденное в этой сессии (или взятое из SV).
+-- GetRealmName() в клиенте Forever иногда возвращает "" — и `GetRealmName() or "?"`
+-- этого не ловит, потому что пустая строка в Lua истинна. Живой SV 22.11.2026:
+-- 729 записей с ключом "Имя-" и realm="" (628 из них снимались инспектом), и
+-- 54 имени задвоены — одна строка с пустым миром, другая с настоящим. Отсюда же
+-- шли битые peer-пакеты "G7;f;;Имя;…", которые отбивал каждый получатель.
+NSP_REALM_LAST = nil
 local function PlayerRealm()
     -- Camelot: two-word names — UnitName returns the SURNAME as the
     -- "realm", so the real realm is taken only from GetRealmName().
-    return GetRealmName() or "?"
+    local r = GetRealmName()
+    if type(r) == "string" and r ~= "" then
+        NSP_REALM_LAST = r
+        return r
+    end
+    -- Клиент ответил пусто: держимся за последнее известное значение, затем за
+    -- мир из SV (account-level, пишется при первом успешном чтении).
+    if NSP_REALM_LAST then return NSP_REALM_LAST end
+    local ok, db = pcall(GetDB)
+    if ok and type(db) == "table" and type(db.realm) == "string" and db.realm ~= "" then
+        NSP_REALM_LAST = db.realm
+        return db.realm
+    end
+    -- "?" — честное «не знаю»: запись с таким миром не станет ключом "Имя-".
+    return "?"
 end
 
 -- zone by player name (another unit in the beta returns mapID=0, zone name unavailable)
@@ -1271,6 +1292,13 @@ PeerSync = function()
         -- и «valid» (записи) расходились без объяснения, а счётчик жил только
         -- в памяти — тот же дефект, что был у gear-полей и throttled.
         batchIn = peerStats.batchIn or 0,
+        -- Диагностика приёма снапшотов (22.11.2026): причины тихих отказов и
+        -- состав канала по протоколам. Без них «gearIn=0» не отличить от
+        -- «G7 не приходит» — а это разные диагнозы с разными действиями.
+        gearDrop = peerStats.gearDrop,
+        gearSample = db.debug.gearSample,
+        kinds = peerStats.kinds,
+        gearNoRealm = peerStats.gearNoRealm or 0,
     }
 end
 
@@ -1753,7 +1781,16 @@ function PeerQueueGear(key, snapshot)
         if old then D(("Peer gear queue full: dropped %s"):format(PeerEsc(old.name or "?", 40))) end
     end
     q[#q + 1] = {
-        key = key, name = entry.name or "?", realm = entry.realm or PlayerRealm(),
+        key = key, name = entry.name or "?",
+        -- ⚠️ Пустая строка в Lua ИСТИННА, поэтому `entry.realm or PlayerRealm()`
+        -- оставлял пустой мир: пакет уходил как "G7;f;;Имя;…", и каждый
+        -- получатель отбивал его на проверке имени/мира (живой SV 22.11.2026:
+        -- gearDrop={"bad name/realm"=9} при kinds={"G7"=9} — все пакеты в
+        -- канале битые, gearIn=0 у всех). Записи без мира существуют: unit-детект
+        -- и часть chat-записей пишут realm="" (640 снапшотов в живом SV), и
+        -- именно они порождали нечитаемые пакеты.
+        realm = (type(entry.realm) == "string" and entry.realm ~= "") and entry.realm
+            or PlayerRealm(),
         game = db.game, at = time(), snapAt = at,
         ids = snapshot.ids, ilvl = tonumber(snapshot.ilvl) or 0,
         imp = type(snapshot.imp) == "string" and snapshot.imp or nil,
@@ -1778,6 +1815,16 @@ function PeerGearPayload(db, it)
     local game = PeerEncode("game", it.game)
     if game == PEER_CODE_UNKNOWN or game == PEER_CODE_NONE then game = it.game end
     local realm = PeerRealmCode(it.realm) or it.realm
+    -- Страховка: пустой мир получатель отбивает (PeerField требует длины > 0),
+    -- поэтому битый пакет не отправляем вовсе — иначе канал молча спамится
+    -- нечитаемыми сообщениями, а отправитель видит «gearSent растёт».
+    if type(realm) ~= "string" or realm == "" then realm = PlayerRealm() end
+    if type(realm) ~= "string" or realm == "" then
+        peerStats.gearNoRealm = (peerStats.gearNoRealm or 0) + 1
+        D(("Peer gear skipped: no realm for %s"):format(PeerEsc(it.name or "?", 40)))
+        PeerSync()
+        return nil
+    end
     local stamp = PeerTimeCode(it.snapAt > 0 and it.snapAt or it.at)
 
     local function Build(withGear, withTalents)
@@ -2141,6 +2188,15 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     if peerStats.inCount > 120 then return Reject("rate limit") end
     local fields = {}
     for part in (message .. ";"):gmatch("(.-);") do fields[#fields + 1] = part end
+    -- Состав канала по протоколам (22.11.2026). Без него не видно, шлют ли пиры
+    -- G7 вообще: seen считает все сообщения подряд, а «пришло 69, из них G7 ноль»
+    -- и «пришло 69, все G7 и все отбиты» требуют разных действий.
+    do
+        local kind = tostring(fields[1] or "?"):sub(1, 6)
+        local kinds = peerStats.kinds
+        if type(kinds) ~= "table" then kinds = {}; peerStats.kinds = kinds end
+        kinds[kind] = (kinds[kind] or 0) + 1
+    end
 
     -- Снапшот экипировки/билда — отдельный тип пакета G7 (20.11.2026). Разбор
     -- вынесен в свою функцию, но живёт в этом же чанке, поэтому видит все
@@ -2421,21 +2477,44 @@ end
 --      потока нет ресинхронизации, «сколько успели» — это мусор в базе.
 function ReceivePeerGear(fields, sender)
     local db = GetDB()
+    -- Диагностика ТИХИХ отказов (22.11.2026). Раньше каждое условие ниже просто
+    -- возвращало управление, поэтому живой SV показывал seen=79 при gearIn=0:
+    -- «канал мёртв» без единой причины, и по такому набору нельзя было отличить
+    -- чужой формат от нашей ошибки. Теперь причина считается, а первые три
+    -- пакета кладутся в семпл — из него видно, ЧТО именно присылают пиры.
+    local function Drop(reason)
+        local gd = peerStats.gearDrop
+        if type(gd) ~= "table" then gd = {}; peerStats.gearDrop = gd end
+        gd[reason] = (gd[reason] or 0) + 1
+        PeerSync()
+    end
+    do
+        local smp = db.debug.gearSample
+        if type(smp) ~= "table" then smp = {}; db.debug.gearSample = smp end
+        if #smp < 3 then
+            smp[#smp + 1] = ("fields=%d [1]=%s [2]=%s [3]=%s [4]=%s [5]=%s [6]=%s len7=%d len8=%d")
+                :format(#fields, PeerEsc(fields[1], 6), PeerEsc(fields[2], 14),
+                    PeerEsc(fields[3], 24), PeerEsc(fields[4], 40), PeerEsc(fields[5], 12),
+                    PeerEsc(fields[6], 4),
+                    fields[7] and #tostring(fields[7]) or -1,
+                    fields[8] and #tostring(fields[8]) or -1)
+        end
+    end
     if not db.peerEnabled or db.peerGearOff then return end
     local game = fields[2]
-    if type(game) ~= "string" or game == "" then return end
+    if type(game) ~= "string" or game == "" then return Drop("bad game field") end
     if #game == 1 then game = PeerDecode("game", game) or game end
-    if game ~= db.game then return end
+    if game ~= db.game then return Drop("game " .. PeerEsc(tostring(game), 14)) end
     local realm = PeerRealmName(fields[3]) or fields[3]
     local name = fields[4]
-    if not PeerField(name, 60) or not PeerField(realm, 100) then return end
+    if not PeerField(name, 60) or not PeerField(realm, 100) then return Drop("bad name/realm") end
     local ts = PeerTimeValue(fields[5])
-    if not ts or ts <= 0 then return end
-    if ts > time() + PEER_CLOCK_SKEW then return end
+    if not ts or ts <= 0 then return Drop("bad time") end
+    if ts > time() + PEER_CLOCK_SKEW then return Drop("time future") end
     local flags = fields[6] or ""
     local wantGear = flags:find("g", 1, true) ~= nil
     local wantTalents = flags:find("t", 1, true) ~= nil
-    if not wantGear and not wantTalents then return end
+    if not wantGear and not wantTalents then return Drop("no flags") end
     local idx = 7
     local ids, ilvl, slots
     if wantGear then
@@ -7254,7 +7333,9 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
             realm = speaker:sub(dash + 1)
         end
         if name == "" then return end
-        realm = realm or PlayerRealm()
+        -- Пустая строка после дефиса ("Name-") не должна становиться миром:
+        -- `realm or PlayerRealm()` её пропускал ("" истинна в Lua).
+        if type(realm) ~= "string" or realm == "" then realm = PlayerRealm() end
         UpsertPlayer(db, {
             key = name .. "-" .. realm, -- same key format as in Record()
             name = name,
