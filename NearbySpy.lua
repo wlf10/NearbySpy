@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.6.0
+    NearbySpy 1.6.1
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -1302,6 +1302,7 @@ PeerSync = function()
         gearSample = db.debug.gearSample,
         kinds = peerStats.kinds,
         gearNoRealm = peerStats.gearNoRealm or 0,
+        gearRealmGuessed = peerStats.gearRealmGuessed or 0,
     }
 end
 
@@ -2510,6 +2511,20 @@ function ReceivePeerGear(fields, sender)
     if game ~= db.game then return Drop("game " .. PeerEsc(tostring(game), 14)) end
     local realm = PeerRealmName(fields[3]) or fields[3]
     local name = fields[4]
+    -- ПУСТОЙ МИР — известный баг опубликованной 1.6.0 (22.11.2026): у всех, кто на
+    -- ней, GetRealmName() иногда возвращает "", и пакет уходит как "G7;f;;Имя;…".
+    -- Отбивать такой пакет целиком значит терять ВСЕ снапшоты от старых клиентов:
+    -- живой SV показывал kinds={G7=28} при gearDrop={"bad name/realm"=28} и
+    -- gearIn=0. Принимаем, подставляя СВОЙ мир и помечая запись
+    -- (peerRealmGuessed), чтобы подстановку было видно: канал общий на кластер,
+    -- и чужой мир так определить нельзя — но потерять данные хуже, чем
+    -- приписать запись нашему миру с явной пометкой.
+    local guessedRealm = false
+    if type(realm) ~= "string" or realm == "" then
+        realm = PlayerRealm()
+        guessedRealm = true
+        peerStats.gearRealmGuessed = (peerStats.gearRealmGuessed or 0) + 1
+    end
     if not PeerField(name, 60) or not PeerField(realm, 100) then return Drop("bad name/realm") end
     local ts = PeerTimeValue(fields[5])
     if not ts or ts <= 0 then return Drop("bad time") end
@@ -2561,6 +2576,9 @@ function ReceivePeerGear(fields, sender)
         slots = slots or (have and have.slots) or nil,
         ilvl = ilvl or (have and have.ilvl) or nil,
         imp = imp or (have and have.imp) or nil,
+        -- Мир в пакете был пуст (баг 1.6.0) и подставлен наш: пометка остаётся в
+        -- записи, чтобы на сайте и в разборе было видно, что мир не из пакета.
+        realmGuessed = guessedRealm or nil,
     }
     if type(snap.ids) ~= "string" and type(snap.imp) ~= "string" then return end
     -- Пишем ТЕМ ЖЕ путём, что и собственный инспект: он ведёт кольцо вытеснения

@@ -1,3 +1,17 @@
+1.6.1
+
+- Fixed: gear and talent snapshots were dropped by every receiver when the
+  sending client did not report its realm. The realm field came out empty and
+  the packet was rejected as unreadable, so sharing silently delivered nothing
+  while the sender still counted it as sent. Records with an empty realm also
+  landed in the database twice, under a name plus an empty realm.
+- Fixed: a realm that the client reports as an empty string is no longer taken
+  at face value; the last known realm is kept, and a one-time pass repairs
+  records already saved without one.
+- Improved: packets with an empty realm are now accepted and stored under the
+  reading client's realm, marked as such, so data from older clients is not
+  lost. Updated clients send the realm properly and carry no mark.
+
 ## NearbySpy 1.6.0
 
 ### New: gear and talent builds of the players you meet
