@@ -1303,6 +1303,8 @@ PeerSync = function()
         kinds = peerStats.kinds,
         gearNoRealm = peerStats.gearNoRealm or 0,
         gearRealmGuessed = peerStats.gearRealmGuessed or 0,
+        gearOrphanFixed = peerStats.gearOrphanFixed or 0,
+        gearAmbiguous = peerStats.gearAmbiguous or 0,
     }
 end
 
@@ -2556,6 +2558,27 @@ function ReceivePeerGear(fields, sender)
     if not ids and not imp then return end
     local key = name .. "-" .. realm
     local entry = db.players and db.players[key]
+    if type(entry) ~= "table" and guessedRealm then
+        -- Мир подставлен нами, поэтому ключ мог не сойтись: игрок известен под
+        -- ДРУГИМ миром кластера. Ищем по имени — ровно одна запись значит тот
+        -- же игрок (имена в базе практически уникальны: неоднозначных 2.1%).
+        -- Живой SV 22.11.2026: 68 из 68 пакетов уходили в orphan именно так.
+        local found, cnt = nil, 0
+        for k, p in pairs(db.players or {}) do
+            if type(p) == "table" and p.name == name then
+                cnt = cnt + 1
+                found = k
+                if cnt > 1 then break end
+            end
+        end
+        if cnt == 1 then
+            key, entry = found, db.players[found]
+            peerStats.gearOrphanFixed = (peerStats.gearOrphanFixed or 0) + 1
+        elseif cnt > 1 then
+            -- Одно имя на нескольких мирах: приписать наугад нельзя.
+            peerStats.gearAmbiguous = (peerStats.gearAmbiguous or 0) + 1
+        end
+    end
     if type(entry) ~= "table" then
         -- Игрока ещё нет в базе: прикрепить снапшот не к чему. Создавать
         -- строку из одного снапшота нельзя — она придёт на сайт без класса и
