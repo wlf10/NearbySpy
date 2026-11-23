@@ -99,13 +99,6 @@ class MastercraftGapTests(unittest.TestCase):
         self.g["TestGap"]("Creature-0-7090-2991-2-265756-A222425F2A", "B")
         self.assertEqual(2, self.g["DB"]["world"]["mcNewTotal"])
 
-    def test_gap_is_recorded_in_debug_ring(self):
-        self.g["TestGap"]("Creature-0-7090-2991-2-257008-A222425F2A", "Баэланн")
-        gap = self.g["DB"]["debug"]["mcGap"]
-        self.assertEqual(1, len(gap))
-        self.assertEqual(257008, gap[1]["id"])
-        self.assertEqual("Баэланн", gap[1]["name"])
-
     def test_no_snapshot_means_silence_not_a_crash(self):
         self.lua.execute("NSP_MC = nil")
         self.g["TestGap"]("Creature-0-7090-2991-2-257008-A222425F2A", "X")

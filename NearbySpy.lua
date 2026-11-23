@@ -180,6 +180,9 @@ GetDB = function()
     -- Мир у записей без него (22.11.2026). Глобал объявлен ниже по файлу —
     -- проверка на nil покрывает вызов во время загрузки.
     if NspMigrateRealms then NspMigrateRealms(db) end
+    -- Проба-диагностика из SV (23.11.2026). Глобал объявлен ниже по файлу —
+    -- проверка на nil покрывает вызов во время загрузки.
+    if NspPruneDebug then NspPruneDebug(db) end
     return db
 end
 
@@ -730,11 +733,6 @@ function WR.NoteMastercraftGap(db, guid, name, zoneId)
     if world.mcNotified[npcID] then return end          -- уже сообщали
     world.mcNotified[npcID] = true
     world.mcNewTotal = (world.mcNewTotal or 0) + 1
-
-    db.debug = db.debug or {}
-    db.debug.mcGap = db.debug.mcGap or {}
-    db.debug.mcGap[#db.debug.mcGap + 1] = { id = npcID, name = name or "?", at = time() }
-    if #db.debug.mcGap > 50 then table.remove(db.debug.mcGap, 1) end
 
     P(L("MC_NEW_VENDOR"):format(
         name ~= "" and name or ("#" .. npcID),
@@ -2837,6 +2835,82 @@ function NspMigrateRealms(db)
     end
 end
 
+-- ── Чистка db.debug от ключей, которых код больше не пишет (23.11.2026) ─────
+-- SavedVariables МЕРЖАТСЯ: ключ, записанный прошлой версией аддона, остаётся в
+-- файле навсегда — удаление кода его не убирает. Живой SV держал 98 КБ debug,
+-- из которых ~70 КБ — дампы снятой пробы (/nspy talex, /nspy inspecttest:
+-- talentTrees, talentTruth, talentSolve, inspect, players, playerOrder), плюс
+-- мусор от давно снятых фич (cv_nameplateShow*).
+--
+-- Миграция одноразовая по номеру версии списка (db.debugPruned): список живых
+-- счётчиков со временем меняется, и поднять номер дешевле, чем заводить новую
+-- функцию. Удаляется только то, что код текущей версии не пишет: любой ключ
+-- вне белого списка. db.debug не содержит ничего, кроме диагностики — рабочие
+-- данные (players, world, itemNames, learn) лежат в корне db и не трогаются.
+--
+-- Список обязан совпадать с тем, что код реально пишет: за этим следит
+-- tests/test_debug_prune.py (грепает все *.lua и падает при расхождении в обе
+-- стороны — новый счётчик без записи в списке и мёртвый ключ в списке).
+-- Глобальная функция, а не local: главный чанк стоит у потолка Lua 5.1 в 200
+-- локалах.
+NSP_DEBUG_PRUNE_VERSION = 2
+function NspPruneDebug(db)
+    if type(db) ~= "table" then return end
+    if db.debugPruned == NSP_DEBUG_PRUNE_VERSION then return end
+    if type(db.debug) ~= "table" then
+        db.debug = {}
+        db.debugPruned = NSP_DEBUG_PRUNE_VERSION
+        return
+    end
+    local keep = {
+        -- transport: peer channel + chat send
+        peer = true, peerJoin = true, peerDrain = true, peerGate = true,
+        peerSenders = true, peerSendError = true, peerCommaStripped = true,
+        lastDrainWhy = true, sendRet = true, sendRetAt = true,
+        -- client gate (ADDON_ACTION_BLOCKED) and throttling
+        blocked = true, blockedOther = true, blockedAt = true, blockedEvent = true,
+        gateWhy = true, kbLockdown = true, kbLockdownLogged = true,
+        -- errors: the support entry point
+        err = true, errAt = true, errCount = true, errLast = true,
+        lastErrorMsg = true, printRing = true, msgLog = true,
+        -- /who: scan, throttle, gate probe
+        whoResults = true, whoAdded = true, whoSoft = true, whoSample = true,
+        whoSampleNoRace = true, whoThrottled = true, whoTest = true,
+        -- passive inspects and gear snapshots
+        inspectQueue = true, inspectTotal = true, gearSample = true,
+        -- session/digest counters
+        ticks = true, lastTickAt = true, lastPlayers = true, lastPlates = true,
+        addedEvents = true, src = true,
+        -- world data (vendors, fish, guild roster) and zone dictionary
+        vendorsDropped = true, fishDropped = true, guildAdded = true,
+        guildOnline = true, guildSeen = true, zoneMap = true,
+        itemNamesRun = true, itemStatsKeys = true, scanErr = true,
+        -- one-time migrations and their counters
+        migrationDropped = true, realmMigFixed = true, realmMigMerged = true,
+        realmMigDropped = true, raceCanonicalised = true, raceJunkCleared = true,
+        raceSamples = true, raceEmpty = true, raceUnresolved = true,
+        cvarErr = true, hardcoreDeathCount = true, hardcoreDeathSamples = true,
+        pruned = true, prunedAt = true,
+        -- this migration's own bookkeeping
+        debugPrunedCount = true, debugPrunedAt = true,
+    }
+    local dropped, names = 0, {}
+    for k in pairs(db.debug) do
+        if not keep[k] then
+            db.debug[k] = nil
+            dropped = dropped + 1
+            if #names < 12 then names[#names + 1] = tostring(k) end
+        end
+    end
+    db.debugPruned = NSP_DEBUG_PRUNE_VERSION
+    if dropped > 0 then
+        db.debug.debugPrunedCount = (db.debug.debugPrunedCount or 0) + dropped
+        db.debug.debugPrunedAt = time()
+        R(("debug prune v%d: %d key(s) removed [%s]")
+            :format(NSP_DEBUG_PRUNE_VERSION, dropped, table.concat(names, ", ")))
+    end
+end
+
 -- Раньше хранилась ОДНА фракция на расу (db.learn.raceFaction), и это ломало
 -- кастомные расы: Skyborne есть и у Альянса, и у Орды (в базе сайта
 -- Skyborne/Alliance 698 + Skyborne/Horde 1, то есть раса не одноместная).
@@ -4592,20 +4666,6 @@ local function ApplyFont(fs, size, flags)
     local obj = FontObjectFor(size)
     if obj and fs.SetFontObject then
         pcall(fs.SetFontObject, fs, obj)
-        -- Which object was actually used is invisible from outside, and the client
-        -- is not guaranteed to ship every variant: record it once per size so the
-        -- choice can be verified from SavedVariables instead of guessed.
-        local okDb, db = pcall(GetDB)
-        if okDb and type(db) == "table" then
-            db.debug = db.debug or {}
-            local fonts = db.debug.fonts
-            if type(fonts) ~= "table" then fonts = {}; db.debug.fonts = fonts end
-            local key = tostring(size)
-            if fonts[key] == nil then
-                fonts[key] = (obj == _G.GameFontNormalSmall and "small")
-                    or (obj == _G.GameFontNormalLarge and "large") or "normal"
-            end
-        end
     end
 end
 
@@ -6839,41 +6899,6 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                 if not okG then P("gear: " .. tostring(errG)) end
             end
         end
-    elseif msg == "talex" or msg:match("^talex%s") then
-        -- diagnostic: export the talent tree dictionary (needed to decode the
-        -- import strings offline; the client is the only source of this data)
-        --   /nspy talex          level 60 tree
-        --   /nspy talex 40       specific level
-        if type(NSP_PROBE) == "table" and type(NSP_PROBE.ExportTalentTrees) == "function" then
-            NSP_PROBE.P, NSP_PROBE.GetDB = P, GetDB
-            if msg:match("^talex%s+diag") then
-                local okD, errD = pcall(NSP_PROBE.TalexDiag)
-                if not okD then P("talex diag: " .. tostring(errD)) end
-            elseif msg:match("^talex%s+truth") then
-                local okR, errR = pcall(NSP_PROBE.TalexTruth)
-                if not okR then P("talex truth: " .. tostring(errR)) end
-            elseif msg:match("^talex%s+solve") then
-                local okV, errV = pcall(NSP_PROBE.TalexSolve)
-                if not okV then P("talex solve: " .. tostring(errV)) end
-            else
-                local okT, errT = pcall(NSP_PROBE.ExportTalentTrees, msg:match("^talex%s+(%d+)$"))
-                if not okT then P("talex: " .. tostring(errT)) end
-            end
-        else
-            P("talex: probe module is missing (NearbySpy_Probe.lua not loaded)")
-        end
-    elseif msg == "inspecttest" or msg:match("^inspecttest%s") then
-        -- diagnostic: can this build show gear and talents of another player?
-        --   /nspy inspecttest            target + mouseover + focus
-        --   /nspy inspecttest all        + nameplates + party, gap 2 max 10
-        -- Results: chat summary + full matrix in SV -> debug.inspect
-        if type(NSP_PROBE) == "table" and type(NSP_PROBE.Run) == "function" then
-            NSP_PROBE.P, NSP_PROBE.GetDB = P, GetDB
-            local okP, errP = pcall(NSP_PROBE.Run, msg:match("^inspecttest%s+(.*)$"))
-            if not okP then P("inspecttest: " .. tostring(errP)) end
-        else
-            P("inspecttest: probe module is missing (NearbySpy_Probe.lua not loaded)")
-        end
     elseif msg == "whostop" then
         if whoScan then
             FinishZoneScan("stopped manually")
@@ -7560,12 +7585,6 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         local db = GetDB()
         EnsureNameplates(db)
         ScheduleTick()
-        -- Inspect probe (/nspy inspecttest) is a separate chunk: it cannot see
-        -- this file's locals, so P and GetDB are injected the same way as the
-        -- journal's (see NearbySpy_Probe.lua header).
-        if type(NSP_PROBE) == "table" then
-            NSP_PROBE.P, NSP_PROBE.GetDB = P, GetDB
-        end
         -- Passive inspector: same injection pattern (no UI, runs on encounters)
         if type(NSP_INSPECT) == "table" then
             NSP_INSPECT.P, NSP_INSPECT.GetDB, NSP_INSPECT.DbgErr = P, GetDB, DbgErr

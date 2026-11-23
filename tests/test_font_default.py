@@ -76,15 +76,6 @@ class FontDefaultTests(unittest.TestCase):
         self.assertEqual("GameFontNormal", fs.fontObject.name,
                          "a missing variant must degrade to normal, not to nothing")
 
-    def test_chosen_object_is_recorded_for_verification(self):
-        lua = self.make_lua()
-        parent = lua.globals().NewParent()
-        lua.globals().NewTextX(parent, 7)
-        lua.globals().NewTextX(parent, 12)
-        fonts = lua.globals().FONT_DB["debug"]["fonts"]
-        self.assertEqual("small", fonts["7"])
-        self.assertEqual("normal", fonts["12"])
-
     def test_survives_missing_gamefont(self):
         lua = self.make_lua(with_game_font=False)
         parent = lua.globals().NewParent()

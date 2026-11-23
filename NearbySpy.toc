@@ -16,5 +16,4 @@ NearbySpy_Locale.lua
 NearbySpy_Journal.lua
 NearbySpy_Inspect.lua
 NearbySpy_Items.lua
-NearbySpy_Probe.lua
 NearbySpy.lua
