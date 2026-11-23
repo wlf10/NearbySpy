@@ -56,7 +56,21 @@ local PER_PLAYER_COOLDOWN = 6 * 3600   -- same player: at most once per 6 hours
 -- имеет смысл только если старые записи в ней отбрасываются быстро.
 local MAX_QUEUE = 80                   -- pending requests, rest are dropped
 local MAX_PER_SESSION = 200            -- hard stop: never flood the server
-local MAX_GEAR = 2000                  -- snapshots kept in SavedVariables
+-- Сколько снимков экипировки держать в SavedVariables.
+--
+-- Было 2000, и это оказалось узким местом: встреч в файле ~55 тысяч, снимков
+-- в SV — 2643, то есть у 96% записей снимка нет вообще. На сайте это выглядит
+-- как «Снимка пока нет: аддон соберёт при следующей встрече» у игроков,
+-- которых встречали десятки раз, — снимок снят и вытеснен кольцом.
+--
+-- Замер цены (24.11.2026): снимок в файле ≈ 200 байт (at, ilvl, ids, slots,
+-- imp), 2000 → 2643 снимка это ~0.5 МБ при файле 23.4 МБ. 6000 добавит
+-- ~0.8 МБ — на фоне лимита SV 128 МБ и 26 МБ живого файла это ничто, а
+-- покрытие вырастает втрое.
+--
+-- Верхнюю границу всё равно держим: без кольца файл растёт с каждой новой
+-- встречей, а это единственная часть SV, которая растёт с цензом.
+local MAX_GEAR = 6000                  -- snapshots kept in SavedVariables
 local SLOT_FIRST, SLOT_LAST = 1, 19
 local TIMEOUT = 8                      -- seconds to wait for INSPECT_READY
 -- A queued request older than this describes a player who has already walked
