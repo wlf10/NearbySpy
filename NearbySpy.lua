@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.6.1
+    NearbySpy 1.6.2
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -99,6 +99,33 @@ GetDB = function()
     -- drops foreign packets AND hides already-stored foreign rows.
     if NearbySpy.peerAllRealms == nil then
         NearbySpy.peerAllRealms = true
+    end
+    -- Retention: записи игроков старше срока удаляются при входе в игру и при
+    -- выходе. Настройка живёт в SavedVariables, поэтому работает и после
+    -- /reload. nil = «не настраивали» → берём умолчание из NSP_CONST;
+    -- 0 = чистка явно выключена (/nspy retain off) и умолчание НЕ возвращается.
+    if NearbySpy.retainDays == nil then
+        NearbySpy.retainDays = (type(NSP_CONST) == "table" and NSP_CONST.RETAIN_DAYS) or 7
+    end
+    -- Позиционная схема: метатаблица НЕ сохраняется в SavedVariables, поэтому
+    -- после загрузки записи приходят голыми массивами и p.name вернёт nil.
+    -- Проход обязан идти ЗДЕСЬ, до любого кода ниже: миграция имён читает
+    -- p.name/p.realm и, не найдя их, выбросила бы все записи как «unusable».
+    -- Защёлка в памяти (не в SV) — GetDB зовут на каждое событие, а проход по
+    -- десяткам тысяч записей нужен один раз за сессию.
+    if not NSP_REC.ready then
+        NSP_REC.ready = true
+        if type(NspMigrateRecords) == "function" then
+            local okM, conv, att = pcall(NspMigrateRecords, NearbySpy)
+            if not okM then
+                NSP_REC.ready = false      -- повторим на следующем вызове
+                NearbySpy.debug = NearbySpy.debug or {}
+                NearbySpy.debug.recMigrateErr = tostring(conv)
+            elseif (tonumber(conv) or 0) + (tonumber(att) or 0) > 0 then
+                NearbySpy.debug = NearbySpy.debug or {}
+                NearbySpy.debug.recMigrated = (NearbySpy.debug.recMigrated or 0) + (tonumber(conv) or 0)
+            end
+        end
     end
     local db = NearbySpy
     -- game tag for the site (14.10.2026): retail / classic_era / forever.
@@ -948,6 +975,127 @@ local function ClassFileFromLocalized(classStr)
     return nil
 end
 
+-- ===================== записи игроков: позиционная схема =====================
+-- Раскладка слотов и метатаблица живут в NearbySpy_Locale.lua (NSP_REC): главный
+-- чанк стоит у потолка Lua 5.1 в 200 top-level locals, поэтому здесь только
+-- глобальные функции. Обе объявлены глобальными намеренно.
+
+-- Новая запись в позиционной схеме. Все слоты заполняются сразу (`false` вместо
+-- nil): дырка в array-части ломает и `#`, и запись SavedVariables.
+-- `key` хранится слотом, хотя совпадает с ключом таблицы: Inspect читает p.key,
+-- а метатаблица не знает, под каким ключом лежит таблица.
+function NspNewPlayerRec(key, data, observed, nowT)
+    local peer = (data.source == "peer")
+    local place = observed or peer
+    -- Round4 — local главного чанка: в вырезанном тестовом блоке его нет, и
+    -- обращение к нему стало бы nil-глобалом. Фолбэк с той же формулой ценой
+    -- одной проверки; в проде всегда берётся настоящая Round4.
+    local round = Round4
+    if not round then
+        round = function(v)
+            if type(v) ~= "number" then return nil end
+            return math.floor(v * 10000 + 0.5) / 10000
+        end
+    end
+    local rec = {
+        data.name or false,                                     -- 1  name
+        data.class or false,                                    -- 2  class
+        data.classLoc or false,                                 -- 3  classLoc
+        data.level or false,                                    -- 4  level
+        data.realm or false,                                    -- 5  realm
+        (place and data.zone) or false,                         -- 6  zone
+        (place and data.zoneId) or false,                       -- 7  zoneId
+        observed and nowT or 0,                                 -- 8  lastSeen
+        observed and nowT or 0,                                 -- 9  firstSeen
+        observed and 1 or 0,                                    -- 10 count
+        (place and data.x and round(data.x)) or false,           -- 11 x
+        (place and data.y and round(data.y)) or false,           -- 12 y
+        data.source or false,                                   -- 13 source
+        data.race or false,                                     -- 14 race
+        data.faction or false,                                  -- 15 faction
+        data.guid or false,                                     -- 16 guid
+        peer and nowT or false,                                 -- 17 peerAt
+        peer or false,                                          -- 18 peerNew
+        data.peerRealm or false,                                -- 19 peerRealm
+        data.peerForeign or false,                              -- 20 peerForeign
+        data.peerFrom or false,                                 -- 21 peerFrom
+        key or false,                                           -- 22 key
+        false,                                                  -- 23 gear
+    }
+    return setmetatable(rec, NSP_REC.MT)
+end
+
+-- Приведение базы к позиционной схеме.
+--
+-- Метатаблица НЕ сохраняется в SavedVariables: клиент пишет только данные, и
+-- после перезапуска игры записи приходят голыми массивами. Поэтому проход нужен
+-- при КАЖДОЙ загрузке, даже когда db.recSchema уже равен текущей версии — он
+-- навешивает метатаблицу и добивает недостающие слоты.
+--
+-- Старая hash-схема (все поля по именам) переносится в позиции; таблицу нельзя
+-- подменить прямо в pairs(), поэтому ключи собираются заранее.
+function NspMigrateRecords(db)
+    if type(db) ~= "table" or type(db.players) ~= "table" then return 0, 0 end
+    local SLOTS = NSP_REC.SLOTS
+    local attached, converted = 0, 0
+    local todo = nil
+    for k, p in pairs(db.players) do
+        if type(p) == "table" then
+            if not NSP_REC.IsPositional(p) then
+                todo = todo or {}
+                todo[#todo + 1] = k
+            else
+                -- добить недостающие слоты (база, сохранённая старой версией
+                -- раскладки с меньшим числом полей) и навесить метатаблицу
+                local n = 0
+                for i = 1, SLOTS do
+                    if rawget(p, i) == nil then rawset(p, i, false) else n = i end
+                end
+                if getmetatable(p) ~= NSP_REC.MT then
+                    setmetatable(p, NSP_REC.MT)
+                    attached = attached + 1
+                end
+            end
+        end
+    end
+    if todo then
+        for _, k in ipairs(todo) do
+            local p = db.players[k]
+            local rec = {}
+            for i = 1, SLOTS do rec[i] = false end
+            rec[1] = p.name or false
+            rec[2] = p.class or false
+            rec[3] = p.classLoc or false
+            rec[4] = p.level or false
+            rec[5] = p.realm or false
+            rec[6] = p.zone or false
+            rec[7] = p.zoneId or false
+            rec[8] = p.lastSeen or 0
+            rec[9] = p.firstSeen or 0
+            rec[10] = p.count or 0
+            rec[11] = p.x or false
+            rec[12] = p.y or false
+            rec[13] = p.source or false
+            rec[14] = p.race or false
+            rec[15] = p.faction or false
+            rec[16] = p.guid or false
+            rec[17] = p.peerAt or false
+            rec[18] = p.peerNew or false
+            rec[19] = p.peerRealm or false
+            rec[20] = p.peerForeign or false
+            rec[21] = p.peerFrom or false
+            -- key: поле совпадает с ключом таблицы в 100% живых записей
+            -- (проверено на 81 347), но если его нет — берём ключ
+            rec[22] = p.key or k
+            rec[23] = p.gear or false
+            db.players[k] = setmetatable(rec, NSP_REC.MT)
+            converted = converted + 1
+        end
+    end
+    db.recSchema = NSP_REC.SCHEMA
+    return converted, attached
+end
+
 -- shared record/upsert
 -- data.observe == false marks a profile-only update: the source knows who the
 -- player is, but nobody actually saw them in the world. Such updates enrich
@@ -961,43 +1109,20 @@ local function UpsertPlayer(db, data)
     local observed = data.observe ~= false
     local entry = db.players[key]
     if not entry then
-        db.players[key] = {
-            name = data.name,
-            realm = data.realm,
-            class = data.class,
-            classLoc = data.classLoc,
-            level = data.level,
-            faction = data.faction,
-            race = data.race,
-            guid = data.guid,
-            -- A peer packet carries the reporter's zone and position (protocol
-            -- N3). For a row we have never seen ourselves this is the only place
-            -- we have, so it is stored; see the update branch below for why it
-            -- never overwrites our own sighting.
-            zone = (observed or data.source == "peer") and data.zone or nil,
-            zoneId = (observed or data.source == "peer") and data.zoneId or nil,
-            x = (observed or data.source == "peer") and Round4(data.x) or nil,
-            y = (observed or data.source == "peer") and Round4(data.y) or nil,
-            firstSeen = observed and nowT or 0,
-            lastSeen = observed and nowT or 0,
-            count = observed and 1 or 0,
-            source = data.source,
-            -- peerAt/peerNew: the row came in over the nearbyspydata channel.
-            -- Stored in SV so the Peer filter and /nspy peer new still answer
-            -- after a relog (the in-memory counters do not survive logout).
-            peerAt = data.source == "peer" and nowT or nil,
-            peerNew = data.source == "peer" or nil,
-            -- Which realm reported the record, and whether that realm is not
-            -- ours: the channel turned out to be shared cluster-wide (09.11.2026,
-            -- CAMWOW EU4/EU5), so the export must be able to tell our own
-            -- sightings-by-peer from another realm's.
-            peerRealm = data.peerRealm or nil,
-            peerForeign = data.peerForeign or nil,
-            -- Which character's addon told us about this player. Provenance is
-            -- the only way to answer "whose data is this row" later: peer
-            -- records are never re-sent, so the sender IS the discoverer.
-            peerFrom = data.peerFrom or nil,
-        }
+        -- Позиционная схема (NSP_REC): запись — массив из 23 слотов, а имена
+        -- полей отдаёт общая метатаблица. Правила заполнения:
+        --   • место (zone/zoneId/x/y) пишется только для НАШЕЙ встречи или
+        --     peer-пакета (протокол N3): для записи, которую мы никогда не
+        --     видели сами, это единственный источник места;
+        --   • lastSeen/count остаются 0 у профиля без встречи (сентинел
+        --     «профиль, а не встреча», см. NspPrune и парсеры);
+        --   • peerAt/peerNew живут в SV, чтобы фильтр Peer и /nspy peer new
+        --     отвечали после перелогина (счётчики в памяти умирают на логауте);
+        --   • peerRealm/peerForeign — канал общий на кластер (CAMWOW EU4/EU5),
+        --     поэтому выгрузка обязана отличать своё наблюдение от чужого;
+        --   • peerFrom — провенанс: peer-записи никогда не пересылаются
+        --     повторно, значит отправитель и есть первооткрыватель.
+        db.players[key] = NspNewPlayerRec(key, data, observed, nowT)
         newThisSession = newThisSession + 1
         -- Journal (1.5.7): a player that entered the database is a real
         -- encounter. Peer packets are excluded — someone else reporting a
@@ -2893,6 +3018,8 @@ function NspPruneDebug(db)
         pruned = true, prunedAt = true,
         -- this migration's own bookkeeping
         debugPrunedCount = true, debugPrunedAt = true,
+        -- позиционная схема записей: сколько перенесено и была ли ошибка
+        recMigrated = true, recMigrateErr = true,
     }
     local dropped, names = 0, {}
     for k in pairs(db.debug) do
@@ -6963,15 +7090,36 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             end
             if not okI then P("itemnames: " .. tostring(errI)) end
         end
+    elseif msg == "mem" then
+        -- Память базы: сколько занимает Lua и из чего состоит база. Цифра
+        -- «записей» — главная: она и определяет вес (поля почти не влияют).
+        local kb = 0
+        if type(collectgarbage) == "function" then
+            local okC, v = pcall(collectgarbage, "count")
+            if okC and type(v) == "number" then kb = v end
+        end
+        local total, own, foreign = 0, 0, 0
+        local myRealm = (GetRealmName and GetRealmName()) or ""
+        for _, p in pairs(db.players) do
+            if type(p) == "table" then
+                total = total + 1
+                if (p.realm or "") == myRealm then own = own + 1 else foreign = foreign + 1 end
+            end
+        end
+        P(("mem: Lua %.1f МБ (%d КБ); записей %d (свой реалм %d, чужие %d); retain %d дн.")
+            :format(kb / 1024, math.floor(kb), total, own, foreign, tonumber(db.retainDays) or 0))
     elseif msg == "retain" or msg:match("^retain%s") then
-        -- Срок хранения записей в SavedVariables. По умолчанию ЧИСТКИ НЕТ:
-        -- файл — единственная локальная копия, и удаление необратимо.
+        -- Срок хранения записей в SavedVariables. Умолчание — 7 дней
+        -- (NSP_CONST.RETAIN_DAYS): база растёт от числа встреч, и без срока она
+        -- упирается в память клиента. Удаление необратимо, поэтому полный снимок
+        -- надо сохранить в файл ДО чистки (games/wow/scripts/archive_nspy.py).
         --   /nspy retain           — показать настройку и что будет удалено
-        --   /nspy retain 14        — хранить 14 дней (чистка на выходе из игры)
-        --   /nspy retain off       — не чистить (по умолчанию)
+        --   /nspy retain 14        — хранить 14 дней
+        --   /nspy retain off       — не чистить вовсе (пишется 0, не nil:
+        --                            nil вернул бы умолчание при следующем входе)
         local arg = msg:match("^retain%s+(%S+)$")
         if arg == "off" or arg == "0" then
-            db.retainDays = nil
+            db.retainDays = 0
             P("retain: чистка выключена, записи не удаляются")
         elseif arg and tonumber(arg) then
             local days = math.floor(tonumber(arg))
@@ -7579,7 +7727,22 @@ frame:RegisterEvent("PLAYER_DEAD")
 frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
         if arg1 == ADDON_NAME then
-            GetDB()
+            -- GetDB сам приводит записи к позиционной схеме (до миграции имён)
+            local db = GetDB()
+            -- Retention on load. Чистим сразу после загрузки базы: тогда в
+            -- SavedVariables при выходе не уедет старый хвост, и следующая
+            -- сессия стартует с меньшей базой. Память ТЕКУЩЕЙ сессии это почти
+            -- не уменьшает (Lua не возвращает hash-часть таблицы при удалении
+            -- ключей) — размер ограничивается для последующих загрузок.
+            do
+                local days = tonumber(db.retainDays) or 0
+                if days > 0 then
+                    local okP, removed = pcall(NspPrune, db, days)
+                    if okP and removed and removed > 0 then
+                        D(("prune: удалено старых записей при входе: %d (старше %d дн.)"):format(removed, days))
+                    end
+                end
+            end
         end
     elseif event == "PLAYER_LOGIN" then
         local db = GetDB()
@@ -7671,8 +7834,8 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             if not okJ then DbgErr("journalDeath", errJ) end
         end
     elseif event == "PLAYER_LOGOUT" then
-        -- Чистка старых записей: только если владелец включил её командой
-        -- /nspy retain N. По умолчанию retainDays = nil → ничего не удаляется.
+        -- Чистка старых записей: срок берётся из SavedVariables (умолчание —
+        -- NSP_CONST.RETAIN_DAYS), 0 = чистка выключена командой /nspy retain off.
         do
             local dbL = GetDB()
             local days = tonumber(dbL.retainDays)
