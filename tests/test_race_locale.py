@@ -121,6 +121,75 @@ class RaceLocaleTest(unittest.TestCase):
         self.assertTrue(fits("Таурен", "ptBR"))
         self.assertTrue(fits("Tauren", "ptBR"))
 
+    def test_name_fits_locale_de(self):
+        """Немецкий клиент: латиница с умляутами — своя, кириллица — нет.
+
+        Гейт для deDE раньше не существовал (ветка «неизвестная локаль — не
+        судим»), поэтому накопленный db.learn от русского клиента ставил в
+        очередь р-"Таурен" — сервер отвечал пустым списком.
+        """
+        lua, mod = self.run_block(LEARN_REAL, "deDE")
+        fits = mod["fits"]
+        self.assertTrue(fits("Tauren", "deDE"))
+        self.assertTrue(fits("Untoter", "deDE"))
+        self.assertTrue(fits("Zwerg", "deDE"))
+        self.assertTrue(fits("Zwergin", "deDE"))     # женская форма, умляутов нет
+        self.assertFalse(fits("Таурен", "deDE"))
+        self.assertFalse(fits("Небеснорожденный из Высшего ордена", "deDE"))
+
+    def test_name_fits_locale_fr(self):
+        """Французский клиент: акценты (Taurène) — свои, кириллица — нет."""
+        lua, mod = self.run_block(LEARN_REAL, "frFR")
+        fits = mod["fits"]
+        self.assertTrue(fits("Humain", "frFR"))
+        self.assertTrue(fits("Elfe de la nuit", "frFR"))
+        self.assertTrue(fits("Taurène", "frFR"))     # 2-байтное é/è не режем
+        self.assertTrue(fits("Mort-vivant", "frFR"))
+        self.assertFalse(fits("Таурен", "frFR"))
+        self.assertFalse(fits("Mensch Таурен", "frFR"))
+
+    def test_de_queue_is_german_only(self):
+        """Очередь рас на немецком клиенте — канон deDE, без кириллицы.
+
+        Таблица берётся НАСТОЯЩАЯ (её объявление входит в вырезанный блок и
+        перекрывает заглушку прелюдии), поэтому тест ловит и рассинхрон
+        RACE_BY_LOCALE с клиентскими строками.
+        """
+        lua, _ = self.run_block(LEARN_REAL, "deDE")
+        chunk = (
+            PRELUDE + LEARN_REAL + locale_block()
+            + '\nCURRENT_LOCALE = "deDE"\n'
+            + "local db = {learn = LEARN}\n"
+            + "local out = {}\n"
+            + "for name in pairs(RaceFilterNames(db, 'Horde')) do out[#out+1] = name end\n"
+            + "table.sort(out)\nreturn out\n"
+        )
+        got = [str(x) for x in lua.execute(chunk).values()]
+        self.assertEqual(got, ["Orc", "Tauren", "Troll", "Untoter"],
+                         "состав очереди Horde (deDE): %s" % got)
+
+        chunk_all = chunk.replace("'Horde'", "'Alliance'")
+        got_all = [str(x) for x in lua.execute(chunk_all).values()]
+        cyr = [n for n in got_all if any(0x400 <= ord(c) <= 0x4FF for c in n)]
+        self.assertEqual(cyr, [], "кириллица в очереди немецкого клиента: %s" % cyr)
+        for de in ("Mensch", "Zwerg", "Nachtelf", "Gnom"):
+            self.assertIn(de, got_all, "нет немецкого канона: %s" % de)
+
+    def test_fr_queue_is_french_only(self):
+        """То же для французского: канон frFR, кириллица отсечена."""
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        chunk = (
+            PRELUDE + LEARN_REAL + locale_block()
+            + '\nCURRENT_LOCALE = "frFR"\n'
+            + "local db = {learn = LEARN}\n"
+            + "local out = {}\n"
+            + "for name in pairs(RaceFilterNames(db, 'Horde')) do out[#out+1] = name end\n"
+            + "table.sort(out)\nreturn out\n"
+        )
+        got = [str(x) for x in lua.execute(chunk).values()]
+        self.assertEqual(got, ["Mort-vivant", "Orc", "Tauren", "Troll"],
+                         "состав очереди Horde (frFR): %s" % got)
+
     def test_ru_locale_excludes_english_names(self):
         """Главное: на русском клиенте в очередь скана не попадает латиница.
 

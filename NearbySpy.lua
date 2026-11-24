@@ -3402,6 +3402,25 @@ local RACE_LOCALE = {
     ["Нежить"] = "Scourge", ["Undead"] = "Scourge", ["Forsaken"] = "Scourge",
     ["Таурен"] = "Tauren", ["Tauren"] = "Tauren",
     ["Тролль"] = "Troll", ["Troll"] = "Troll",
+    -- German and French clients (24.11.2026). Strings come from DB2 ChrRaces,
+    -- field Name_lang (wago.tools export) — the very strings the client shows
+    -- in the /who race column and the server expects in the filter. Source
+    -- check: the Russian values of the same export match the table above
+    -- character for character.
+    -- Female forms (Zwergin, Nachtelfe, Untote; Humaine, Naine, Orque,
+    -- Morte-vivante, Taurène, Trollesse) are listed HERE FOR NORMALISATION
+    -- ONLY: UnitRace returns the race name with the unit's gender, so without
+    -- them those records would be stored as raw text instead of a file key.
+    -- They never go into a race query — that uses the canon from
+    -- RACE_BY_LOCALE, exactly like the Russian «Орчиха»/«Гномка».
+    ["Mensch"] = "Human", ["Zwerg"] = "Dwarf", ["Zwergin"] = "Dwarf",
+    ["Nachtelf"] = "NightElf", ["Nachtelfe"] = "NightElf", ["Gnom"] = "Gnome",
+    ["Untoter"] = "Scourge", ["Untote"] = "Scourge",
+    ["Humain"] = "Human", ["Humaine"] = "Human",
+    ["Nain"] = "Dwarf", ["Naine"] = "Dwarf",
+    ["Elfe de la nuit"] = "NightElf",
+    ["Mort-vivant"] = "Scourge", ["Morte-vivante"] = "Scourge",
+    ["Taurène"] = "Tauren", ["Trollesse"] = "Troll",
 }
 
 -- LearnedFactions — НАБОР фракций, в которых наблюдалась раса.
@@ -4300,6 +4319,27 @@ local RACE_BY_LOCALE = {
         Orc = "Orc", Scourge = "Undead", Tauren = "Tauren",
         Troll = "Troll",
     },
+    -- German and French clients (24.11.2026). Source: DB2 ChrRaces, field
+    -- Name_lang (wago.tools export) — exactly the strings the client shows in
+    -- the "Volk"/"race" column of the /who window and the ones the server
+    -- expects in the filter. Source check: the Russian values of the same
+    -- export matched the table above character for character.
+    -- NOTE: German Orc is spelled «Orc», not «Ork» — that is the client string,
+    -- not a typo. Female forms (Zwergin/Nachtelfe/Untote, Naine/Morte-vivante/
+    -- Taurène/Trollesse) do NOT belong here: the server understands the canon,
+    -- same as with the Russian «Орчиха»/«Гномка» (see RaceFilterNames).
+    deDE = {
+        Human = "Mensch", Dwarf = "Zwerg", NightElf = "Nachtelf",
+        Gnome = "Gnom",
+        Orc = "Orc", Scourge = "Untoter", Tauren = "Tauren",
+        Troll = "Troll",
+    },
+    frFR = {
+        Human = "Humain", Dwarf = "Nain", NightElf = "Elfe de la nuit",
+        Gnome = "Gnome",
+        Orc = "Orc", Scourge = "Mort-vivant", Tauren = "Tauren",
+        Troll = "Troll",
+    },
 }
 
 local function PlayerFaction()
@@ -4342,6 +4382,14 @@ local function NameFitsLocale(name, loc)
     loc = loc or (GetLocale and GetLocale()) or ""
     if loc == "enUS" or loc == "enGB" or loc == "enTW" then
         return name:find("[\128-\255]") == nil  -- только ASCII
+    elseif loc == "deDE" or loc == "frFR" then
+        -- Latin locales: umlauts and accents (ä ö ü ß é è) belong here, while
+        -- Cyrillic (leading bytes D0/D1) and CJK (E3..ED) arrive only from a
+        -- db.learn table accumulated in someone else's locale. The gate is
+        -- needed exactly here: without it the German client queued
+        -- р-"Таурен"/р-"Нежить" left over from the Russian session, the server
+        -- answered with an empty list and the magnifier clicks were wasted.
+        return name:find("[\208\209]") == nil and name:find("[\227-\237]") == nil
     elseif loc == "ruRU" then
         return name:find("[\208\209]") ~= nil   -- кириллица: D0/D1 + 80..BF
     elseif loc == "zhCN" or loc == "zhTW" or loc == "koKR" then
