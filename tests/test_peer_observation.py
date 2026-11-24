@@ -18,7 +18,7 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
-from nsp_helpers import CONST_PRELUDE, RACE_PRELUDE
+from nsp_helpers import CONST_PRELUDE, RACE_PRELUDE, REC_PRELUDE
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -56,7 +56,7 @@ def block() -> str:
 class PeerObservationTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n" + PRELUDE + "\n"
+        self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n" + REC_PRELUDE + "\n" + PRELUDE + "\n"
                          "function ZoneNameById(id) return nil end\n"
                          + block() + "\n"
                          "TestReceive = ReceivePeerMessage\n"

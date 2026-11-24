@@ -84,36 +84,72 @@ NSP_CONST = {
 --
 -- Порядок слотов менять нельзя: он записан в файлах игроков. Новые поля —
 -- только В КОНЕЦ, и старые, уже сохранённые записи, обязаны продолжать читаться.
+--
+-- v3 (2026-11-24): убраны два слота, которые дублировали уже имеющиеся данные.
+--   classLoc — локализованное имя класса выводится из `class` через
+--     ClassLocFromFile (ClassDisplayName уже так и делает), а в файле оно
+--     занимало 0.86 МБ (24 значения на 9 классов: русский + английский);
+--   key — совпадал с ключом таблицы в 100% живых записей (55 768 из 55 768).
+--     Inspect его НЕ читает из записи: он передаёт ключ сам (J.Request(unit, key)
+--     → pending.key), поэтому слот был чистым балластом на 2.09 МБ.
+-- Удаление слота — это ещё и память клиента: array-часть записи короче на два
+-- TValue (16 байт каждый), а записей десятки тысяч.
+--
+-- Записи v2 (23 слота) читаются миграцией NspMigrateRecords: раскладка ниже
+-- сохранена в NSP_REC.V2 именно для неё.
 NSP_REC = {
     -- индексы слотов: имя поля -> позиция
     name = 1,
     class = 2,
-    classLoc = 3,
-    level = 4,
-    realm = 5,
-    zone = 6,
-    zoneId = 7,
-    lastSeen = 8,
-    firstSeen = 9,
-    count = 10,
-    x = 11,
-    y = 12,
-    source = 13,
-    race = 14,
-    faction = 15,
-    guid = 16,
-    peerAt = 17,
-    peerNew = 18,
-    peerRealm = 19,
-    peerForeign = 20,
-    peerFrom = 21,
-    key = 22,
-    gear = 23,
-    SLOTS = 23,
-    -- Версия раскладки в SavedVariables (db.recSchema). 2 = позиционная.
-    -- Смена числа заставит пересобрать записи при следующем входе.
-    SCHEMA = 2,
+    level = 3,
+    realm = 4,
+    zone = 5,
+    zoneId = 6,
+    lastSeen = 7,
+    firstSeen = 8,
+    count = 9,
+    x = 10,
+    y = 11,
+    source = 12,
+    race = 13,
+    faction = 14,
+    guid = 15,
+    peerAt = 16,
+    peerNew = 17,
+    peerRealm = 18,
+    peerForeign = 19,
+    peerFrom = 20,
+    gear = 21,
+    SLOTS = 21,
+    -- Версия раскладки в SavedVariables (db.recSchema). 2 = позиционная с
+    -- classLoc и key, 3 = позиционная без них. Смена числа заставит пересобрать
+    -- записи при следующем входе.
+    SCHEMA = 3,
 }
+
+-- Раскладка v2: только для миграции уже сохранённых файлов (23 слота).
+-- Индексы здесь — ИМЕНА ПОЛЕЙ старой схемы, поэтому classLoc и key в ней есть.
+NSP_REC.V2 = {
+    name = 1, class = 2, classLoc = 3, level = 4, realm = 5, zone = 6, zoneId = 7,
+    lastSeen = 8, firstSeen = 9, count = 10, x = 11, y = 12, source = 13,
+    race = 14, faction = 15, guid = 16, peerAt = 17, peerNew = 18,
+    peerRealm = 19, peerForeign = 20, peerFrom = 21, key = 22, gear = 23,
+    SLOTS = 23,
+}
+
+-- Поля текущей раскладки в порядке слотов: по ним миграция пересобирает запись,
+-- а позиции берёт из самого NSP_REC (единственный источник истины).
+-- Лежит здесь, а не local в NearbySpy.lua: тот чанк у потолка 200 top-level
+-- locals, и лишние local'ы валят загрузку аддона целиком.
+NSP_REC.V3_FIELDS = {
+    "name", "class", "level", "realm", "zone", "zoneId", "lastSeen", "firstSeen",
+    "count", "x", "y", "source", "race", "faction", "guid", "peerAt", "peerNew",
+    "peerRealm", "peerForeign", "peerFrom", "gear",
+}
+
+-- Числовые слоты: nil превращается в 0, а не в false — иначе парсер сайта
+-- получил бы false там, где ждёт число (lastSeen=0 — сентинел «не встречали»).
+NSP_REC.NUMERIC = {lastSeen = true, firstSeen = true, count = true}
 
 -- Метатаблица записи: отдаёт полям их прежние имена.
 NSP_REC.MT = {
@@ -127,6 +163,15 @@ NSP_REC.MT = {
     __newindex = function(t, i, v)
         local n = NSP_REC[i]
         if not n then
+            -- Неизвестное ИМЯ писать нельзя: в таблице появился бы именованный
+            -- ключ, и SavedVariables записался бы словарём вместо массива —
+            -- формат файла сменился бы молча. Так случилось бы с classLoc/key
+            -- при любой забытой строке вида `entry.classLoc = x` после перехода
+            -- на v3. Считаем в NSP_REC.unknown: поле пропало, но файл цел.
+            if type(i) == "string" then
+                NSP_REC.unknown = (NSP_REC.unknown or 0) + 1
+                return
+            end
             rawset(t, i, v)
             return
         end

@@ -5,7 +5,7 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
-from nsp_helpers import RACE_PRELUDE
+from nsp_helpers import RACE_PRELUDE, REC_PRELUDE
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -41,7 +41,7 @@ class PeerDiagnosticsTests(unittest.TestCase):
             "ChatFrame1 = DEFAULT_CHAT_FRAME\n"
             "local function AddFilter(_, callback) _G.TestFilter = callback end\n"
             "ChatFrame_AddMessageEventFilter = AddFilter\n"
-            + RACE_PRELUDE + "\n"
+            + RACE_PRELUDE + "\n" + REC_PRELUDE + "\n"
             + peer + "\n"
             + filtering + "\n"
             "TestReceive = ReceivePeerMessage\n"

@@ -19,7 +19,7 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
-from nsp_helpers import CONST_PRELUDE
+from nsp_helpers import CONST_PRELUDE, REC_PRELUDE
 
 ADDON = Path(__file__).resolve().parents[1]
 SOURCE = ADDON / "NearbySpy.lua"
@@ -36,7 +36,7 @@ class PeerUpdateTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
-            CONST_PRELUDE + "\n"
+            CONST_PRELUDE + "\n" + REC_PRELUDE + "\n"
             "time = function() return 1000 end\n"
             "function Round4(v) if v == nil then return nil end "
             "return math.floor(v * 10000 + 0.5) / 10000 end\n"

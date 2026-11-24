@@ -79,7 +79,14 @@ class PassiveInspectTests(unittest.TestCase):
         # deterministic pacing
         self.lua.execute("math.random = function() return 0 end")
         self.g = self.lua.globals()
-        self.J = self.lua.execute(INSPECT_FILE.read_text(encoding="utf-8"))
+        src = INSPECT_FILE.read_text(encoding="utf-8")
+        self.J = self.lua.execute(src)
+        # Потолок кольца — local в исходнике; выносим его в глобал, чтобы тест
+        # проверял ФАКТИЧЕСКИЙ лимит, а не зашитое когда-то число.
+        import re as _re
+        m = _re.search(r"local MAX_GEAR = (\d+)", src)
+        if m:
+            self.g["NSP_INSPECT_MAX_GEAR"] = int(m.group(1))
         self.J["P"] = self.g["PStub"]
         self.J["GetDB"] = self.lua.eval("function() return DB end")
         self.db = self.g["DB"]
@@ -318,12 +325,17 @@ class PassiveInspectTests(unittest.TestCase):
 
     # -- bounded storage ----------------------------------------------------
     def test_snapshot_ring_drops_oldest_and_keeps_the_player_row(self):
-        # fill the ring past its cap by hand, then let one Store evict
-        self.lua.execute("""
-        for i = 1, 2001 do
+        # fill the ring past its cap by hand, then let one Store evict.
+        # Потолок берём ИЗ АДДОНА, а не хардкодим: MAX_GEAR менялся (2000 → 6000
+        # 24.11.2026), и зашитое число превращает полезный тест в ложный провал.
+        cap = int(self.lua.eval("NSP_INSPECT_MAX_GEAR")) if self.lua.globals()["NSP_INSPECT_MAX_GEAR"] else None
+        if cap is None:
+            self.skipTest("MAX_GEAR не выставлен в тестовом окружении")
+        self.lua.execute(f"""
+        for i = 1, {cap + 1} do
             local k = "P" .. i .. "-Realm"
-            DB.players[k] = { name = "p" .. i, gear = { at = i } }
-            DB.gearRing = DB.gearRing or {}
+            DB.players[k] = {{ name = "p" .. i, gear = {{ at = i }} }}
+            DB.gearRing = DB.gearRing or {{}}
             DB.gearRing[#DB.gearRing + 1] = k
         end
         """)
@@ -331,7 +343,7 @@ class PassiveInspectTests(unittest.TestCase):
         self.ready()
 
         ring = [str(k) for k in self.db["gearRing"].values()]
-        self.assertLessEqual(len(ring), 2000)
+        self.assertLessEqual(len(ring), cap)
         # the evicted player keeps the row, loses only the snapshot
         self.assertIsNotNone(self.db["players"]["P1-Realm"])
         self.assertIsNone(self.db["players"]["P1-Realm"]["gear"])

@@ -10,6 +10,8 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
+from nsp_helpers import REC_PRELUDE
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -22,10 +24,15 @@ class NameMigrationTests(unittest.TestCase):
             source.index("-- Keep a bounded sample")
         ]
         lua = LuaRuntime(unpack_returned_tuples=True)
+        # GetDB приводит записи к позиционной схеме, поэтому ему нужны NSP_REC
+        # и конструктор записи — тот же набор, что в проде.
+        lua.execute(REC_PRELUDE)
         lua.execute(
+            "NSP_CONST = { RETAIN_DAYS = 7 }\n"
             "time = function() return 1000 end\n"
             "GetBuildInfo = function() return '1.60.1' end\n"
             "GetRealmName = function() return 'Home' end\n"
+            "D = function() end\n"
         )
         # lupa's table_from does not convert nested dicts — convert per record
         lua_players = lua.table()

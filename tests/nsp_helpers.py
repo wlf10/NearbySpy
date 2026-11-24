@@ -56,5 +56,34 @@ def race_prelude() -> str:
     return "\n".join(parts)
 
 
+def rec_prelude() -> str:
+    """Позиционная схема записи (NSP_REC) плюс её конструктор, одним куском.
+
+    С 1.7.0 запись игрока — массив из 23 слотов, и `UpsertPlayer` создаёт её
+    через `NspNewPlayerRec`. Любой харнес, который вырезает `UpsertPlayer`,
+    обязан принести и то, и другое: иначе он падает на
+    "attempt to call global 'NspNewPlayerRec' (a nil value)" и не проверяет
+    ничего о самом апсерте.
+
+    Слоты берутся из настоящего файла локалей (там же метатаблица), а
+    конструктор — из настоящего `NearbySpy.lua`: переписанная копия схемы в
+    тесте разошлась бы с продакшном на первой правке порядка слотов.
+    """
+    loc = LOCALE_FILE.read_text(encoding="utf-8")
+    start = loc.index("NSP_REC = {")
+    end = loc.index("NSP_LOCALE = {", start)
+    rec_block = loc[start:end]
+
+    src = ADDON_FILE.read_text(encoding="utf-8")
+    parts = [rec_block]
+    marker = "function NspNewPlayerRec(key, data, observed, nowT)"
+    if marker in src:
+        ctor_start = src.index(marker)
+        ctor_end = src.index("-- Приведение базы к позиционной схеме", ctor_start)
+        parts.append(src[ctor_start:ctor_end])
+    return "\n".join(parts)
+
+
 CONST_PRELUDE = const_prelude()
 RACE_PRELUDE = race_prelude()
+REC_PRELUDE = rec_prelude()

@@ -14,7 +14,7 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
-from nsp_helpers import RACE_PRELUDE
+from nsp_helpers import RACE_PRELUDE, REC_PRELUDE
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -55,7 +55,7 @@ def block() -> str:
 class PeerPlaceTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(PRELUDE + "\n" + RACE_PRELUDE + "\n" + block() + "\n"
+        self.lua.execute(PRELUDE + "\n" + RACE_PRELUDE + "\n" + REC_PRELUDE + "\n" + block() + "\n"
                          "TestQueue = QueuePeerNew\n"
                          # NB: `DrainPeerQueue = DrainPeerQueue` is a NO-OP: with a
                          # local of that name in scope the left side resolves to the
