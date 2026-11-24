@@ -6961,7 +6961,11 @@ local function BuildHubWindow()
             if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
         end)
     HubCell(hubWin, 1, 1, "HUB_SETTINGS", "HUB_SETTINGS_D", 0.75, 0.75, 0.78,
-        function() ShowSettingsWindow() end)
+        function()
+            -- вкладка в меню модификаций клиента, а если её нет — окно аддона
+            local ok, err = pcall(NspOpenOptions)
+            if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
+        end)
     hub.Refresh()
 end
 
@@ -6988,6 +6992,10 @@ end
 -- manual ASCII fallback for clients where the template is gutted.
 local optWin
 local opt = {}
+-- Виджеты второго хозяина — вкладки в меню модификаций. Отдельная таблица, иначе
+-- оба места писали бы в одну и перезатирали друг друга: после этого перестают
+-- обновляться либо галочки окна, либо панели.
+local optRows = {}
 
 local function OptCheck(parent, x, y, labelKey, descKey, getter, setter)
     local okTpl, cb = pcall(CreateFrame, "CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
@@ -7233,6 +7241,111 @@ local function TzEntries()
     return t
 end
 
+-- ── Строки настроек: ОДНА таблица, ДВА места показа ─────────────────────────
+-- Опции показываются в собственном окне аддона (/nspy settings, плитка hub) и
+-- во вкладке меню модификаций клиента. Список живёт в ОДНОЙ функции, иначе
+-- «добавил галочку в окно, забыл в панель» расходится молча: в меню клиента
+-- не хватает настройки, которую видно в окне аддона.
+--
+-- Global, не local: главный чанк стоит на 195 из 200 локалов Lua 5.1.
+--   kind = "check"  → OptCheck(parent, x, y, label, desc, getter, setter)
+--   kind = "select" → OptSelect с entries (функция списка) и width
+function NspSetRows()
+    return {
+        { kind = "check", key = "peer", label = "SET_PEER", desc = "SET_PEER_D",
+          getter = function() return GetDB().peerEnabled and true or false end,
+          setter = function(v)
+              local db = GetDB()
+              db.peerEnabled = v
+              if v then
+                  local ok, err = pcall(JoinPeerChannel)
+                  if not ok then DbgErr("peerJoin", err) end
+              else
+                  peerQueue, peerQueued = {}, {}
+                  if LeaveChannelByName then pcall(LeaveChannelByName, PeerChannelName()) end
+              end
+              hub.Refresh()
+          end },
+
+        { kind = "check", key = "allRealms", label = "SET_PEER_ALL", desc = "SET_PEER_ALL_D",
+          getter = function() return GetDB().peerAllRealms and true or false end,
+          setter = function(v)
+              local db = GetDB()
+              db.peerAllRealms = v
+              -- Both directions change what the list shows, so repaint it right
+              -- away: with the flag off stored foreign rows disappear, with it on
+              -- they come back (nothing is deleted either way).
+              -- `parent` here is whichever window hosts the row, so it tells us
+              -- nothing about the PLAYER window — ask that window directly.
+              local mainWin = _G and _G.NearbySpyWindow
+              if mainWin and mainWin.IsShown and mainWin:IsShown() then pcall(TacticalUpdate) end
+              if hub and hub.Refresh then pcall(hub.Refresh) end
+          end },
+
+        { kind = "check", key = "minimap", label = "SET_MINIMAP", desc = "SET_MINIMAP_D",
+          getter = function() return not GetDB().minimapHide end,
+          setter = function(v)
+              local db = GetDB()
+              -- stored inverted: minimapHide keeps old saved variables working
+              db.minimapHide = not v
+              -- the icon is created lazily; if the user shows it before it was
+              -- ever built, build it first — then the update places it (hiding
+              -- then showing must leave a button on screen, not nothing)
+              if v and not miniBtn and BuildMinimapButton then pcall(BuildMinimapButton) end
+              if MinimapButton_Update then MinimapButton_Update() end
+          end },
+
+        { kind = "select", key = "lang", ddName = "NearbySpyLangDD", width = 190,
+          label = "SET_LANG", desc = "SET_LANG_D", entries = LangEntries,
+          getter = function() return GetDB().locale or "AUTO" end,
+          setter = function(v)
+              local db = GetDB()
+              db.locale = (v ~= "AUTO") and v or nil
+              RefreshSettingsText()
+              P(L("SET_RELOAD"))
+          end },
+
+        { kind = "select", key = "tz", ddName = "NearbySpyTzDD", width = 190,
+          label = "SET_TZ", desc = "SET_TZ_D", entries = TzEntries,
+          getter = function()
+              local off = GetDB().tzOffset
+              return (type(off) == "number") and off or "AUTO"
+          end,
+          setter = function(v)
+              GetDB().tzOffset = (v ~= "AUTO") and v or nil
+          end },
+    }
+end
+
+-- Раскладка строк в любом родителе. Возвращает Y, на котором кончилось
+-- содержимое (по нему хозяин считает высоту). Шаг считается по ИЗМЕРЕННОЙ высоте
+-- текста: описание переносится на две-четыре строки в зависимости от шрифта
+-- клиента и языка, и жёсткие 52 px накладывали длинные строки друг на друга.
+-- nameSuffix нужен потому, что у дропдаунов есть ИМЕНА: два фрейма с одним
+-- именем в WoW — ошибка «duplicate name», поэтому панель клиента получает свои.
+function NspLayRows(parent, startY, store, nameSuffix)
+    local rows = NspSetRows()
+    local y = startY or -16
+    local suffix = nameSuffix or ""
+    for i = 1, #rows do
+        local row = rows[i]
+        if row.kind == "select" then
+            local sel = OptSelect(parent, y, row.ddName .. suffix, row.label, row.desc,
+                row.width, row.entries, row.getter, row.setter)
+            store[row.key] = sel
+            y = y - (46 + OptTextHeight(sel and sel.desc, 22)) - 18
+        else
+            local cb, label, desc = OptCheck(parent, 16, y, row.label, row.desc,
+                row.getter, row.setter)
+            store[row.key] = cb
+            store[row.key .. "Label"] = label
+            store[row.key .. "Desc"] = desc
+            y = y - (4 + OptTextHeight(label, 14) + 3 + OptTextHeight(desc, 22)) - 16
+        end
+    end
+    return y
+end
+
 local function BuildSettingsWindow()
     local okTpl, tplWin = pcall(CreateFrame, "Frame", "NearbySpySettings", UIParent,
         "BasicFrameTemplateWithInset")
@@ -7291,85 +7404,9 @@ local function BuildSettingsWindow()
     -- description wraps to two, three or four lines depending on the client
     -- font and the language, so hard-coded step of 52px made the longer rows
     -- overlap the next one (seen with the new "Accept other realms" checkbox).
-    local rowY = -52
-    local function NextCheckY(label, desc)
-        return rowY - (4 + OptTextHeight(label, 14) + 3 + OptTextHeight(desc, 22)) - 16
-    end
-    local function NextSelectY(sel)
-        -- a selector draws its label at y, the dropdown at y-14 and the
-        -- description at y-46, so its block never ends before 46 + desc height
-        return rowY - (46 + OptTextHeight(sel and sel.desc, 22)) - 18
-    end
-
-    opt.peer, opt.peerLabel, opt.peerDesc = OptCheck(win, 16, rowY, "SET_PEER", "SET_PEER_D",
-        function() return GetDB().peerEnabled and true or false end,
-        function(v)
-            local db = GetDB()
-            db.peerEnabled = v
-            if v then
-                local ok, err = pcall(JoinPeerChannel)
-                if not ok then DbgErr("peerJoin", err) end
-            else
-                peerQueue, peerQueued = {}, {}
-                if LeaveChannelByName then pcall(LeaveChannelByName, PeerChannelName()) end
-            end
-            hub.Refresh()
-        end)
-    rowY = NextCheckY(opt.peerLabel, opt.peerDesc)
-
-    opt.allRealms, opt.allRealmsLabel, opt.allRealmsDesc = OptCheck(win, 16, rowY,
-        "SET_PEER_ALL", "SET_PEER_ALL_D",
-        function() return GetDB().peerAllRealms and true or false end,
-        function(v)
-            local db = GetDB()
-            db.peerAllRealms = v
-            -- Both directions change what the list shows, so repaint it right
-            -- away: with the flag off stored foreign rows disappear, with it on
-            -- they come back (nothing is deleted either way).
-            -- `win` here is the SETTINGS window: checking it told us only that
-            -- the checkbox was visible, and the repaint then ran against a player
-            -- window that may never have been built. Ask the player window.
-            local mainWin = _G and _G.NearbySpyWindow
-            if mainWin and mainWin.IsShown and mainWin:IsShown() then pcall(TacticalUpdate) end
-            if hub and hub.Refresh then pcall(hub.Refresh) end
-        end)
-    rowY = NextCheckY(opt.allRealmsLabel, opt.allRealmsDesc)
-
-    opt.minimap, opt.minimapLabel, opt.minimapDesc = OptCheck(win, 16, rowY, "SET_MINIMAP", "SET_MINIMAP_D",
-        function() return not GetDB().minimapHide end,
-        function(v)
-            local db = GetDB()
-            -- stored inverted: minimapHide keeps old saved variables working
-            db.minimapHide = not v
-            -- the icon is created lazily; if the user shows it before it was
-            -- ever built, build it first — then the update places it (hiding
-            -- then showing must leave a button on screen, not nothing)
-            if v and not miniBtn and BuildMinimapButton then pcall(BuildMinimapButton) end
-            if MinimapButton_Update then MinimapButton_Update() end
-        end)
-    rowY = NextCheckY(opt.minimapLabel, opt.minimapDesc)
-
-    opt.lang = OptSelect(win, rowY, "NearbySpyLangDD", "SET_LANG", "SET_LANG_D", 190,
-        LangEntries,
-        function() return GetDB().locale or "AUTO" end,
-        function(v)
-            local db = GetDB()
-            db.locale = (v ~= "AUTO") and v or nil
-            RefreshSettingsText()
-            P(L("SET_RELOAD"))
-        end)
-    rowY = NextSelectY(opt.lang)
-
-    opt.tz = OptSelect(win, rowY, "NearbySpyTzDD", "SET_TZ", "SET_TZ_D", 190,
-        TzEntries,
-        function()
-            local off = GetDB().tzOffset
-            return (type(off) == "number") and off or "AUTO"
-        end,
-        function(v)
-            GetDB().tzOffset = (v ~= "AUTO") and v or nil
-        end)
-    rowY = NextSelectY(opt.tz)
+    -- Сами строки берутся из общего списка NspSetRows — того же, из которого
+    -- строится вкладка в меню модификаций.
+    local rowY = NspLayRows(win, -52, opt)
 
     -- The window grows with its content: a fixed height clipped the last
     -- selector once a longer description was added.
@@ -7380,40 +7417,143 @@ local function BuildSettingsWindow()
     win:Hide()
 end
 
--- Live relabel after a language switch: only the settings window rebuilds its
+-- Live relabel after a language switch: only the settings surfaces rebuild their
 -- text; windows built earlier keep their labels until /reload (hint is shown).
-RefreshSettingsText = function()
-    if not optWin then return end
-    local tt = optWin.TitleText or opt.title
-    if tt and tt.SetText then tt:SetText(L("HUB_SETTINGS")) end
-    if opt.peerLabel then opt.peerLabel:SetText(L("SET_PEER")) end
-    if opt.peerDesc then opt.peerDesc:SetText(L("SET_PEER_D")) end
-    if opt.allRealmsLabel then opt.allRealmsLabel:SetText(L("SET_PEER_ALL")) end
-    if opt.allRealmsDesc then opt.allRealmsDesc:SetText(L("SET_PEER_ALL_D")) end
-    if opt.minimapLabel then opt.minimapLabel:SetText(L("SET_MINIMAP")) end
-    if opt.minimapDesc then opt.minimapDesc:SetText(L("SET_MINIMAP_D")) end
-    if opt.lang then
-        opt.lang.label:SetText(L("SET_LANG"))
-        opt.lang.desc:SetText(L("SET_LANG_D"))
-        opt.lang.Refresh()
+-- Text is relabelled in BOTH hosts — the custom window and the client's AddOns
+-- panel — from the same row list, so a new row cannot be relabelled in one
+-- place and forgotten in the other.
+function NspRelabelRows(store)
+    if type(store) ~= "table" then return end
+    local rows = NspSetRows()
+    for i = 1, #rows do
+        local row = rows[i]
+        if row.kind == "select" then
+            local sel = store[row.key]
+            if sel then
+                if sel.label then sel.label:SetText(L(row.label)) end
+                if sel.desc then sel.desc:SetText(L(row.desc)) end
+                if sel.Refresh then sel.Refresh() end
+            end
+        else
+            local lab, desc = store[row.key .. "Label"], store[row.key .. "Desc"]
+            if lab then lab:SetText(L(row.label)) end
+            if desc then desc:SetText(L(row.desc)) end
+        end
     end
-    if opt.tz then
-        opt.tz.label:SetText(L("SET_TZ"))
-        opt.tz.desc:SetText(L("SET_TZ_D"))
-        opt.tz.Refresh()
+end
+
+RefreshSettingsText = function()
+    if optWin then
+        local tt = optWin.TitleText or opt.title
+        if tt and tt.SetText then tt:SetText(L("HUB_SETTINGS")) end
+    end
+    NspRelabelRows(opt)
+    NspRelabelRows(optRows)
+end
+
+-- Проставить виджетам сохранённые значения. Нужно ОБОИМ хозяевам: настройку
+-- можно поменять мимо панели (`/nspy peer off` в чате), и тогда галочка в меню
+-- модификаций показывала бы неправду до /reload.
+function NspSyncRowValues(store)
+    if type(store) ~= "table" then return end
+    local rows = NspSetRows()
+    for i = 1, #rows do
+        local row = rows[i]
+        local w = store[row.key]
+        if row.kind == "select" then
+            if w and w.Refresh then w:Refresh() end
+        elseif w and w.SetChecked then
+            w:SetChecked(row.getter() and true or false)
+        end
     end
 end
 
 ShowSettingsWindow = function()
     local ok, err = pcall(function()
         if not optWin then BuildSettingsWindow() end
-        if opt.peer then opt.peer:SetChecked(GetDB().peerEnabled and true or false) end
-        if opt.allRealms then opt.allRealms:SetChecked(GetDB().peerAllRealms and true or false) end
-        if opt.lang then opt.lang.Refresh() end
-        if opt.tz then opt.tz.Refresh() end
+        NspSyncRowValues(opt)
         optWin:Show()
     end)
     if not ok then P(L("ERR_WINDOW") .. tostring(err)) end
+end
+
+-- ── Вкладка в меню модификаций клиента (Settings → AddOns → NearbySpy) ─────
+-- Как у остальных аддонов. Порядок ветвей взят из ЖИВОГО клиента (исходник
+-- ForeverDungeonJournal/Systems/OptionsPanel.lua): сначала современная
+-- Settings-API, при её отсутствии — старая InterfaceOptions. Оба API в этом
+-- клиенте есть (замер по Interface/AddOns: Settings.Register* используют
+-- Auctionator, Mastercraft, TalkingHeadRu, CatQuest; InterfaceOptions_AddCategory
+-- — ForeverDungeonJournal, Details, BetterBlizzFrames).
+-- Отдельный фрейм, а не переиспользование окна: у окна свой заголовок, рамка и
+-- перетаскивание, а панель клиента сама рисует холст и скролл.
+-- Глобалы (NspOptPanel/NspOptCategory), а не локалы: главный чанк стоит на 199
+-- из 200 локалов Lua 5.1, и два «удобных» локала стоят дороже, чем одна буква
+-- в имени.
+local function BuildOptionsPanel()
+    if NspOptPanel then return NspOptPanel end
+    local p = CreateFrame("Frame", "NearbySpyOptionsPanel")
+    -- Старая API берёт заголовок вкладки из panel.name (у нового API он в
+    -- аргументе), поэтому имя задаётся всегда.
+    p.name = "NearbySpy"
+    local lastY = NspLayRows(p, -16, optRows, "Opt")
+    local h = -lastY + 16
+    if h < 120 then h = 120 end
+    if p.SetSize then p:SetSize(560, h) end
+    p:SetScript("OnShow", function() pcall(NspSyncRowValues, optRows) end)
+    NspOptPanel = p
+    return p
+end
+
+-- true, если вкладка зарегистрирована (или уже была). false — регистрация не
+-- удалась, и тогда команда открывает собственное окно аддона: молча ничего не
+-- делать нельзя, иначе «настройки не открываются» без причины.
+function NspRegisterOptions()
+    if NspOptCategory then return true end
+    local okBuild, p = pcall(BuildOptionsPanel)
+    if not okBuild or not p then return false end
+    if type(Settings) == "table" and Settings.RegisterCanvasLayoutCategory
+        and Settings.RegisterAddOnCategory then
+        local okReg, cat = pcall(function()
+            local c = Settings.RegisterCanvasLayoutCategory(p, "NearbySpy")
+            -- ID нужен Settings.OpenToCategory: по нему открывается вкладка
+            if type(c) == "table" then c.ID = "NearbySpy" end
+            Settings.RegisterAddOnCategory(c)
+            return c
+        end)
+        if okReg and cat then
+            NspOptCategory = cat
+            return true
+        end
+    end
+    if InterfaceOptions_AddCategory then
+        local okReg = pcall(InterfaceOptions_AddCategory, p)
+        if okReg then
+            NspOptCategory = p
+            return true
+        end
+    end
+    return false
+end
+
+-- NspOpenOptions() — одна точка входа для `/nspy settings` и плитки в hub:
+-- сначала вкладка клиента, иначе собственное окно.
+function NspOpenOptions()
+    if not NspOptCategory then pcall(NspRegisterOptions) end
+    if NspOptCategory then
+        if type(Settings) == "table" and Settings.OpenToCategory then
+            local id = NspOptCategory.ID or "NearbySpy"
+            if pcall(Settings.OpenToCategory, id) then return true end
+        end
+        if InterfaceOptionsFrame_OpenToCategory then
+            -- старый API: первый вызов открывает окно, второй выбирает вкладку —
+            -- с одним вызовом игрок попадает на список категорий
+            pcall(InterfaceOptionsFrame_OpenToCategory, NspOptCategory)
+            pcall(InterfaceOptionsFrame_OpenToCategory, NspOptCategory)
+            return true
+        end
+    end
+    ShowSettingsWindow()
+    return false
 end
 
 function MinimapButton_Update()
@@ -7583,7 +7723,9 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         MinimapButton_Update()
         P(db.minimapHide and L("MM_OFF") or L("MM_ON"))
     elseif msg == "settings" or msg == "options" then
-        ShowSettingsWindow()
+        -- Как у всех аддонов: вкладка в меню модификаций, иначе окно аддона.
+        local okS, opened = pcall(NspOpenOptions)
+        if not okS then P(L("ERR_WINDOW") .. tostring(opened)) end
     elseif msg == "whotest" or msg:match("^whotest%s") then
         -- diagnostic: probe the programmatic /who gate on this build
         --   /nspy whotest              three send paths, 15 s each
@@ -8421,6 +8563,12 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         local db = GetDB()
         EnsureNameplates(db)
         ScheduleTick()
+        -- Вкладка в меню модификаций (Settings → AddOns → NearbySpy). Регистрация
+        -- здесь, а не в ADDON_LOADED: панель клиента к этому моменту уже создана,
+        -- а рамки настроек ещё не нужны. Неудача не должна ломать вход — команда
+        -- /nspy settings в этом случае откроет собственное окно аддона.
+        local okOpt, registered = pcall(NspRegisterOptions)
+        if not okOpt then DbgErr("optionsRegister", registered) end
         -- Passive inspector: same injection pattern (no UI, runs on encounters)
         if type(NSP_INSPECT) == "table" then
             NSP_INSPECT.P, NSP_INSPECT.GetDB, NSP_INSPECT.DbgErr = P, GetDB, DbgErr

@@ -136,7 +136,10 @@ WIN = { height = nil }
 class SettingsRealmFlagTests(unittest.TestCase):
     def setUp(self):
         source = SOURCE.read_text(encoding="utf-8")
-        start = source.index("local function BuildSettingsWindow()")
+        # Срез начинается с общего списка строк (NspSetRows) и слоя раскладки:
+        # окно больше не держит свои копии опций, и без этого блока тест
+        # проверял бы пустоту вместо настоящей раскладки.
+        start = source.index("function NspSetRows()")
         end = source.index("function MinimapButton_Update()", start)
         block = source[start:end]
         self.lua = LuaRuntime(unpack_returned_tuples=True)
