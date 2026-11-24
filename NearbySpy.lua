@@ -1372,11 +1372,28 @@ local function UpsertPlayer(db, data)
     NspResolveZoneId(entry)
     if observed and data.source ~= "peer" and QueuePeerNew then
         local changedLevel = data.level and prevLevel and data.level ~= prevLevel
-        local changedZone = data.zone and data.zone ~= "" and data.zone ~= prevZone
-        -- зона сравнивается по id, когда он известен: имя локализовано, а id —
-        -- один и тот же во всех клиентских языках
-        if data.zoneId and data.zoneId > 0 and prevZoneId and data.zoneId ~= prevZoneId then
-            changedZone = true
+        -- Смена зоны решается ПО ID, а не по тексту (24.11.2026).
+        --
+        -- Название зоны локализовано и приходит на языке той сессии, которой
+        -- сделана запись: в базе рядом лежат «Тирисфальские леса» (старый
+        -- ruRU-клиент) и «Tirisfal» (deDE) — это ОДНА зона с одним id. Текстовое
+        -- сравнение объявляло такие записи сменой зоны и слало в канал пустое
+        -- обновление при каждой повторной встрече.
+        --
+        -- Старый id досстанавливаем из текста той же вшитой таблицей: иначе
+        -- «id появился впервые» выглядело бы как смена зоны. Текст остаётся
+        -- сравнением только когда id нет ни с одной стороны (старые записи).
+        local newZoneId = tonumber(data.zoneId) or 0
+        local oldZoneId = tonumber(prevZoneId) or 0
+        if oldZoneId == 0 and type(prevZone) == "string" and prevZone ~= ""
+            and prevZone ~= "?" then
+            oldZoneId = ZoneIdByName(prevZone) or 0
+        end
+        local changedZone
+        if newZoneId > 0 and oldZoneId > 0 then
+            changedZone = (newZoneId ~= oldZoneId)
+        else
+            changedZone = data.zone and data.zone ~= "" and data.zone ~= prevZone
         end
         if changedLevel or changedZone then
             local upd = {}

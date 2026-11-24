@@ -86,6 +86,9 @@ def rec_prelude() -> str:
     # проверяет ничего о самом апсерте. Настоящая проверка — в
     # tests/test_zone_resolve.py, здесь достаточно заглушки.
     parts.append("NspResolveZoneId = function() end")
+    # ZoneIdByName вызывается из UpsertPlayer при сравнении зоны (смена зоны
+    # решается по id). Как и выше — объявлена вне вырезаемого слайса.
+    parts.append("ZoneIdByName = function() return nil end")
     return "\n".join(parts)
 
 

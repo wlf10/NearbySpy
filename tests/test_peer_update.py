@@ -32,11 +32,31 @@ def upsert_block() -> str:
     return src[start:end]
 
 
+def zone_names_block() -> str:
+    """Настоящая таблица зон билда + ZoneIdByName (не заглушка).
+
+    Смена зоны решается по id, поэтому сравнение зовёт `ZoneIdByName` чтобы
+    досстановить id старой записи из её названия. Проверять это на заглушке
+    бессмысленно: тогда тест не отличает «резолв работает» от «резолв молчит».
+    7749 записей грузятся за считанные миллисекунды.
+    """
+    src = SOURCE.read_text(encoding="utf-8")
+    start = src.index("function ZoneIdByName(name)")
+    end = src.index("-- ZoneNameById", start)
+    zone_id_fn = src[start:end]
+    table_lua = (ADDON / "NearbySpy_Zones.lua").read_text(encoding="utf-8")
+    return (
+        "ZoneMapRefresh = function() end\n"
+        "ZoneMapInit = function() return {}, {} end\n"
+        + table_lua + "\n" + zone_id_fn
+    )
+
+
 class PeerUpdateTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
-            CONST_PRELUDE + "\n" + REC_PRELUDE + "\n"
+            CONST_PRELUDE + "\n" + REC_PRELUDE + "\n" + zone_names_block() + "\n"
             "time = function() return 1000 end\n"
             "function Round4(v) if v == nil then return nil end "
             "return math.floor(v * 10000 + 0.5) / 10000 end\n"
@@ -109,6 +129,50 @@ class PeerUpdateTests(unittest.TestCase):
         self.g["QUEUE_CALLS"] = self.lua.table_from({})
         self.upsert()          # те же уровень и зона
         self.assertEqual([], self.calls(), "одно и то же изменение ушло повторно")
+
+    # --- смена зоны решается по ID, а не по тексту (24.11.2026) -------------
+    #
+    # Название зоны локализовано: в базе рядом лежат «Тирисфальские леса»
+    # (старый ruRU-клиент) и «Tirisfal» (deDE) — одна зона с одним id.
+    # Текстовое сравнение объявляло это сменой зоны и слало пустое обновление
+    # в канал при каждой повторной встрече.
+
+    def test_same_zone_id_with_different_language_name_is_not_a_change(self):
+        self.upsert(zoneId=1420, zone="Тирисфальские леса")
+        self.g["QUEUE_CALLS"] = self.lua.table_from({})
+        self.upsert(zoneId=1420, zone="Tirisfal")
+        self.assertEqual([], self.calls(),
+                         "одна зона под разными именами ушла в обмен как смена")
+
+    def test_different_zone_id_with_similar_name_is_a_change(self):
+        self.upsert(zoneId=1417, zone="Arathi Highlands")
+        self.g["QUEUE_CALLS"] = self.lua.table_from({})
+        self.upsert(zoneId=1461, zone="Arathi Basin")
+        calls = self.calls()
+        self.assertEqual(1, len(calls), "другая зона не ушла в обмен")
+        self.assertTrue(calls[0]["isUpdate"])
+
+    def test_missing_old_id_is_resolved_from_the_name(self):
+        """id появился впервые — это уточнение, а не смена зоны.
+
+        Старая запись хранила только название («Durotar») без id; свежая
+        встреча даёт id 1411. Сравнение по тексту объявило бы смену, хотя зона
+        та же.
+        """
+        self.upsert(zoneId=0, zone="Durotar")
+        self.g["QUEUE_CALLS"] = self.lua.table_from({})
+        self.upsert(zoneId=1411, zone="Durotar")
+        self.assertEqual([], self.calls(),
+                         "появление id объявлено сменой зоны")
+
+    def test_without_ids_text_is_still_compared(self):
+        """Фолбэк для старых записей: id нет — сравниваем текст, как раньше."""
+        self.upsert(zoneId=0, zone="Elwynn")
+        self.g["QUEUE_CALLS"] = self.lua.table_from({})
+        self.upsert(zoneId=0, zone="Durotar")
+        calls = self.calls()
+        self.assertEqual(1, len(calls), "без id смена зоны потерялась")
+        self.assertTrue(calls[0]["isUpdate"])
 
     def test_update_carries_observation_time(self):
         self.upsert()
