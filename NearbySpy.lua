@@ -551,6 +551,31 @@ local function Round4(v)
     return math.floor(v * 10000 + 0.5) / 10000
 end
 
+-- ZoneDisplay — имя зоны В ЯЗЫКЕ ТЕКУЩЕГО КЛИЕНТА.
+--
+-- Записи накапливаются годами: у встречи, снятой на русском клиенте, в слоте
+-- zone лежит «Нагорье Арати», у немецкой — «Arathihochland», у англоязычной
+-- приёма из канала — что-то третье. В окне это выглядело смешанным набором
+-- языков. uiMapID одинаков в любой локали, поэтому имя берём по нему:
+-- C_Map.GetMapInfo(id).name клиент отдаёт уже на своём языке (проверено на
+-- deDE: 1417→Arathihochland, 1429→Wald von Elwynn).
+--
+-- Фолбэк на сохранённый текст обязателен:
+--   • zoneId есть у 82% записей базы (замер по живому SV 24.11.2026);
+--   • у записи из канала зоны нет вовсе — честно покажем «?».
+-- Глобальная функция, а не local: главный чанк на 197 локалах из 200 у Lua 5.1.
+function ZoneDisplay(zoneId, zoneText)
+    local n = tonumber(zoneId)
+    if n and n > 0 then
+        local name = ZoneNameById(n)
+        if name and name ~= "" then return name end
+    end
+    if type(zoneText) == "string" and zoneText ~= "" and zoneText ~= "?" then
+        return zoneText
+    end
+    return "?"
+end
+
 -- ============ helpers shared with world collection ============
 -- ProbeText и ProbeTip остались после вырезания probe-блоков: ими
 -- пользуется сбор мира (имя предмета из тултипа, чтение торговой позиции).
@@ -5935,7 +5960,7 @@ local function TacticalRow(parent, index)
         GameTooltip:AddLine(p.name or "?", r, g, b)
         GameTooltip:AddLine(ClassDisplayName(p.class, p.classLoc)
             .. "; " .. L("LVL_PREFIX") .. tostring(p.level or "?"), 0.82, 0.88, 0.88)
-        GameTooltip:AddLine(L("UI_ZONE") .. ": " .. tostring(p.zone or "?"), 0.65, 0.72, 0.72)
+        GameTooltip:AddLine(L("UI_ZONE") .. ": " .. ZoneDisplay(p.zoneId, p.zone), 0.65, 0.72, 0.72)
         if p.peerForeign and p.realm and p.realm ~= "" then
             -- A peer record from another realm: someone else in the channel met
             -- this player, we did not. The full realm has no room in the list,
@@ -6001,7 +6026,7 @@ local function TacticalRows()
                 L("LVL_PREFIX"), tostring(p.level or "?")))
             -- Peer records carry no position or zone at all (the packet has
             -- neither), so a peer row honestly has no zone.
-            row.zone:SetText(p.zone or "?")
+            row.zone:SetText(ZoneDisplay(p.zoneId, p.zone))
             -- In the peer list the CONTACT column answers "when did this arrive
             -- over the channel", which is the only timestamp a peer row has.
             -- Everywhere else our own sighting wins; a peer row has none

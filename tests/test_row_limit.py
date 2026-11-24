@@ -36,6 +36,13 @@ local function TacticalVisible() return true end
 -- минимальный мок строки: методы-заглушки + наблюдаемые FontString'ы
 function ClassLocFromFile(f) return (LOCALIZED_CLASS_NAMES_MALE or {})[f] end
 function RealmBadge(realm) return realm end
+-- Зона в колонке выводится через ZoneDisplay (24.11.2026): она берёт имя по
+-- uiMapID у клиента. Проверка самой ZoneDisplay — в test_zone_display.py,
+-- здесь достаточно заглушки, повторяющей её контракт.
+function ZoneDisplay(zoneId, zoneText)
+    if zoneText and zoneText ~= "" and zoneText ~= "?" then return zoneText end
+    return "?"
+end
 function ClassDisplayName(file, fallback) return fallback or (LOCALIZED_CLASS_NAMES_MALE or {})[file] or file or "?" end
 LOCALIZED_CLASS_NAMES_MALE = {MAGE = "Маг", DRUID = "Друид"}
 
