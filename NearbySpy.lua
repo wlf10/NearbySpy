@@ -544,7 +544,7 @@ function ZoneIdByName(name)
     local byName = ZoneMapInit()
     local hit = byName[name]
     if hit then return hit end
-    local t = NSP_ZONE_BY_NAME
+    local t = NSP_ZONE_TABLE
     if type(t) == "table" then
         -- ключи в таблице в нижнем регистре; string.lower в Lua 5.1 работает
         -- по байтам и для UTF-8 безопасен (меняет только ASCII-регистр),
@@ -612,6 +612,29 @@ function ZoneDisplay(zoneId, zoneText)
         return zoneText
     end
     return "?"
+end
+
+-- NspResolveZoneId — досстановить zoneId по тексту зоны в записи.
+--
+-- Зачем: зона приходит текстом из трёх путей, где id взять негде —
+--   • peer-пакет с zoneId=0 (пир не знал id и прислал имя в хвосте);
+--   • chat (спикер в чате: ни зоны, ни id — зона появляется позже из другого
+--     источника, а id при этом никто не проставлял);
+--   • чужая локаль: name→id у клиента нет вовсе, только вшитая таблица.
+-- Замер по живому SV 24.11.2026: 72 записи из 209 пришли без zoneId, хотя все
+-- их названия есть в NSP_ZONE_TABLE («Orgrimmar», «Duralar», «Feralas», …).
+--
+-- Трогаем ТОЛЬКО отсутствующий id: уже известный не перезаписываем (id — факт
+-- наблюдения, имя может быть старой сессией). Вызов дешёвый: ZoneIdByName
+-- сначала смотрит кэш клиента, затем таблицу; обход карт кэширован.
+function NspResolveZoneId(entry)
+    if type(entry) ~= "table" then return end
+    local zid = entry.zoneId
+    if zid and zid ~= 0 then return end          -- id уже есть — не трогаем
+    local zone = entry.zone
+    if type(zone) ~= "string" or zone == "" or zone == "?" then return end
+    local resolved = ZoneIdByName(zone)
+    if resolved and resolved > 0 then entry.zoneId = resolved end
 end
 
 -- ============ helpers shared with world collection ============
@@ -1232,6 +1255,12 @@ local function UpsertPlayer(db, data)
         --     повторно, значит отправитель и есть первооткрыватель.
         db.players[key] = NspNewPlayerRec(key, data, observed, nowT)
         newThisSession = newThisSession + 1
+        -- Зона пришла ТЕКСТОМ без id (peer с zoneId=0, чат, чужой клиент) —
+        -- восстанавливаем id вшитой таблицей билда. Без этого такие записи
+        -- нельзя ни показать на языке интерфейса, ни фильтровать по зоне:
+        -- замер по живому SV 24.11.2026 — 72 из 209 записей /who остались без
+        -- zoneId, хотя все их названия есть в таблице.
+        NspResolveZoneId(db.players[key])
         -- Journal (1.5.7): a player that entered the database is a real
         -- encounter. Peer packets are excluded — someone else reporting a
         -- sighting is not our meeting (same contract as the alert feature).
@@ -1337,6 +1366,10 @@ local function UpsertPlayer(db, data)
     -- Условия: это наша встреча (не peer — иначе бесконечная ретрансляция),
     -- и в записи действительно что-то поменялось. Дедуп в QueuePeerNew держит
     -- ключ с самими значениями, так что одно и то же изменение уйдёт один раз.
+    -- Зона обновлена текстом без id (новая встреча в другой зоне, peer-пакет
+    -- с zoneId=0) — досстанавливаем id по имени. Здесь, а не только в ветке
+    -- создания: запись могла существовать, а зона прийти впервые.
+    NspResolveZoneId(entry)
     if observed and data.source ~= "peer" and QueuePeerNew then
         local changedLevel = data.level and prevLevel and data.level ~= prevLevel
         local changedZone = data.zone and data.zone ~= "" and data.zone ~= prevZone

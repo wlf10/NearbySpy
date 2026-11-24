@@ -81,6 +81,11 @@ def rec_prelude() -> str:
         ctor_start = src.index(marker)
         ctor_end = src.index("-- Приведение базы к позиционной схеме", ctor_start)
         parts.append(src[ctor_start:ctor_end])
+    # NspResolveZoneId вызывается из UpsertPlayer, а объявлена выше вырезаемого
+    # слайса. Без неё любой харнес апсерта падает «attempt to call global» и не
+    # проверяет ничего о самом апсерте. Настоящая проверка — в
+    # tests/test_zone_resolve.py, здесь достаточно заглушки.
+    parts.append("NspResolveZoneId = function() end")
     return "\n".join(parts)
 
 
@@ -153,6 +158,11 @@ NspNoteSendRet = function() return false end
 PeerCoord = function(v) return tostring(v) end
 ClassLocFromFile = function(c) return c end
 ZoneNameById = function() return nil end
+-- NspResolveZoneId объявлена выше слайса (досстанавливает zoneId по имени
+-- зоны, см. её определение в NearbySpy.lua). Настоящая проверка — в
+-- tests/test_zone_resolve.py; здесь нужна заглушка, иначе вызов внутри
+-- UpsertPlayer падает «attempt to call global».
+NspResolveZoneId = function() end
 -- jitter в ответах на запрос делаем детерминированным: иначе тест «ответ
 -- уходит сразу» плавал бы на случайности.
 math.random = function(a, b) return a or 0 end
