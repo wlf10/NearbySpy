@@ -37,15 +37,28 @@
 
 ### New: ask other clients for what they have seen recently
 
-- `/nspy peer ask [minutes]` sends a request over the sharing channel and the
-  other running clients answer with their most recent sightings from that window
-  — up to 15 encounters and 5 gear snapshots, which fits in under a minute of
-  channel traffic. `/nspy peer ask status` shows the counters.
+- `/nspy peer ask` sends a request over the sharing channel and the other running
+  clients answer with their most recent sightings from that window — up to 15
+  encounters and 5 gear snapshots, which fits in under a minute of channel
+  traffic. `/nspy peer ask status` shows the counters.
+- `/nspy peer ask <name> [minutes]` asks one player only, so clients can be
+  visited one at a time instead of everyone answering at once. `/nspy peer ask
+  list` prints who has been talking in the channel. Double names work as they
+  appear in chat ("Youtchi Zerling"), with or without the hyphen, in any case.
 - Answers travel under their own packet type, so clients that did not ask for
   them drop them instead of writing them into their database. Only the client
   that made the request accepts the reply.
 - Nothing about your own database changes: records received this way are marked
   as someone else's observation, exactly like the regular sharing channel.
+
+### New: NearbySpy settings in the game's own AddOns tab
+
+- The options are now also available under Settings → AddOns → NearbySpy, where
+  every other addon keeps them, and `/nspy settings` opens that tab. They are the
+  same options as in the addon's own window: sharing, accept other realms,
+  minimap icon, interface language, heatmap timezone.
+- On clients whose settings API is missing entirely, the command falls back to
+  the addon's own window instead of doing nothing.
 
 ### Fixed: a snapshot without a realm was accepted but never stored
 
