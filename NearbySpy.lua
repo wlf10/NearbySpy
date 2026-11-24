@@ -616,17 +616,24 @@ end
 
 -- NspResolveZoneId — досстановить zoneId по тексту зоны в записи.
 --
--- Зачем: зона приходит текстом из трёх путей, где id взять негде —
+-- ⚠️ ПЕРЕХОДНЫЙ МЕХАНИЗМ (решение пользователя 24.11.2026): «пока оставим на
+-- переходный период, потом будем убирать». Убирать, когда в базе не останется
+-- записей без zoneId от старых клиентов — то есть после того, как парк
+-- обновится на версию, которая id шлёт всегда.
+--
+-- Зачем нужен сейчас: зона приходит текстом из трёх путей, где id взять негде —
 --   • peer-пакет с zoneId=0 (пир не знал id и прислал имя в хвосте);
 --   • chat (спикер в чате: ни зоны, ни id — зона появляется позже из другого
 --     источника, а id при этом никто не проставлял);
---   • чужая локаль: name→id у клиента нет вовсе, только вшитая таблица.
--- Замер по живому SV 24.11.2026: 72 записи из 209 пришли без zoneId, хотя все
--- их названия есть в NSP_ZONE_TABLE («Orgrimmar», «Duralar», «Feralas», …).
+--   • записи, сделанные ДО появления таблицы: у них в SV только название
+--     («Тирисфальские леса») и zoneId = false.
+-- Досстановленный id — второсортный по сравнению с наблюдённым: он выведен из
+-- текста, а не пришёл от клиента. Поэтому существующий id НИКОГДА не
+-- перезаписывается, а в peer-сравнении (UpsertPlayer) такой id уже не даёт
+-- отправить пустое обновление — см. блок «смена зоны решается по ID».
 --
--- Трогаем ТОЛЬКО отсутствующий id: уже известный не перезаписываем (id — факт
--- наблюдения, имя может быть старой сессией). Вызов дешёвый: ZoneIdByName
--- сначала смотрит кэш клиента, затем таблицу; обход карт кэширован.
+-- Счётчик, по которому видно, что механизм отработал своё: db.debug.zoneResolved.
+-- Когда он перестанет расти между сессиями — переходный период закончен.
 function NspResolveZoneId(entry)
     if type(entry) ~= "table" then return end
     local zid = entry.zoneId
@@ -634,7 +641,14 @@ function NspResolveZoneId(entry)
     local zone = entry.zone
     if type(zone) ~= "string" or zone == "" or zone == "?" then return end
     local resolved = ZoneIdByName(zone)
-    if resolved and resolved > 0 then entry.zoneId = resolved end
+    if resolved and resolved > 0 then
+        entry.zoneId = resolved
+        local db = GetDB and GetDB()
+        if type(db) == "table" then
+            db.debug = db.debug or {}
+            db.debug.zoneResolved = (db.debug.zoneResolved or 0) + 1
+        end
+    end
 end
 
 -- ============ helpers shared with world collection ============
@@ -3735,6 +3749,10 @@ function NspPruneDebug(db)
         migrationDropped = true, realmMigFixed = true, realmMigMerged = true,
         realmMigDropped = true, raceCanonicalised = true, raceJunkCleared = true,
         raceSamples = true, raceEmpty = true, raceUnresolved = true,
+        -- переходный механизм досстановления zoneId по имени зоны (24.11.2026):
+        -- счётчик показывает, что механизм ещё нужен; когда рост прекратится —
+        -- его пора убирать (см. NspResolveZoneId)
+        zoneResolved = true,
         cvarErr = true, hardcoreDeathCount = true, hardcoreDeathSamples = true,
         pruned = true, prunedAt = true,
         -- this migration's own bookkeeping
