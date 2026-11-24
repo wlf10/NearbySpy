@@ -41,7 +41,10 @@ def send_block() -> str:
     """Кодеки + очередь встреч + очередь gear + DrainPeerQueue."""
     src = SOURCE.read_text(encoding="utf-8")
     codes = src[src.index("NSP_PEER_CODES = {"):src.index("-- Peers now carry the place as well")]
-    gear = src[src.index("function PeerQueueGear(key, snapshot)"):
+    # маркер без закрывающей скобки: подпись PeerQueueGear может получить
+    # аргументы (с 1.6.3 — opts), и точное совпадение с «(key, snapshot)» ломает
+    # вырезание, хотя код рабочий.
+    gear = src[src.index("function PeerQueueGear(key, snapshot"):
                src.index("-- Замер возврата канала (15.11.2026)")]
     queue = src[src.index("QueuePeerNew = function(db, data)"):
                src.index("local function ReceivePeerMessage(")]

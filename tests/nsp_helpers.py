@@ -87,3 +87,99 @@ def rec_prelude() -> str:
 CONST_PRELUDE = const_prelude()
 RACE_PRELUDE = race_prelude()
 REC_PRELUDE = rec_prelude()
+
+
+def peer_prelude() -> str:
+    """Слайс peer-подсистемы целиком: константы, упаковка, очереди и запрос Q1.
+
+    Зачем одним куском, а не функция за функцией: `PeerAnswerDue` зовёт
+    настоящие `QueuePeerNew` и `PeerQueueGear`, а те живут внутри той же
+    секции и держат состояние в ЕЁ локалах (`peerQueue`, `peerQueued`,
+    `peerStats`). Вырезать их по отдельности можно, но тогда харнес начнёт
+    подменять очередь своей копией — и проверять переписанный код, а не
+    продакшн.
+
+    Слайс идёт от начала peer-секции до `ReceivePeerMessage` (его не берём: он
+    тянет за собой пол-файла). Область видимости чанка = один Lua-чанк, поэтому
+    состояние видно вызываемому коду и остаётся недоступным снаружи — наружу
+    отдаём ссылки `TestPeerQueue` / `TestPeerStats` / `TestPeerQueued`.
+
+    Внешние имена (D, P, GetDB, time, GetChannelName, PlayerRealm, UnitName,
+    UnitFactionGroup, PlayerZone, NspNoteSendRet, PeerCoord, ClassLocFromFile,
+    ZoneNameById) в продакшне объявлены ВЫШЕ слайса, поэтому в харнессе это
+    глобалы-заглушки, и тест обязан задать их ДО выполнения чанка.
+    """
+    src = ADDON_FILE.read_text(encoding="utf-8")
+    start = src.index("-- Opt-in, realm-local peer exchange.")
+    end = src.index("local function ReceivePeerMessage(message, sender, fromBatch)")
+    return (src[start:end]
+            + "\nTestPeerQueue, TestPeerStats, TestPeerQueued = peerQueue, peerStats, peerQueued\n"
+            + """
+-- Сброс сессионного состояния очередей: тесту нужно чистое «что ушло после
+-- этой команды», а дедуп-карты живут в локалах чанка и снаружи не чистятся.
+TestPeerReset = function()
+    for i = #peerQueue, 1, -1 do peerQueue[i] = nil end
+    for k in pairs(peerQueued) do peerQueued[k] = nil end
+    for k in pairs(peerSent) do peerSent[k] = nil end
+    peerStats.gearQueue = {}
+    peerStats.gearSent = {}
+end
+-- Разгрузка очереди — настоящая, не копия: иначе тест «сколько сообщений
+-- уходит в канал» проверял бы сборку пачки, переписанную в тесте.
+TestDrain = DrainPeerQueue
+""")
+
+
+PEER_PRELUDE = peer_prelude()
+
+# Заглушки клиента для peer-слайса. Каждое имя здесь в продакшне объявлено ВЫШЕ
+# слайса, поэтому в чанке оно резолвится как глобал — и тест обязан задать их до
+# выполнения чанка, иначе получит «attempt to call a nil value» вместо проверки.
+PEER_STUBS = r"""
+TestClock = 1000000
+TestChannel = 7
+TestDB = {game = "forever", peerEnabled = true, players = {}, debug = {}}
+D = function() end
+P = function() end
+L = function(k) return k end
+time = function() return TestClock end
+GetDB = function() return TestDB end
+PlayerRealm = function() return "TestRealm PvP" end
+PlayerZone = function() return "TestZone" end
+UnitName = function() return "Me", nil end
+UnitFactionGroup = function() return "Alliance" end
+GetChannelName = function() return TestChannel end
+NspNoteSendRet = function() return false end
+PeerCoord = function(v) return tostring(v) end
+ClassLocFromFile = function(c) return c end
+ZoneNameById = function() return nil end
+-- jitter в ответах на запрос делаем детерминированным: иначе тест «ответ
+-- уходит сразу» плавал бы на случайности.
+math.random = function(a, b) return a or 0 end
+"""
+
+
+def peer_module(lua):
+    """Загрузить peer-слайс в готовый LuaRuntime, вернуть таблицу TestDB.
+
+    Состояние (очередь, счётчики) остаётся внутри чанка и доступно тесту через
+    глобалы TestPeerQueue / TestPeerStats / TestPeerQueued.
+    """
+    lua.execute(CONST_PRELUDE + "\n" + PEER_STUBS + "\n" + PEER_PRELUDE)
+    return lua.globals()["TestDB"]
+
+
+def lua_fields(lua, payload: str):
+    """Разложить пакет на поля ТЕМ ЖЕ разбором, что в приёмнике.
+
+    Не `lua.table_from([...])`: он строит индексы с нуля, и `fields[2]` внутри
+    аддона оказывается ЧУЖИМ полем (тест падал на «game mismatch» при
+    правильном пакете). Разбор строки через gmatch — это буквально код
+    `ReceivePeerMessage`, так что и раскладка совпадает по определению.
+    """
+    lua.globals()["TestPayload"] = payload
+    lua.execute(
+        "TestFields = {}\n"
+        "for part in (TestPayload .. ';'):gmatch('(.-);') do TestFields[#TestFields + 1] = part end\n"
+    )
+    return lua.globals()["TestFields"]

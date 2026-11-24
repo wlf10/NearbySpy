@@ -59,7 +59,7 @@ def codec_block() -> str:
 
 def gear_send_block() -> str:
     src = SOURCE.read_text(encoding="utf-8")
-    start = src.index("function PeerQueueGear(key, snapshot)")
+    start = src.index("function PeerQueueGear(key, snapshot")  # без закрывающей скобки: подпись может получить аргументы
     end = src.index("-- Замер возврата канала (15.11.2026)")
     return src[start:end]
 

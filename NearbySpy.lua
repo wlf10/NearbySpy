@@ -1450,6 +1450,19 @@ PeerSync = function()
         gearRealmGuessed = peerStats.gearRealmGuessed or 0,
         gearOrphanFixed = peerStats.gearOrphanFixed or 0,
         gearAmbiguous = peerStats.gearAmbiguous or 0,
+        -- Запрос базы у пиров (Q1, 24.11.2026). Без этих полей вся диагностика
+        -- запроса жила бы только в памяти до логаута — ровно та же ошибка, что
+        -- была с throttled и gear-счётчиками: в кольце строка есть, в файле
+        -- ничего.
+        askSent = peerStats.askSent or 0,
+        askReqIn = peerStats.askReqIn or 0,
+        askIgnored = peerStats.askIgnored or 0,
+        askQueued = peerStats.askQueued or 0,
+        askGearQueued = peerStats.askGearQueued or 0,
+        askSkipped = peerStats.askSkipped or 0,
+        askEmpty = peerStats.askEmpty or 0,
+        askIn = peerStats.askIn or 0,
+        askPending = (type(peerStats.askPending) == "table") and true or false,
     }
 end
 
@@ -1780,6 +1793,13 @@ QueuePeerNew = function(db, data)
         end
         key = base .. "|u" .. tostring(level) .. "|" .. tostring(zoneId)
     end
+    -- Ответ на запрос пира (Q1, 24.11.2026). Ключ дедупа привязан к nonce
+    -- запроса: без этого правило «одна запись на игрока за сессию» не выпустило
+    -- бы запись, которую у нас как раз и просили, и повторный запрос не получил
+    -- бы ничего. Одинаковый nonce дважды не уйдёт (это тот же ключ).
+    if data.answerNonce then
+        key = base .. "|a" .. tostring(data.answerNonce)
+    end
     if peerSent[key] or peerQueued[key] then return end
     -- Coordinates are shared ONLY when they belong to the reported player.
     -- A /who entry knows the player's ZONE but has no position, so its x/y is
@@ -1906,7 +1926,7 @@ end
 -- Что НЕ отправляется никогда:
 --   • чужой снапшот, полученный по каналу (иначе релей, как и у встреч);
 --   • снапшот, который мы уже отправили в этой сессии (дедуп по ключу + at).
-function PeerQueueGear(key, snapshot)
+function PeerQueueGear(key, snapshot, opts)
     local db = GetDB()
     if not db.peerEnabled or db.peerGearOff then return end
     if type(key) ~= "string" or key == "" or type(snapshot) ~= "table" then return end
@@ -1920,7 +1940,12 @@ function PeerQueueGear(key, snapshot)
     if type(q) ~= "table" then q = {}; peerStats.gearQueue = q end
     local sent = peerStats.gearSent
     if type(sent) ~= "table" then sent = {}; peerStats.gearSent = sent end
-    if sent[key] == at then return end
+    -- Ответ на запрос пира (Q1) переотправляет снапшот, который в этой сессии
+    -- уже уходил пассивно: для него флаг «уже отправлено» не действует, иначе
+    -- на запрос пришли бы встречи без вещей. Дедуп В ОЧЕРЕДИ остаётся — два
+    -- одинаковых снапшота одновременно не стоят.
+    local force = (type(opts) == "table" and opts.force) or nil
+    if not force and sent[key] == at then return end
     for i = 1, #q do
         if q[i].key == key and q[i].snapAt == at then return end
     end
@@ -1946,6 +1971,10 @@ function PeerQueueGear(key, snapshot)
         ids = snapshot.ids, ilvl = tonumber(snapshot.ilvl) or 0,
         imp = type(snapshot.imp) == "string" and snapshot.imp or nil,
         gearFromPeer = snapshot.from and true or nil,
+        -- Снапшот-ответ не имеет права обогнать свою запись о встрече: у
+        -- получателя без строки он уйдёт в orphan (живой SV 22.11.2026: 68
+        -- пакетов, 68 orphan). Пока ключ встречи стоит в очереди, снапшот ждёт.
+        afterKey = (type(opts) == "table" and opts.afterKey) or nil,
     }
     D(("Peer gear queued: %s (%s, %d slots) q=%d"):format(
         PeerEsc(entry.name, 40), PeerEsc(db.game, 12), (snapshot.slots or tonumber(
@@ -2009,6 +2038,16 @@ function PeerDrainGear(db)
         D(("Peer gear expired before send: %s"):format(PeerEsc(old and old.name or "?", 40)))
     end
     if #q == 0 then return end
+    -- Снапшот-ответ (Q1) ждёт, пока его запись о встрече не уйдёт из очереди:
+    -- получатель без строки отбрасывает снапшот в orphan. Ждём, но не
+    -- застреваем: проходим очередь по кругу один раз, и если все ждут — отдаём
+    -- слот встречам (return false), они и разблокируют ожидание.
+    local probe = 0
+    while #q > 0 and q[1].afterKey and peerQueued[q[1].afterKey] and probe < #q do
+        q[#q + 1] = table.remove(q, 1)
+        probe = probe + 1
+    end
+    if #q == 0 or (q[1].afterKey and peerQueued[q[1].afterKey]) then return false end
     local channel = GetChannelName(PeerChannelName())
     if not channel or channel == 0 then
         if nowT - peerStats.lastNoChannel >= 60 then
@@ -2111,6 +2150,10 @@ end
 local function DrainPeerQueue()
     local db = GetDB()
     if not db.peerEnabled then return end
+    -- Ответ на запрос пира (Q1, 24.11.2026): если запрос пришёл и его задержка
+    -- истекла, записи встают в очередь ЗДЕСЬ — до выбора слота — чтобы уйти
+    -- тем же кликом, который иначе ушёл бы на чужую пачку.
+    if PeerAnswerDue then pcall(PeerAnswerDue, db) end
     -- ── Очерёдность «встречи или экипировка» (20.11.2026, второй заход) ────
     -- Сначала gear отправлялся ТОЛЬКО при пустой очереди встреч. На живом
     -- прогоне это оказалось голоданием: очередь встреч стояла на 55 из 60 и не
@@ -2172,6 +2215,41 @@ local function DrainPeerQueue()
     -- The beta may require a hardware input event for sending channel chat.
     local send = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
     if not send then return end
+
+    -- ── Управляющий пакет (запрос Q1, 24.11.2026) ───────────────────────────
+    -- Он уже собран целиком и в пачку не пакуется: это одно короткое
+    -- сообщение, а не запись о встрече. Стоит в голове очереди, поэтому уходит
+    -- первым же свободным слотом.
+    local ctl = peerQueue[1]
+    if ctl and type(ctl.raw) == "string" then
+        if ctl.raw:find("|", 1, true) then
+            db.debug.peerSendError = "ask payload contains '|' (server rejects it)"
+            table.remove(peerQueue, 1)
+            peerQueued[ctl.key] = nil
+            PeerSync()
+            return
+        end
+        local okC, resultC = pcall(send, ctl.raw, "CHANNEL", nil, channel)
+        if NspNoteSendRet(db, okC, resultC, nowT) then
+            D(("Peer gate: a block fired with this ask send (total %d)")
+                :format(db.debug.peerGate or 0))
+        end
+        if not okC or resultC == false then
+            db.debug.peerSendError = tostring(resultC):sub(1, 150)
+            D(("Peer ask send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
+            PeerSync()
+            return
+        end
+        table.remove(peerQueue, 1)
+        peerQueued[ctl.key] = nil
+        peerStats.lastSend = nowT
+        peerStats.askSent = (peerStats.askSent or 0) + 1
+        db.debug.peerSendError = nil
+        D(("Peer ask sent: %s (%d bytes) q=%d"):format(
+            PeerEsc(ctl.label or "?", 30), #ctl.raw, #peerQueue))
+        PeerSync()
+        return
+    end
 
     -- ── Сборка пачки ────────────────────────────────────────────────────────
     -- Одна отправка = одно сообщение канала, а PEER_GAP даёт лишь 6 отправок в
@@ -2270,6 +2348,218 @@ local function DrainPeerQueue()
     PeerSync()
 end
 
+-- ── Запрос базы у пиров: пакет Q1 (24.11.2026) ──────────────────────────────
+-- Обмен был односторонним: N7 — встречи, G7 — экипировка и билд. Запроса
+-- «пришли, что у тебя есть» в протоколе не было, поэтому добавлен ОДИН
+-- управляющий пакет, а ответ приходит ОБЫЧНЫМИ N7/G7:
+--
+--   запрос: Q1;game;realm;minutes;nonce        (~20 байт)
+--
+-- Почему ответ обычными тегами: клиент, который Q1 не знает, ничего не теряет —
+-- для него записи ответа это рядовой трафик канала, а не «неизвестный
+-- протокол». Новый тег ответа сломал бы приём у всех, кто не обновился.
+--
+-- Ответ ограничен не размером базы, а каналом: ~10 сообщений в минуту, значит
+-- верхушка по свежести (NSP_CONST.ASK_ROWS) плюс несколько снапшотов
+-- (NSP_CONST.ASK_GEAR). «Выгрузить весь час» физически не влезает.
+
+-- PeerAskSend(db, minutes) — поставить запрос в очередь канала.
+-- true + payload при успехе, false + причина при отказе.
+function PeerAskSend(db, minutes)
+    if type(db) ~= "table" then return false, "no database" end
+    if not db.peerEnabled then return false, "sharing is off (/nspy peer on)" end
+    minutes = math.floor(tonumber(minutes) or 60)
+    if minutes < NSP_CONST.ASK_MIN then minutes = NSP_CONST.ASK_MIN end
+    if minutes > NSP_CONST.ASK_MAX then minutes = NSP_CONST.ASK_MAX end
+    -- GetChannelName возвращает ДВА значения (id, имя): в сравнении берём
+    -- только первое, иначе во второй аргумент форматирования уехало бы имя.
+    local chan = GetChannelName(PeerChannelName())
+    if not chan or chan == 0 then
+        return false, ("channel %s is not joined (/nspy peer on)"):format(PeerChannelName())
+    end
+    local realm = PlayerRealm()
+    if type(realm) ~= "string" or realm == "" or realm == "?" then
+        return false, "realm unknown in this client"
+    end
+    local game = PeerEncode("game", db.game)
+    if game == PEER_CODE_UNKNOWN or game == PEER_CODE_NONE then game = db.game end
+    local realmCode = PeerRealmCode(realm) or realm
+    -- nonce уникален на запрос: по нему привязан ключ дедупа ответа, иначе
+    -- правило «одна запись на игрока за сессию» не выпустило бы именно те
+    -- записи, которые просили.
+    local nonce = PeerB36(math.floor(time() % 1678591) + 1870)
+    local payload = table.concat({"Q1", game, realmCode, PeerB36(minutes), nonce}, ";")
+    if #payload > PEER_PAYLOAD_MAX then return false, "request too long" end
+    if payload:find("|", 1, true) then return false, "request contains '|'" end
+    local key = "ask|" .. nonce
+    for i = 1, #peerQueue do
+        if peerQueue[i].key == key then return false, "the same request is already queued" end
+    end
+    -- В голову очереди: запрос — это одна короткая строка, и ждать за пачкой
+    -- встреч ему незачем.
+    table.insert(peerQueue, 1, {
+        key = key, raw = payload, name = "?", at = time(),
+        game = db.game, realm = realm, label = ("Q1 %dm"):format(minutes),
+    })
+    peerQueued[key] = true
+    -- Окно учёта ответа: тега у ответа нет намеренно, поэтому «сколько записей
+    -- пришло по нашему запросу» считается по времени от отправки.
+    peerStats.askIn = 0
+    peerStats.askWindowUntil = time() + 180
+    peerStats.askNonce = nonce
+    D(("Peer ask queued: %s"):format(payload))
+    PeerSync()
+    return true, payload
+end
+
+-- PeerAnswerDue(db) — собрать ответ на пришедший Q1, когда прошла случайная
+-- задержка. Вызывается из разгрузки очереди, поэтому ответ уходит тем же
+-- кликом по миру, что и обычные пакеты.
+function PeerAnswerDue(db)
+    local req = peerStats.askPending
+    if type(req) ~= "table" then return false end
+    local nowT = time()
+    if nowT < (tonumber(req.due) or 0) then return false end
+    peerStats.askPending = nil
+    if type(db) ~= "table" or not db.peerEnabled then return false end
+    -- Канал отвечает не чаще NSP_CONST.ASK_GAP: два запроса подряд не должны
+    -- давать два ответа, иначе один игрок займёт канал чужими записями.
+    if peerStats.askLastAnswer
+        and nowT - peerStats.askLastAnswer < NSP_CONST.ASK_GAP then
+        peerStats.askSkipped = (peerStats.askSkipped or 0) + 1
+        D("Peer ask answer skipped: channel answered recently")
+        PeerSync()
+        return false
+    end
+    local cutoff = nowT - (tonumber(req.minutes) or 60) * 60
+    local rows = {}
+    for key, p in pairs(db.players or {}) do
+        local ls = tonumber(p.lastSeen) or 0
+        -- Только СВОИ встречи: чужое (source == "peer") не пересылаем — иначе
+        -- канал становится релеем, а получатель принимает это за наблюдение.
+        if ls > 0 and ls >= cutoff and (p.source or "") ~= "peer"
+            and p.class and p.level and p.name then
+            rows[#rows + 1] = {key = key, p = p, ls = ls}
+        end
+    end
+    if #rows == 0 then
+        peerStats.askEmpty = (peerStats.askEmpty or 0) + 1
+        D("Peer ask answer: nothing in the window")
+        PeerSync()
+        return false
+    end
+    table.sort(rows, function(a, b) return a.ls > b.ls end)
+    local want = #rows
+    if want > NSP_CONST.ASK_ROWS then want = NSP_CONST.ASK_ROWS end
+    local queued, gearN, gearQ = 0, 0, 0
+    for i = 1, want do
+        local row = rows[i]
+        local p = row.p
+        local before = #peerQueue
+        QueuePeerNew(db, {
+            key = row.key, name = p.name, realm = p.realm,
+            class = p.class, level = p.level, race = p.race, faction = p.faction,
+            zone = p.zone, zoneId = p.zoneId,
+            -- Координаты НЕ отправляем: в базе у /who-строк это точка
+            -- НАБЛЮДАТЕЛЯ (провенанс точки в SV не сохраняется), а выдать её за
+            -- позицию игрока — значит поставить чужого человека на свою точку.
+            observedAt = row.ls,
+            answerNonce = req.nonce,
+        })
+        if #peerQueue > before then
+            queued = queued + 1
+            local snap = p.gear
+            if gearN < NSP_CONST.ASK_GEAR and type(snap) == "table"
+                and type(snap.ids) == "string" and snap.ids ~= "" and not snap.from
+                and not db.peerGearOff then
+                local gBefore = type(peerStats.gearQueue) == "table"
+                    and #peerStats.gearQueue or 0
+                -- Ключ дедупа записи о встрече считаем так же, как QueuePeerNew:
+                -- снапшот ждёт его отправки, иначе у получателя нет строки и
+                -- снапшот уйдёт в orphan.
+                PeerQueueGear(row.key, snap, {
+                    force = true,
+                    afterKey = db.game .. "|" .. row.key .. "|a" .. tostring(req.nonce),
+                })
+                local gAfter = type(peerStats.gearQueue) == "table"
+                    and #peerStats.gearQueue or 0
+                if gAfter > gBefore then
+                    gearN = gearN + 1
+                    gearQ = gearQ + (gAfter - gBefore)
+                end
+            end
+        end
+    end
+    local skipped = want - queued
+    peerStats.askQueued = (peerStats.askQueued or 0) + queued
+    peerStats.askGearQueued = (peerStats.askGearQueued or 0) + gearN
+    peerStats.askSkipped = (peerStats.askSkipped or 0) + skipped
+    if queued > 0 then peerStats.askLastAnswer = nowT end
+    D(("Peer ask answer: %d of %d rows queued (%d left out of the window), gear %d/%d, from %s")
+        :format(queued, want, #rows - want, gearN, gearQ, PeerEsc(req.from or "?", 30)))
+    PeerSync()
+    return queued > 0
+end
+
+-- ReceivePeerAsk(fields, sender) — пришёл запрос Q1. Отвечаем НЕ сразу:
+-- случайная задержка разносит ответы нескольких пиров по времени, иначе все
+-- ответят одним залпом в канал с лимитом ~10 сообщений в минуту.
+function ReceivePeerAsk(fields, sender)
+    local db = GetDB()
+    local function Ignore(reason)
+        peerStats.askIgnored = (peerStats.askIgnored or 0) + 1
+        local tag = "ask:" .. reason
+        if peerStats.rejectLogged and not peerStats.rejectLogged[tag] then
+            peerStats.rejectLogged[tag] = true
+            D(("Peer ask ignored: %s (from %s)"):format(reason, PeerEsc(sender or "?", 40)))
+        end
+        PeerSync()
+    end
+    peerStats.askReqIn = (peerStats.askReqIn or 0) + 1
+    if not db.peerEnabled then return Ignore("sharing disabled") end
+    if #fields ~= 5 then return Ignore("field count") end
+    local wireGame = fields[2]
+    if type(wireGame) == "string" and #wireGame == 1 then
+        wireGame = PeerDecode("game", wireGame) or wireGame
+    end
+    if wireGame ~= db.game then return Ignore("game mismatch") end
+    local wireRealm = PeerRealmName(fields[3]) or fields[3]
+    -- Отвечаем только своему миру: наша база — про наш мир, и в чужой отдавать
+    -- её незачем (там эти строки пришли бы как foreign).
+    if type(wireRealm) ~= "string" or wireRealm == "" or wireRealm ~= PlayerRealm() then
+        return Ignore("foreign realm")
+    end
+    local minutes = tonumber(tostring(fields[4] or ""), 36)
+    if not minutes or minutes <= 0 then return Ignore("bad window") end
+    if minutes < NSP_CONST.ASK_MIN then minutes = NSP_CONST.ASK_MIN end
+    if minutes > NSP_CONST.ASK_MAX then minutes = NSP_CONST.ASK_MAX end
+    if type(fields[5]) ~= "string" or fields[5] == "" or not PeerField(fields[5], 8) then
+        return Ignore("bad nonce")
+    end
+    local nowT = time()
+    -- Один ответ на отправителя за NSP_CONST.ASK_SENDER_GAP: иначе один игрок
+    -- может запрашивать базу в цикле, и канал будет занят только им.
+    peerStats.askFrom = peerStats.askFrom or {}
+    local last = tonumber(peerStats.askFrom[sender]) or 0
+    if last > 0 and nowT - last < NSP_CONST.ASK_SENDER_GAP then
+        return Ignore("request from this sender too soon")
+    end
+    if type(peerStats.askPending) == "table" then
+        -- Отвечаем только на последний запрос: два ответа подряд канал всё
+        -- равно не примет, а склеить их — значит нарушить nonce.
+        peerStats.askSkipped = (peerStats.askSkipped or 0) + 1
+        return
+    end
+    peerStats.askFrom[sender] = nowT
+    local jitter = 0
+    if NSP_CONST.ASK_JITTER > 0 then jitter = math.random(0, NSP_CONST.ASK_JITTER) end
+    peerStats.askPending = {nonce = fields[5], minutes = minutes, due = nowT + jitter,
+        sender = sender, from = PeerEsc(sender or "?", 40)}
+    D(("Peer ask received: %dm, answering in %ds (from %s)")
+        :format(minutes, jitter, PeerEsc(sender or "?", 40)))
+    PeerSync()
+end
+
 local function ReceivePeerMessage(message, sender, fromBatch)
     -- fromBatch: строку вызвал разбор пачки N5. Счётчики сообщений и лимит
     -- частоты считаются ОДИН раз на сообщение, а не на каждую запись внутри
@@ -2355,6 +2645,12 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     -- полей, и старый чек «field count» отверг бы его как мусор.
     if fields[1] == "G7" then
         return ReceivePeerGear(fields, sender)
+    end
+
+    -- Запрос базы (Q1, 24.11.2026): управляющий пакет со своим форматом
+    -- (5 полей), поэтому проверяется ДО валидации числа полей у встреч.
+    if fields[1] == "Q1" then
+        return ReceivePeerAsk(fields, sender)
     end
 
     -- Признак пачки — разделитель PEER_BATCH_SEP (запятая). Он ЗАПРЕЩЁН в
@@ -2605,6 +2901,12 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         -- A valid record that only refreshed a known player is the real proof
         -- the channel is alive: source="peer" never appears for those rows.
         peerStats.merged = peerStats.merged + 1
+    end
+    -- Ответ на НАШ запрос (Q1, 24.11.2026): тега у ответа нет намеренно — это
+    -- обычные записи N7, — поэтому «сколько пришло по запросу» считается по
+    -- времени: окно открывается в момент постановки запроса в очередь.
+    if peerStats.askWindowUntil and nowT <= peerStats.askWindowUntil then
+        peerStats.askIn = (peerStats.askIn or 0) + 1
     end
     D(("Peer in: %s %s %d (%s) %s%s"):format(
         PeerEsc(name), PeerEsc(class, 20), level, PeerEsc(faction, 10),
@@ -4894,18 +5196,18 @@ local HELP_COMMANDS = {
     "/nspy who", "/nspy whostop",
     "/nspy count", "/nspy announce", "/nspy debug",
     "/nspy peer on", "/nspy peer off", "/nspy peer", "/nspy peer new", "/nspy peer list",
-    "/nspy peer send", "/nspy zones", "/nspy reset",
+    "/nspy peer send", "/nspy peer ask", "/nspy zones", "/nspy reset",
     "/nspy server", "/nspy menu", "/nspy minimap", "/nspy settings",
     "/nspy me",
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Force-send the pending queue (no world click needed)", "Zone dictionary: rebuild and report (no /who needed)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)", "This character's journal: playtime, zones, encounters, level"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "强制发送待发队列（无需点击世界）", "区域字典：重建并报告（无需 /who）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)", "本角色的日志：游戏时长、区域、遇见、等级"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Отправить очередь принудительно (без клика по миру)", "Словарь зон: пересобрать и показать (без /who)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)", "Журнал персонажа: время в игре, зоны, встречи, уровень"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Warteschlange sofort senden (ohne Klick in die Welt)", "Zonen-Wörterbuch: neu aufbauen und melden (ohne /who)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)", "Journal dieses Charakters: Spielzeit, Zonen, Begegnungen, Stufe"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Dictionnaire des zones : reconstruire et rapporter (sans /who)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "지역 사전: 재구성 및 보고 (/who 불필요)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Force-send the pending queue (no world click needed)", "Ask peers for the players they saw recently (default 60 minutes)", "Zone dictionary: rebuild and report (no /who needed)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)", "This character's journal: playtime, zones, encounters, level"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "强制发送待发队列（无需点击世界）", "向频道请求其他玩家最近见过的记录（默认 60 分钟）", "区域字典：重建并报告（无需 /who）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)", "本角色的日志：游戏时长、区域、遇见、等级"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Отправить очередь принудительно (без клика по миру)", "Запросить у пиров игроков, которых они видели недавно (по умолчанию 60 минут)", "Словарь зон: пересобрать и показать (без /who)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)", "Журнал персонажа: время в игре, зоны, встречи, уровень"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Warteschlange sofort senden (ohne Klick in die Welt)", "Peers nach zuletzt gesehenen Spielern fragen (Standard 60 Minuten)", "Zonen-Wörterbuch: neu aufbauen und melden (ohne /who)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)", "Journal dieses Charakters: Spielzeit, Zonen, Begegnungen, Stufe"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Demander aux pairs les joueurs vus récemment (60 minutes par défaut)", "Dictionnaire des zones : reconstruire et rapporter (sans /who)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "최근에 본 플레이어를 피어에게 요청 (기본 60분)", "지역 사전: 재구성 및 보고 (/who 불필요)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
 }
 local helpWin
 local EffectiveLocale -- forward: defined with the settings selectors below
@@ -7357,6 +7659,39 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                         peerStats.gearBad or 0))
         end
         if PeerSync then pcall(PeerSync) end
+    elseif msg == "peer ask" or msg:match("^peer ask%s") then
+        -- Запрос базы у пиров (Q1, 24.11.2026):
+        --   /nspy peer ask            запрос за последний час (60 минут)
+        --   /nspy peer ask 180        запрос за 3 часа (кламп 5…1440)
+        --   /nspy peer ask status     состояние и счётчики, без отправки
+        -- Ответ приезжает ОБЫЧНЫМИ записями канала и живёт по правилам peer:
+        -- наши lastSeen/count не двигаются, время наблюдения — peerAt, источник
+        -- остаётся "peer" (чужое наблюдение не становится нашим).
+        local arg = msg:match("^peer ask%s+(%S+)$")
+        if arg == "status" then
+            P(("peer ask: sent=%d, requests_in=%d, answer_rows=%d, answer_gear=%d, skipped=%d, empty=%d, in=%d")
+                :format(peerStats.askSent or 0, peerStats.askReqIn or 0,
+                        peerStats.askQueued or 0, peerStats.askGearQueued or 0,
+                        peerStats.askSkipped or 0, peerStats.askEmpty or 0,
+                        peerStats.askIn or 0))
+            P(("peer ask: pending=%s, receive window=%s, last answer=%s")
+                :format(tostring(type(peerStats.askPending) == "table"),
+                        (peerStats.askWindowUntil and peerStats.askWindowUntil > time())
+                            and "open" or "closed",
+                        peerStats.askLastAnswer and TimeAgo(peerStats.askLastAnswer) or "never"))
+            P("peer ask: the answer is the newest rows the peer saw in the window - the channel carries ~10 messages a minute, not a whole dump")
+        else
+            local okA, done, payload = pcall(PeerAskSend, db, arg)
+            if not okA then
+                P("peer ask error: " .. tostring(done))
+            elseif not done then
+                P("peer ask not sent: " .. tostring(payload))
+            else
+                P(("peer ask queued: %s"):format(tostring(payload)))
+                P("  it leaves on the next click in the world (hardware gate); /nspy peer send forces it")
+            end
+            if PeerSync then pcall(PeerSync) end
+        end
     elseif msg == "peer send" then
         -- Ручная разгрузка очереди. Очередь штатно уходит только по клику в
         -- 3D-мир (hardware gate беты: WorldFrame OnMouseDown). Если этот гейт
