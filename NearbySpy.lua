@@ -1484,6 +1484,13 @@ PeerSync = function()
         -- клиент такие пакеты выбрасывает, и в SV должно быть видно, что они
         -- приходили, а не «в канале тишина».
         askStray = peerStats.askStray or 0,
+        -- Адресные запросы (24.11.2026): сколько запросов отправлено и сколько
+        -- сейчас открыто. При обходе пиров по очереди это главные числа —
+        -- по ним видно, чей ответ ещё не пришёл.
+        askOut = peerStats.askOut or 0,
+        askNotMe = peerStats.askNotMe or 0,
+        askWrongSender = peerStats.askWrongSender or 0,
+        askLastFrom = peerStats.askLastFrom,
         askPending = (type(peerStats.askPending) == "table") and true or false,
     }
 end
@@ -2432,9 +2439,50 @@ end
 -- верхушка по свежести (NSP_CONST.ASK_ROWS) плюс несколько снапшотов
 -- (NSP_CONST.ASK_GEAR). «Выгрузить весь час» физически не влезает.
 
--- PeerAskSend(db, minutes) — поставить запрос в очередь канала.
+-- PeerNormName(s) — имя в сравнимом виде: без регистра, без лишних пробелов.
+-- Замер по живому SV (240 отправителей в канале): двойные имена приходят ВСЕГДА
+-- через ОДИН пробел («Youtchi Zerling», «Grishnákh Soulrend»), дефисов и цифр
+-- в именах нет. Но ввод игрока бывает с лишним пробелом после копипаста, и
+-- тогда точное сравнение молча не срабатывало бы.
+function PeerNormName(s)
+    if type(s) ~= "string" then return "" end
+    s = s:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
+    return s
+end
+
+-- PeerIsMe(name) — это имя нашего персонажа? Нужно адресному запросу (Q1 с
+-- именем): отвечать должен ТОЛЬКО названный игрок, иначе «спросим по очереди»
+-- снова превращается в залп от всех участников канала.
+--
+-- ⚠️ Двойные имена. UnitName отдаёт имя и фамилию ДВУМЯ значениями, а в канале
+-- и в базе они склеены пробелом, поэтому сравнение идёт по склеенной форме.
+-- Голое имя при наличии фамилии НЕ считается совпадением: иначе запрос «Wolff»
+-- получил бы ответ и от «Wolff», и от «Wolff Magy» — то есть адресность теряла
+-- бы смысл ровно там, ради чего делалась. Дефис приравнивается к пробелу:
+-- внутри клиента двойное имя хранится через дефис, и игрок может набрать так.
+function PeerIsMe(name)
+    local want = PeerNormName(name)
+    if want == "" then return false end
+    local wantDash = (want:gsub("%-", " "))
+    local me, surname = UnitName("player")
+    if type(me) ~= "string" or me == "" then return false end
+    local forms
+    if type(surname) == "string" and surname ~= "" then
+        forms = {me .. " " .. surname, me .. "-" .. surname}
+    else
+        forms = {me, me .. "-" .. PlayerRealm()}
+    end
+    for i = 1, #forms do
+        local have = PeerNormName(forms[i])
+        if have == want or (have:gsub("%-", " ")) == wantDash then return true end
+    end
+    return false
+end
+
+-- PeerAskSend(db, minutes, target) — поставить запрос в очередь канала.
+-- target = nil → запрос всем (вещание); иначе спрашиваем ТОЛЬКО названного.
 -- true + payload при успехе, false + причина при отказе.
-function PeerAskSend(db, minutes)
+function PeerAskSend(db, minutes, target)
     if type(db) ~= "table" then return false, "no database" end
     if not db.peerEnabled then return false, "sharing is off (/nspy peer on)" end
     minutes = math.floor(tonumber(minutes) or 60)
@@ -2446,39 +2494,110 @@ function PeerAskSend(db, minutes)
     if not chan or chan == 0 then
         return false, ("channel %s is not joined (/nspy peer on)"):format(PeerChannelName())
     end
+    -- Мир для запроса не нужен: он не едет в пакете (требование владельца
+    -- 24.11.2026), а ответ собирается по миру КАЖДОЙ записи. Раньше здесь стоял
+    -- отказ «realm unknown» — он запрещал спросить в клиенте, который не отдал
+    -- имя мира, хотя для запроса это уже не нужно.
+    -- Локальная переменная остаётся только для метаданных элемента очереди
+    -- (по ней видно, из какого мира запрос), поэтому пустое значение допустимо.
     local realm = PlayerRealm()
-    if type(realm) ~= "string" or realm == "" or realm == "?" then
-        return false, "realm unknown in this client"
+    if target then
+        target = tostring(target)
+        -- Имя едет ТЕКСТОМ (в отличие от прочих полей): оно не из конечного
+        -- множества. PeerField запрещает разделители и управляющие символы —
+        -- без него имя с ';' развалило бы пакет на лишние поля.
+        if not PeerField(target, 60) then return false, "bad player name" end
+        -- Просить у самого себя бессмысленно: ответ придёт от нас же и будет
+        -- отброшен как собственное эхо.
+        if PeerIsMe(target) then return false, "that is your own character" end
     end
-    local game = PeerEncode("game", db.game)
-    if game == PEER_CODE_UNKNOWN or game == PEER_CODE_NONE then game = db.game end
-    local realmCode = PeerRealmCode(realm) or realm
-    -- nonce уникален на запрос: по нему привязан ключ дедупа ответа, иначе
-    -- правило «одна запись на игрока за сессию» не выпустило бы именно те
-    -- записи, которые просили.
-    local nonce = PeerB36(math.floor(time() % 1678591) + 1870)
-    local payload = table.concat({"Q1", game, realmCode, PeerB36(minutes), nonce}, ";")
+    -- Пакет запроса — МИНИМАЛЬНЫЙ: `Q1;минуты;nonce[;имя]`. Игры и мира в нём
+    -- НЕТ (замечание владельца 24.11.2026): канал уже определяет, кто слышит
+    -- запрос, а мир каждой записи едет в самих N7-ответах — дублировать его в
+    -- запросе значит тратить байты и заставлять приём сверять поле, которое
+    -- ничего не решает.
+    -- nonce уникален на КАЖДЫЙ запрос: по нему привязан и ключ дедупа ответа, и
+    -- запись в таблице открытых запросов. Счётчик нужен потому, что при обходе
+    -- пиров по очереди два запроса попадают в одну секунду — одного лишь
+    -- time() не хватило бы, nonce совпал бы и второй ответ считался чужим.
+    peerStats.askSeq = (peerStats.askSeq or 0) + 1
+    local nonce = PeerB36(math.floor(time() % 1678591) + 1870) .. PeerB36(peerStats.askSeq)
+    if #nonce > 8 then nonce = nonce:sub(-8) end
+    local parts = {"Q1", PeerB36(minutes), nonce}
+    if target then parts[#parts + 1] = target end
+    local payload = table.concat(parts, ";")
     if #payload > PEER_PAYLOAD_MAX then return false, "request too long" end
     if payload:find("|", 1, true) then return false, "request contains '|'" end
     local key = "ask|" .. nonce
     for i = 1, #peerQueue do
         if peerQueue[i].key == key then return false, "the same request is already queued" end
     end
+    local nowT = time()
+    peerStats.askTargetAt = peerStats.askTargetAt or {}
+    -- Один и тот же адресат не чаще ASK_TARGET_GAP: при обходе легко дважды
+    -- кликнуть по тому же имени, а канал этого не любит. Для запроса «всем»
+    -- ключ — "all": он стоит дороже всех (отвечают сразу все), поэтому
+    -- ограничен тем же интервалом.
+    local gateKey = target or "all"
+    local prev = tonumber(peerStats.askTargetAt[gateKey]) or 0
+    if prev > 0 and nowT - prev < NSP_CONST.ASK_TARGET_GAP then
+        return false, ("already asked %s %ds ago")
+            :format(target or "everyone", nowT - prev)
+    end
+    peerStats.askTargetAt[gateKey] = nowT
     -- В голову очереди: запрос — это одна короткая строка, и ждать за пачкой
     -- встреч ему незачем.
     table.insert(peerQueue, 1, {
-        key = key, raw = payload, name = "?", at = time(),
-        game = db.game, realm = realm, label = ("Q1 %dm"):format(minutes),
+        key = key, raw = payload, name = "?", at = nowT,
+        game = db.game, realm = realm,
+        label = target and ("Q1 %dm -> %s"):format(minutes, target) or ("Q1 %dm"):format(minutes),
     })
     peerQueued[key] = true
-    -- Окно учёта ответа: тега у ответа нет намеренно, поэтому «сколько записей
-    -- пришло по нашему запросу» считается по времени от отправки.
-    peerStats.askIn = 0
-    peerStats.askWindowUntil = time() + 180
-    peerStats.askNonce = nonce
+    -- Открытые запросы: их МОЖЕТ быть несколько одновременно, иначе обход по
+    -- очереди ломался бы — второй запрос закрывал окно первого, и его ответ
+    -- отбрасывался как «чужой». Храним по nonce, самый старый вытесняется.
+    local open = peerStats.askOpen
+    if type(open) ~= "table" then open = {}; peerStats.askOpen = open end
+    local live, oldest, oldestAt = 0, nil, nil
+    for n, req in pairs(open) do
+        if nowT > (tonumber(req.expires) or 0) then
+            open[n] = nil
+        else
+            live = live + 1
+            local at = tonumber(req.at) or 0
+            if not oldestAt or at < oldestAt then oldest, oldestAt = n, at end
+        end
+    end
+    if live >= NSP_CONST.ASK_OPEN_MAX and oldest then open[oldest] = nil end
+    open[nonce] = {target = target, minutes = minutes, at = nowT,
+        -- Поле НЕ называем until: это зарезервированное слово Lua, и
+        -- `req.until` не компилируется вовсе (ловится первым же прогоном).
+        expires = nowT + NSP_CONST.ASK_OPEN_TTL}
+    peerStats.askOut = (peerStats.askOut or 0) + 1
     D(("Peer ask queued: %s"):format(payload))
     PeerSync()
     return true, payload
+end
+
+-- PeerAskKnownPeers() — кто вообще подавал голос в канале. Нужен для обхода по
+-- очереди: имена берём из tally отправителей, которая пишется в SavedVariables
+-- (peerStats живёт только в памяти и на логауте обнуляется).
+-- Возвращает массив {name=..., count=...}, отсортированный по числу пакетов.
+function PeerAskKnownPeers(db)
+    local out = {}
+    if type(db) ~= "table" or type(db.debug) ~= "table" then return out end
+    local senders = db.debug.peerSenders
+    if type(senders) ~= "table" then return out end
+    for name, count in pairs(senders) do
+        if type(name) == "string" and name ~= "" then
+            out[#out + 1] = {name = name, count = tonumber(count) or 0}
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.count == b.count then return a.name < b.name end
+        return a.count > b.count
+    end)
+    return out
 end
 
 -- PeerAnswerDue(db) — собрать ответ на пришедший Q1, когда прошла случайная
@@ -2587,24 +2706,28 @@ function ReceivePeerAsk(fields, sender)
     end
     peerStats.askReqIn = (peerStats.askReqIn or 0) + 1
     if not db.peerEnabled then return Ignore("sharing disabled") end
-    if #fields ~= 5 then return Ignore("field count") end
-    local wireGame = fields[2]
-    if type(wireGame) == "string" and #wireGame == 1 then
-        wireGame = PeerDecode("game", wireGame) or wireGame
-    end
-    if wireGame ~= db.game then return Ignore("game mismatch") end
-    local wireRealm = PeerRealmName(fields[3]) or fields[3]
-    -- Отвечаем только своему миру: наша база — про наш мир, и в чужой отдавать
-    -- её незачем (там эти строки пришли бы как foreign).
-    if type(wireRealm) ~= "string" or wireRealm == "" or wireRealm ~= PlayerRealm() then
-        return Ignore("foreign realm")
-    end
-    local minutes = tonumber(tostring(fields[4] or ""), 36)
+    -- Раскладка: Q1;минуты;nonce[;имя]. Ни игры, ни мира здесь нет — канал сам
+    -- определяет слышимость, а мир едет в записях ответа. Поле адресата
+    -- необязательное: 3 поля = запрос всем, 4 = адресный «ответь мне».
+    if #fields ~= 3 and #fields ~= 4 then return Ignore("field count") end
+    local minutes = tonumber(tostring(fields[2] or ""), 36)
     if not minutes or minutes <= 0 then return Ignore("bad window") end
     if minutes < NSP_CONST.ASK_MIN then minutes = NSP_CONST.ASK_MIN end
     if minutes > NSP_CONST.ASK_MAX then minutes = NSP_CONST.ASK_MAX end
-    if type(fields[5]) ~= "string" or fields[5] == "" or not PeerField(fields[5], 8) then
+    if type(fields[3]) ~= "string" or fields[3] == "" or not PeerField(fields[3], 8) then
         return Ignore("bad nonce")
+    end
+    -- Адресат: если запрос назвал конкретного игрока, отвечает ТОЛЬКО он.
+    -- Это и есть смысл имени в команде — обходить пиров по одному, не устраивая
+    -- залп из всех клиентов канала в минуту, которая держит ~10 сообщений.
+    local target = fields[4]
+    if target == "" or target == "-" then target = nil end
+    if target then
+        if not PeerField(target, 60) then return Ignore("bad target") end
+        if not PeerIsMe(target) then
+            peerStats.askNotMe = (peerStats.askNotMe or 0) + 1
+            return
+        end
     end
     local nowT = time()
     -- Один ответ на отправителя за NSP_CONST.ASK_SENDER_GAP: иначе один игрок
@@ -2623,10 +2746,11 @@ function ReceivePeerAsk(fields, sender)
     peerStats.askFrom[sender] = nowT
     local jitter = 0
     if NSP_CONST.ASK_JITTER > 0 then jitter = math.random(0, NSP_CONST.ASK_JITTER) end
-    peerStats.askPending = {nonce = fields[5], minutes = minutes, due = nowT + jitter,
-        sender = sender, from = PeerEsc(sender or "?", 40)}
-    D(("Peer ask received: %dm, answering in %ds (from %s)")
-        :format(minutes, jitter, PeerEsc(sender or "?", 40)))
+    peerStats.askPending = {nonce = fields[3], minutes = minutes, due = nowT + jitter,
+        sender = sender, from = PeerEsc(sender or "?", 40), target = target}
+    D(("Peer ask received: %dm%s, answering in %ds (from %s)")
+        :format(minutes, target and (" for " .. PeerEsc(target, 30)) or "", jitter,
+            PeerEsc(sender or "?", 40)))
     PeerSync()
 end
 
@@ -3019,13 +3143,25 @@ function ReceivePeerAnswer(message, sender)
     -- ЧУЖОЙ ответ (или ответ на давно закрытый запрос) — выбрасываем. Это и
     -- есть смысл отдельного тега: третий клиент канала не должен записывать
     -- адресный ответ в свою базу.
-    if type(peerStats.askNonce) ~= "string" or peerStats.askNonce ~= nonce then
-        return Ignore("answer for another request")
-    end
-    if not peerStats.askWindowUntil or time() > peerStats.askWindowUntil then
-        peerStats.askNonce = nil
+    -- Открытых запросов может быть несколько (обход пиров по очереди), поэтому
+    -- ищем nonce в таблице, а не сверяем с единственным «текущим».
+    local nowT = time()
+    local open = peerStats.askOpen
+    if type(open) ~= "table" then return Ignore("no open requests") end
+    local req = open[nonce]
+    if type(req) ~= "table" then return Ignore("answer for another request") end
+    if nowT > (tonumber(req.expires) or 0) then
+        open[nonce] = nil
         return Ignore("answer window closed")
     end
+    -- Отвечал тот, кого просили? Для вещания адресата нет. Несовпадение НЕ
+    -- повод выбросить данные (ответ всё равно адресован нам по nonce), но
+    -- считается: по этому счётчику видно, что кто-то ответил на чужой запрос.
+    if req.target and sender and sender:lower() ~= req.target:lower() then
+        peerStats.askWrongSender = (peerStats.askWrongSender or 0) + 1
+    end
+    req.answered = nowT
+    peerStats.askLastFrom = PeerEsc(sender or "?", 40)
     -- Вложенность запрещена: A1 внутри A1 — это либо порча, либо попытка
     -- обойти проверку nonce. Внутри допустимы только «обычные» пакеты.
     if inner:sub(1, 2) == "A1" then return Ignore("nested answer") end
@@ -5326,12 +5462,12 @@ local HELP_COMMANDS = {
 }
 
 local HELP_TEXT = {
-    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Force-send the pending queue (no world click needed)", "Ask peers for the players they saw recently (default 60 minutes)", "Zone dictionary: rebuild and report (no /who needed)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)", "This character's journal: playtime, zones, encounters, level"},
-    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "强制发送待发队列（无需点击世界）", "向频道请求其他玩家最近见过的记录（默认 60 分钟）", "区域字典：重建并报告（无需 /who）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)", "本角色的日志：游戏时长、区域、遇见、等级"},
-    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Отправить очередь принудительно (без клика по миру)", "Запросить у пиров игроков, которых они видели недавно (по умолчанию 60 минут)", "Словарь зон: пересобрать и показать (без /who)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)", "Журнал персонажа: время в игре, зоны, встречи, уровень"},
-    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Warteschlange sofort senden (ohne Klick in die Welt)", "Peers nach zuletzt gesehenen Spielern fragen (Standard 60 Minuten)", "Zonen-Wörterbuch: neu aufbauen und melden (ohne /who)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)", "Journal dieses Charakters: Spielzeit, Zonen, Begegnungen, Stufe"},
-    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Demander aux pairs les joueurs vus récemment (60 minutes par défaut)", "Dictionnaire des zones : reconstruire et rapporter (sans /who)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
-    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "최근에 본 플레이어를 피어에게 요청 (기본 60분)", "지역 사전: 재구성 및 보고 (/who 불필요)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
+    enUS = {"Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Counters and diagnostics", "Toggle new-encounter chat messages", "Toggle technical chat logs", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "Sharing status and counters", "What the channel delivered - new to us only", "Everything the channel delivered (updates included)", "Force-send the pending queue (no world click needed)", "Ask peers for what they saw - add a name to ask one player (list = who is here)", "Zone dictionary: rebuild and report (no /who needed)", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)", "This character's journal: playtime, zones, encounters, level"},
+    zhCN = {"玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "计数与诊断", "切换新遇见玩家的聊天提示", "切换技术日志", "加入可选的玩家共享频道", "退出频道并清空待发队列", "共享状态与计数", "频道带来的新记录（仅新增）", "频道收到的全部记录（含更新）", "强制发送待发队列（无需点击世界）", "向频道请求其他玩家最近的记录——加上名字可只问一人（list = 谁在频道里）", "区域字典：重建并报告（无需 /who）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)", "本角色的日志：游戏时长、区域、遇见、等级"},
+    ruRU = {"Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Счётчики и диагностика", "Вкл/выкл сообщения о новых встречах", "Вкл/выкл технические логи в чате", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Состояние и счётчики обмена", "Что пришло из канала — только новые для нас", "Всё, что пришло из канала (включая обновления)", "Отправить очередь принудительно (без клика по миру)", "Запросить у пиров, кого они видели — с именем спрашиваем одного (list = кто в канале)", "Словарь зон: пересобрать и показать (без /who)", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)", "Журнал персонажа: время в игре, зоны, встречи, уровень"},
+    deDE = {"Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Zähler und Diagnose", "Meldungen über neue Begegnungen umschalten", "Technische Chat-Logs umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Austauschstatus und Zähler", "Was der Kanal geliefert hat - nur neue für uns", "Alles vom Kanal (auch Aktualisierungen)", "Warteschlange sofort senden (ohne Klick in die Welt)", "Peers nach Sichtungen fragen - mit Namen nur einen Spieler (list = wer ist da)", "Zonen-Wörterbuch: neu aufbauen und melden (ohne /who)", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)", "Journal dieses Charakters: Spielzeit, Zonen, Begegnungen, Stufe"},
+    frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Demander aux pairs ce qu'ils ont vu - avec un nom, un seul joueur (list = qui est là)", "Dictionnaire des zones : reconstruire et rapporter (sans /who)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
+    koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "피어에게 목격 기록을 요청 — 이름을 넣으면 한 명에게만 (list = 채널 참여자)", "지역 사전: 재구성 및 보고 (/who 불필요)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
 }
 local helpWin
 local EffectiveLocale -- forward: defined with the settings selectors below
@@ -7784,34 +7920,91 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         end
         if PeerSync then pcall(PeerSync) end
     elseif msg == "peer ask" or msg:match("^peer ask%s") then
-        -- Запрос базы у пиров (Q1, 24.11.2026):
-        --   /nspy peer ask            запрос за последний час (60 минут)
-        --   /nspy peer ask 180        запрос за 3 часа (кламп 5…1440)
-        --   /nspy peer ask status     состояние и счётчики, без отправки
-        -- Ответ приезжает ОБЫЧНЫМИ записями канала и живёт по правилам peer:
-        -- наши lastSeen/count не двигаются, время наблюдения — peerAt, источник
-        -- остаётся "peer" (чужое наблюдение не становится нашим).
-        local arg = msg:match("^peer ask%s+(%S+)$")
-        if arg == "status" then
-            P(("peer ask: sent=%d, requests_in=%d, answer_rows=%d, answer_gear=%d, skipped=%d, empty=%d, in=%d, stray=%d")
-                :format(peerStats.askSent or 0, peerStats.askReqIn or 0,
-                        peerStats.askQueued or 0, peerStats.askGearQueued or 0,
-                        peerStats.askSkipped or 0, peerStats.askEmpty or 0,
-                        peerStats.askIn or 0, peerStats.askStray or 0))
-            P(("peer ask: pending=%s, receive window=%s, last answer=%s")
+        -- Запрос базы у пиров (Q1/A1, 24.11.2026):
+        --   /nspy peer ask                запрос всем, за последний час
+        --   /nspy peer ask 180            запрос всем, за 3 часа (кламп 5…1440)
+        --   /nspy peer ask Wolff          только этому игроку, окно по умолчанию
+        --   /nspy peer ask Wolff 180      только ему, за 3 часа
+        --   /nspy peer ask list           кто вообще говорил в канале (для обхода)
+        --   /nspy peer ask status         состояние и счётчики, без отправки
+        -- Имя нужно, чтобы спрашивать по очереди: иначе на каждый запрос
+        -- отвечают ВСЕ участники, а канал держит ~10 сообщений в минуту.
+        -- Ник приводится к нижнему регистру диспетчером команд — сравнение на
+        -- приёме тоже регистронезависимое, поэтому это не мешает.
+        local rest = msg:match("^peer ask%s+(.+)$")
+        local target, window
+        if rest then
+            -- «имя [минуты]»: имя двусловное у всех (замер по живому SV: 240
+            -- отправителей, ни одного однословного), поэтому последний токен
+            -- считаем минутами ТОЛЬКО если это чистое число.
+            local name, num = rest:match("^(.-)%s+(%d+)$")
+            if name and name ~= "" then
+                target, window = name, num
+            elseif rest:match("^%d+$") then
+                window = rest
+            else
+                target = rest
+            end
+            if target then
+                -- Копипаст из чата/`list` тащит лишние пробелы: «Wolff  Magy»
+                -- после схлопывания совпадёт с именем персонажа.
+                target = target:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+            end
+        end
+        if rest == "status" then
+            P(("peer ask: sent=%d, outgoing=%d, requests_in=%d, answer_rows=%d, answer_gear=%d, skipped=%d, empty=%d, in=%d, stray=%d")
+                :format(peerStats.askSent or 0, peerStats.askOut or 0,
+                        peerStats.askReqIn or 0, peerStats.askQueued or 0,
+                        peerStats.askGearQueued or 0, peerStats.askSkipped or 0,
+                        peerStats.askEmpty or 0, peerStats.askIn or 0,
+                        peerStats.askStray or 0))
+            -- Открытые запросы: при обходе их несколько, и надо видеть, чей ответ
+            -- ещё не пришёл, а чей закрылся по времени.
+            local openN, waiting = 0, {}
+            if type(peerStats.askOpen) == "table" then
+                for n, req in pairs(peerStats.askOpen) do
+                    if time() <= (tonumber(req.expires) or 0) then
+                        openN = openN + 1
+                        if not req.answered then
+                            waiting[#waiting + 1] = tostring(req.target or "all")
+                        end
+                    end
+                end
+            end
+            P(("peer ask: open=%d, waiting for: %s")
+                :format(openN, #waiting > 0 and table.concat(waiting, ", ") or "nobody"))
+            P(("peer ask: pending answer=%s, ignored(not me)=%d, wrong sender=%d, last answer from=%s")
                 :format(tostring(type(peerStats.askPending) == "table"),
-                        (peerStats.askWindowUntil and peerStats.askWindowUntil > time())
-                            and "open" or "closed",
-                        peerStats.askLastAnswer and TimeAgo(peerStats.askLastAnswer) or "never"))
-            P("peer ask: the answer is the newest rows the peer saw in the window - the channel carries ~10 messages a minute, not a whole dump")
+                        peerStats.askNotMe or 0, peerStats.askWrongSender or 0,
+                        tostring(peerStats.askLastFrom or "nobody")))
+            P("peer ask: an answer is the newest rows the peer saw in the window - the channel carries ~10 messages a minute, not a whole dump")
+        elseif rest == "list" then
+            local peers = PeerAskKnownPeers(db)
+            if #peers == 0 then
+                P("peer ask list: nobody has spoken in this channel yet - turn sharing on (/nspy peer on) and wait for other players")
+            else
+                P(("peer ask list: %d known peers (ask them one by one: /nspy peer ask <name>)"):format(#peers))
+                local shown = #peers > 15 and 15 or #peers
+                for i = 1, shown do
+                    P(("  %d. %s (%d packets)"):format(i, peers[i].name, peers[i].count))
+                end
+                if #peers > shown then
+                    P(("  ... and %d more"):format(#peers - shown))
+                end
+            end
         else
-            local okA, done, payload = pcall(PeerAskSend, db, arg)
+            local okA, done, payload = pcall(PeerAskSend, db, window, target)
             if not okA then
                 P("peer ask error: " .. tostring(done))
             elseif not done then
                 P("peer ask not sent: " .. tostring(payload))
             else
                 P(("peer ask queued: %s"):format(tostring(payload)))
+                if target then
+                    P(("  only %s will answer, so you can go through peers one by one"):format(target))
+                else
+                    P("  everybody who has this version will answer - add a name to ask one peer only")
+                end
                 P("  it leaves on the next click in the world (hardware gate); /nspy peer send forces it")
             end
             if PeerSync then pcall(PeerSync) end

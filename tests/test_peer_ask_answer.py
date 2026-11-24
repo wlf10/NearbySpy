@@ -186,7 +186,7 @@ class PeerAskAnswerTests(unittest.TestCase):
         # второй запрос через 60 с: канал только что отвечал, ждём ASK_GAP
         self.lua.execute("TestClock = TestClock + 60")
         self.globals["ReceivePeerAsk"](
-            lua_fields(self.lua, "Q1;f;TestRealm PvP;1o;zz"), "PeerTwo")
+            lua_fields(self.lua, "Q1;1o;zz"), "PeerTwo")
         self.lua.execute("TestClock = TestClock + 1")
         self.assertFalse(self.answer())
         self.assertEqual(0, len(self.rows()))

@@ -117,9 +117,19 @@ class PeerAnswerTagTests(unittest.TestCase):
     def recv(self, msg):
         self.g["TestReceive"](msg, "Answerer")
 
-    def open_request(self, nonce="mine"):
-        self.g["TestStats"]["askNonce"] = nonce
-        self.g["TestStats"]["askWindowUntil"] = 1794300000 + 180
+    def open_request(self, nonce="mine", until=None):
+        # Открытые запросы живут ТАБЛИЦЕЙ по nonce: при обходе пиров по очереди
+        # их несколько одновременно, и «текущий запрос» — понятие из прошлой
+        # версии, где второй запрос закрывал окно первого.
+        open_reqs = self.g["TestStats"]["askOpen"]
+        if open_reqs is None:
+            self.lua.execute("TestStats.askOpen = {}")
+            open_reqs = self.g["TestStats"]["askOpen"]
+        open_reqs[nonce] = self.lua.table_from({
+            "minutes": 60,
+            "at": 1794300000,
+            "expires": 1794300000 + (180 if until is None else until),
+        })
 
     def applied(self):
         return [str(self.g["APPLIED"][i]) for i in range(1, len(self.g["APPLIED"]) + 1)]
@@ -197,9 +207,12 @@ class PeerAnswerTagTests(unittest.TestCase):
 
     # --- 3. СТАРЫЙ клиент (без ветки A1) --------------------------------
     def test_old_client_discards_the_answer_packet(self):
-        _, g = self.build(drop_answer_branch=True)
-        g["TestStats"]["askNonce"] = "mine"
-        g["TestStats"]["askWindowUntil"] = 1794300000 + 180
+        # build() создаёт СВОЙ LuaRuntime: таблицы брать только из него, иначе
+        # «cannot mix objects from different Lua runtimes».
+        lua2, g = self.build(drop_answer_branch=True)
+        g["TestStats"]["askOpen"] = lua2.table_from({
+            "mine": lua2.table_from(
+                {"minutes": 60, "at": 1794300000, "expires": 1794300180})})
         g["TestReceive"](self.answer("mine"), "Answerer")
         self.assertEqual([], [str(g["APPLIED"][i]) for i in range(1, len(g["APPLIED"]) + 1)])
         self.assertEqual(1, g["TestStats"]["rejected"])
@@ -207,7 +220,7 @@ class PeerAnswerTagTests(unittest.TestCase):
 
     def test_old_client_discards_the_request_packet_too(self):
         _, g = self.build(drop_answer_branch=True)
-        g["TestReceive"]("Q1;f;" + REALM + ";1o;abc", "Requester")
+        g["TestReceive"]("Q1;1o;abc", "Requester")
         # у Q1 пять полей, у встреч 8/12/13/14 — старый приёмник отвергает
         self.assertEqual(1, g["TestStats"]["rejected"])
         self.assertIsNone(g["TestStats"]["askPending"])

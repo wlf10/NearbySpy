@@ -94,7 +94,8 @@ class PeerAskTransportTests(unittest.TestCase):
         self.add_player("Nonce-Home", NOW - 10,
                         gear={"ids": "1:100,2:200", "at": NOW - 10, "ilvl": 60})
         ok, payload = self.globals["PeerAskSend"](self.db, 60)
-        nonce = str(payload).split(";")[4]
+        # Q1;минуты;nonce — мира и игры в запросе больше нет
+        nonce = str(payload).split(";")[2]
         self.globals["TestPeerReset"]()
         self.globals["ReceivePeerAsk"](lua_fields(self.lua, str(payload)), "PeerGuy")
         self.lua.execute("TestClock = TestClock + 1")
