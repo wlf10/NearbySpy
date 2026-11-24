@@ -304,11 +304,21 @@ local function PlayerRealm()
 end
 
 -- zone by player name (another unit in the beta returns mapID=0, zone name unavailable)
+--
+-- GetRealZoneText, а не GetZoneText: GetZoneText отдаёт ПОДзону («Тихий Омут»,
+-- «Ферма Гаррена»), а PlayerZoneId() — зону (GetBestMapForUnit). Из-за этого
+-- текст и id в одной записи описывали разное, и обратный поиск по имени не
+-- находил id. В живом SV до правки: zoneId=1420 соседствовал с текстами
+-- «Тирисфальские леса» ×1732, «Тихий Омут» ×4, «Ферма Гаррена» ×3.
+-- GetRealZoneText в клиенте есть (проверено пробой API: db.api.GetRealZoneText=1).
 local function PlayerZone()
-    local zone = GetZoneText()
+    local zone
+    if GetRealZoneText then zone = GetRealZoneText() end
     if not zone or zone == "" then
-        zone = GetRealZoneText()
+        -- фолбэк: в другой сборке API может не быть, а зону терять нельзя
+        zone = GetZoneText()
     end
+    if zone == "" then zone = nil end
     return zone
 end
 
@@ -516,13 +526,41 @@ function ZoneMapRefresh()
     ZoneMapInit()
 end
 
--- ZoneIdByName — id по тексту зоны из /who. nil, если зоны нет в словаре
--- (тогда вызывающий шлёт текст, как раньше, — молча терять зону нельзя).
+-- ZoneIdByName — id по тексту зоны из /who. nil, если зоны нет ни в словаре
+-- клиента, ни во вшитой таблице (тогда вызывающий шлёт текст, как раньше, —
+-- молча терять зону нельзя).
+--
+-- Порядок источников важен:
+--   1) словарь клиента (C_Map) — «своё» написание в текущем языке, точнее
+--      всего; но он КУЦЫЙ: 117 карт против 821 зоны в базе, потому что отдаёт
+--      только уже загруженные карты, а обход дерева на этом клиенте не работает;
+--   2) NSP_ZONE_BY_NAME — вшитая таблица из DB2 ТОЧНОГО билда (7749 имён в 10
+--      локалях, генерируется scripts/gen_zones.py). Она разрешает 1131 название
+--      из 1189 в живом SV, поднимая покрытие zoneId с 82% до 97%.
+-- Таблица необязательна: без файла аддон работает как раньше (pcall-гейт).
 function ZoneIdByName(name)
     if type(name) ~= "string" or name == "" then return nil end
     ZoneMapRefresh()          -- если прошлый обход собрал огрызок — попробуем ещё
     local byName = ZoneMapInit()
-    return byName[name]
+    local hit = byName[name]
+    if hit then return hit end
+    local t = NSP_ZONE_BY_NAME
+    if type(t) == "table" then
+        -- ключи в таблице в нижнем регистре; string.lower в Lua 5.1 работает
+        -- по байтам и для UTF-8 безопасен (меняет только ASCII-регистр),
+        -- поэтому русские/немецкие имена остаются нетронутыми.
+        local key = name:lower()
+        local exact = t[key]
+        if exact then return exact end
+        -- лишние пробелы по краям в /who случаются редко, но стоят дешевле
+        -- одного потерянного zoneId
+        local trimmed = key:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= key then
+            local v = t[trimmed]
+            if v then return v end
+        end
+    end
+    return nil
 end
 
 -- ZoneNameById — имя зоны на языке ТЕКУЩЕГО клиента по id из пакета.
