@@ -7492,6 +7492,11 @@ end
 local function BuildOptionsPanel()
     if NspOptPanel then return NspOptPanel end
     local p = CreateFrame("Frame", "NearbySpyOptionsPanel")
+    -- Панель создаётся СКРЫТОЙ. Так делают оба аддона-образца этого клиента
+    -- (Mastercraft: p:Hide(); TalkingHeadRu: panel:Hide()) — холст настроек
+    -- показывает сама система при открытии вкладки. Без этого фрейм висит
+    -- поверх игры сразу после входа.
+    if p.Hide then p:Hide() end
     -- Старая API берёт заголовок вкладки из panel.name (у нового API он в
     -- аргументе), поэтому имя задаётся всегда.
     p.name = "NearbySpy"
@@ -7541,8 +7546,20 @@ function NspOpenOptions()
     if not NspOptCategory then pcall(NspRegisterOptions) end
     if NspOptCategory then
         if type(Settings) == "table" and Settings.OpenToCategory then
-            local id = NspOptCategory.ID or "NearbySpy"
-            if pcall(Settings.OpenToCategory, id) then return true end
+            -- Открывать надо по ИДЕНТИФИКАТОРУ категории, который отдаёт
+            -- category:GetID() (так делает TalkingHeadRu в этом клиенте).
+            -- Строковое имя система молча не находит: pcall не падает, окно не
+            -- открывается — и команда «сработала», ничего не показав.
+            local id
+            if type(NspOptCategory.GetID) == "function" then
+                local okId, v = pcall(NspOptCategory.GetID, NspOptCategory)
+                if okId then id = v end
+            end
+            if id == nil then id = NspOptCategory.ID end
+            if id ~= nil then
+                local okOpen = pcall(Settings.OpenToCategory, id)
+                if okOpen then return true end
+            end
         end
         if InterfaceOptionsFrame_OpenToCategory then
             -- старый API: первый вызов открывает окно, второй выбирает вкладку —

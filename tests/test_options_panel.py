@@ -71,8 +71,8 @@ local function W()
     w.SetHeight = function() end
     w.SetJustifyH = function() end
     w.SetScript = function(self, ev, fn) self.scripts = self.scripts or {}; self.scripts[ev] = fn end
-    w.Show = function() end
-    w.Hide = function() end
+    w.Show = function(self) self.shown = true end
+    w.Hide = function(self) self.shown = false end
     w.IsShown = function() return false end
     w.CreateTexture = function() return W() end
     w.SetChecked = function(self, v) self.checked = v and true or false end
@@ -130,8 +130,13 @@ class OptionsPanelTests(unittest.TestCase):
 Settings = {}
 Settings.REGISTERED = {}
 Settings.OPENED = {}
+Settings.NEXT_ID = 0
 function Settings.RegisterCanvasLayoutCategory(panel, title)
-    local cat = { panel = panel, title = title }
+    -- В живом клиенте категория отдаёт СВОЙ идентификатор через GetID(), и
+    -- именно его принимает Settings.OpenToCategory (так делает TalkingHeadRu).
+    Settings.NEXT_ID = Settings.NEXT_ID + 1
+    local cat = { panel = panel, title = title, nid = Settings.NEXT_ID }
+    function cat.GetID(self) return self.nid end
     Settings.REGISTERED[#Settings.REGISTERED + 1] = cat
     return cat
 end
@@ -177,11 +182,33 @@ end
         # ID нужен Settings.OpenToCategory — без него вкладка не открывается
         self.assertEqual("NearbySpy", str(cat["ID"]))
 
-    def test_modern_api_opens_by_category_id(self):
+    def test_modern_api_opens_with_the_category_get_id(self):
+        # Строковое имя система молча не находит: pcall не падает, окно не
+        # открывается — и команда «сработала», ничего не показав.
         _, g = self.build(modern=True, old=False)
         g["NspRegisterOptions"]()
         self.assertTrue(g["NspOpenOptions"]())
+        opened = self.rows(g["Settings"]["OPENED"])
+        self.assertEqual(1, len(opened))
+        self.assertEqual(g["NspOptCategory"]["nid"], opened[0])
+        self.assertNotEqual("NearbySpy", str(opened[0]))
+
+    def test_falls_back_to_ID_when_category_has_no_GetID(self):
+        lua, g = self.build(modern=True, old=False)
+        g["NspRegisterOptions"]()
+        # категория без GetID (другая сборка API) — открываем по полю ID
+        lua.execute("NspOptCategory.GetID = nil")
+        self.assertTrue(g["NspOpenOptions"]())
         self.assertEqual(["NearbySpy"], [str(x) for x in self.rows(g["Settings"]["OPENED"])])
+
+    def test_panel_is_created_hidden(self):
+        # Так делают оба аддона-образца (Mastercraft, TalkingHeadRu): холст
+        # показывает сама система при открытии вкладки. Видимая панель висела бы
+        # поверх игры сразу после входа.
+        _, g = self.build(modern=True, old=True)
+        g["NspRegisterOptions"]()
+        self.assertEqual(False, g["NspOptPanel"]["shown"],
+                         "панель настроек обязана создаваться скрытой")
 
     def test_panel_has_its_own_panel_name_for_the_old_api(self):
         _, g = self.build(modern=True, old=True)
