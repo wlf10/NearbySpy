@@ -5,6 +5,8 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
+from nsp_helpers import CUT_PRELUDE
+
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
 OURS = "CAMWOW EU5 Realm 1 PvE"
@@ -16,7 +18,7 @@ class RealmTagTests(unittest.TestCase):
         start = source.index("function PeerRealmTag(realm, mine)")
         end = source.index("local function TacticalVisible(p, now)", start)
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute(source[start:end] + "\nTestTag = PeerRealmTag\n")
+        self.lua.execute(CUT_PRELUDE + "\n" + source[start:end] + "\nTestTag = PeerRealmTag\n")
 
     def tag(self, realm, mine=OURS):
         return self.lua.globals()["TestTag"](realm, mine)

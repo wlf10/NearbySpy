@@ -13,6 +13,8 @@ import unittest
 
 from lupa.lua51 import LuaRuntime
 
+from nsp_helpers import CUT_PRELUDE
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "NearbySpy.lua"
 
@@ -30,6 +32,7 @@ class SecretSysMsgTests(unittest.TestCase):
         ]
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
+            CUT_PRELUDE + "\n"
             "local whoScan, lastWhoSent = nil, 0\n"
             "local db = { debug = {}, whoPauseUntil = 0 }\n"
             "GetDB = function() return db end\n"
@@ -135,6 +138,7 @@ class PeerEscSecretTests(unittest.TestCase):
         ]
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
+            CUT_PRELUDE + "\n"
             "ACCESSIBLE = true\n"
             "canaccessvalue = function(v) return ACCESSIBLE end\n"
             + block

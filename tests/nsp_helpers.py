@@ -97,6 +97,25 @@ RACE_PRELUDE = race_prelude()
 REC_PRELUDE = rec_prelude()
 
 
+def cut_prelude() -> str:
+    """Настоящий NspCut — обрезка строки по байтам без разрыва UTF-8 символа.
+
+    Любой харнес, который вырезает диагностику (кольцо печати, PeerEsc, тег
+    мира), обязан принести её с собой: в продакшне NspCut объявлен ВЫШЕ среза,
+    и без него чанк падает «attempt to call global 'NspCut' (a nil value)»,
+    не проверив ничего о самом коде.
+    """
+    src = ADDON_FILE.read_text(encoding="utf-8")
+    if "function NspCut(s, n)" not in src:
+        return "-- NspCut отсутствует в этой сборке\n"
+    start = src.index("function NspCut(s, n)")
+    end = src.index("-- Untrusted chat text", start)
+    return src[start:end]
+
+
+CUT_PRELUDE = cut_prelude()
+
+
 def peer_prelude() -> str:
     """Слайс peer-подсистемы целиком: константы, упаковка, очереди и запрос Q1.
 

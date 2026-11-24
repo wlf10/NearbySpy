@@ -74,7 +74,7 @@ local function P(msg)
     if ok and type(db2) == "table" and type(db2.debug) == "table" then
         local ring = db2.debug.printRing
         if type(ring) ~= "table" then ring = {}; db2.debug.printRing = ring end
-        ring[#ring + 1] = stamped:sub(1, 500)
+        ring[#ring + 1] = NspCut(stamped, 500)
         if #ring > 200 then table.remove(ring, 1) end
     end
 end
@@ -209,6 +209,10 @@ GetDB = function()
     -- Проба-диагностика из SV (23.11.2026). Глобал объявлен ниже по файлу —
     -- проверка на nil покрывает вызов во время загрузки.
     if NspPruneDebug then NspPruneDebug(db) end
+    -- След снятой пробы (верхний уровень SV) и приведение zoneId к тексту зоны
+    -- (25.11.2026). Глобал объявлен ниже по файлу — проверка на nil покрывает
+    -- вызов во время загрузки.
+    if NspFixZoneIds then NspFixZoneIds(db) end
     return db
 end
 
@@ -221,7 +225,7 @@ local function RecordHardcoreDeath(message)
     db.debug.hardcoreDeathCount = (db.debug.hardcoreDeathCount or 0) + 1
     local samples = db.debug.hardcoreDeathSamples
     if type(samples) ~= "table" then samples = {}; db.debug.hardcoreDeathSamples = samples end
-    samples[#samples + 1] = { at = time(), realm = GetRealmName(), message = message:sub(1, 500) }
+    samples[#samples + 1] = { at = time(), realm = GetRealmName(), message = NspCut(message, 500) }
     if #samples > 200 then table.remove(samples, 1) end
 end
 
@@ -231,7 +235,7 @@ local function R(msg)
     if ok and type(db2) == "table" and type(db2.debug) == "table" then
         local ring = db2.debug.printRing
         if type(ring) ~= "table" then ring = {}; db2.debug.printRing = ring end
-        ring[#ring + 1] = ("[%s] %s"):format(date("%H:%M:%S"), tostring(msg)):sub(1, 500)
+        ring[#ring + 1] = NspCut(("[%s] %s"):format(date("%H:%M:%S"), tostring(msg)), 500)
         if #ring > 200 then table.remove(ring, 1) end
     end
 end
@@ -628,9 +632,11 @@ end
 --   • записи, сделанные ДО появления таблицы: у них в SV только название
 --     («Тирисфальские леса») и zoneId = false.
 -- Досстановленный id — второсортный по сравнению с наблюдённым: он выведен из
--- текста, а не пришёл от клиента. Поэтому существующий id НИКОГДА не
--- перезаписывается, а в peer-сравнении (UpsertPlayer) такой id уже не даёт
--- отправить пустое обновление — см. блок «смена зоны решается по ID».
+-- текста, а не пришёл от клиента. Поэтому здесь существующий id не трогается,
+-- а в peer-сравнении (UpsertPlayer) такой id уже не даёт отправить пустое
+-- обновление — см. блок «смена зоны решается по ID». Исключение — случай,
+-- когда ТЕКСТ зоны обновился, а id от источника не пришёл: там id
+-- пересчитывается и перезаписывается (см. UpsertPlayer и NspFixZoneIds).
 --
 -- Счётчик, по которому видно, что механизм отработал своё: db.debug.zoneResolved.
 -- Когда он перестанет расти между сессиями — переходный период закончен.
@@ -651,6 +657,72 @@ function NspResolveZoneId(entry)
     end
 end
 
+-- Версия разового прохода «zoneId по тексту зоны» (25.11.2026).
+NSP_ZONE_FIX_VERSION = 1
+
+-- NspFixZoneIds — привести zoneId записи в соответствие с её текстом зоны.
+--
+-- БАГ, ради которого написан (живой SavedVariables 25.11.2026): у 361 записи
+-- из 59 375 текст описывал одну зону, а zoneId — другую. Причина в
+-- UpsertPlayer: ростер гильдии отдаёт зону ТЕКСТОМ и вообще без id
+-- (HandleGuildRoster), /who до появления вшитой таблицы резолвил не всякое
+-- имя — текст обновлялся, а id оставался от прежнего наблюдения. До 1.6.3
+-- этого не было видно (окно показывало текст), после перехода на
+-- ZoneDisplay(id) стало видно: игрок в Штормграде показывался под чужим id,
+-- и на сайт уходил неверный zoneId.
+--
+-- Решение всегда в пользу ТЕКСТА: он пишется при каждом наблюдении, а id —
+-- только когда источник его прислал. Тем же проходом досстанавливается id у
+-- записей, которые его так и не получили (это разовый NspResolveZoneId по
+-- всей базе, а не по одной встрече).
+--
+-- Разовость — по флагу db.zoneIdFixed: гонять 59 тыс. записей на каждом входе
+-- не нужно, а новые расхождения закрывает сам UpsertPlayer.
+function NspFixZoneIds(db)
+    if type(db) ~= "table" then return end
+    -- След снятой API-пробы (NearbySpy_Probe.lua удалён 23.11.2026): в коде
+    -- этих ключей нет, а в SV они лежали с 08.11 — ~130 КБ неймспейсов и
+    -- образцов торговцев. NspPruneDebug чистит только db.debug, верхний
+    -- уровень оставался нетронутым.
+    if db.probe ~= nil or db.probeOn ~= nil then
+        db.probe, db.probeOn = nil, nil
+        db.debug = db.debug or {}
+        db.debug.probePruned = true
+    end
+    if db.zoneIdFixed == NSP_ZONE_FIX_VERSION then return end
+    local players = db.players
+    if type(players) ~= "table" then
+        db.zoneIdFixed = NSP_ZONE_FIX_VERSION
+        return
+    end
+    local fixed, added = 0, 0
+    for _, rec in pairs(players) do
+        if type(rec) == "table" then
+            local zone = rec.zone
+            if type(zone) == "string" and zone ~= "" and zone ~= "?" then
+                local resolved = ZoneIdByName(zone)
+                if resolved and resolved > 0 then
+                    local zid = rec.zoneId
+                    if not zid or zid == 0 then
+                        rec.zoneId = resolved
+                        added = added + 1
+                    elseif resolved ~= zid then
+                        rec.zoneId = resolved
+                        fixed = fixed + 1
+                    end
+                end
+            end
+        end
+    end
+    db.zoneIdFixed = NSP_ZONE_FIX_VERSION
+    db.debug = db.debug or {}
+    db.debug.zoneIdFixed = (db.debug.zoneIdFixed or 0) + fixed
+    db.debug.zoneIdAdded = (db.debug.zoneIdAdded or 0) + added
+    if fixed > 0 or added > 0 then
+        R(("zoneId fix: %d corrected by zone text, %d restored"):format(fixed, added))
+    end
+end
+
 -- ============ helpers shared with world collection ============
 -- ProbeText и ProbeTip остались после вырезания probe-блоков: ими
 -- пользуется сбор мира (имя предмета из тултипа, чтение торговой позиции).
@@ -660,7 +732,7 @@ local function ProbeText(fs)
     if not ok or txt == nil then return nil end
     if type(txt) ~= "string" then return "[secret]" end
     if canaccessvalue and not canaccessvalue(txt) then return "[secret]" end
-    return txt:sub(1, 120)
+    return NspCut(txt, 120)
 end
 
 local probeTip
@@ -1313,7 +1385,18 @@ local function UpsertPlayer(db, data)
         -- too (it means "not a profile-only row"), so without this guard a peer
         -- packet overwrote the zone we had seen ourselves — caught by
         -- test_peer_place_does_not_overwrite_our_own_sighting.
-        if data.zone and data.source ~= "peer" then entry.zone = data.zone end
+        if data.zone and data.source ~= "peer" then
+            entry.zone = data.zone
+            -- Текст зоны обновился, а id источник не прислал (ростер гильдии
+            -- отдаёт только текст; /who — когда имя не резолвится). Оставлять
+            -- старый id нельзя: он описывает ДРУГУЮ зону, и ZoneDisplay по нему
+            -- покажет чужую зону, а на сайт уйдёт неверный zoneId. Текст всегда
+            -- свежее id — он пишется каждым наблюдением.
+            if not data.zoneId then
+                local resolved = ZoneIdByName(data.zone)
+                if resolved and resolved > 0 then entry.zoneId = resolved end
+            end
+        end
         if data.zoneId and data.source ~= "peer" then entry.zoneId = data.zoneId end
         -- x/y больше не храним (v4): это была позиция НАБЛЮДАТЕЛЯ, а не цели,
         -- и приёмники её не читали. Слоты убраны ради перехода в блок на 16
@@ -1622,6 +1705,43 @@ PeerSync = function()
     }
 end
 
+-- NspCut — обрезать строку до n БАЙТ, не разрывая символ UTF-8.
+--
+-- `string.sub` считает БАЙТЫ, поэтому кириллица, CJK и умляуты режутся
+-- пополам, и в SavedVariables остаётся байт-огрызок. Живой файл 25.11.2026
+-- содержал 6 таких мест (кольцо печати, тултипы предметов) — файл перестаёт
+-- быть валидным UTF-8: Python-парсер выгрузки читает errors="replace" и терпит,
+-- а Go на сайте подставил бы U+FFFD, то есть испортил бы текст молча.
+--
+-- Идём от конца отрезанной части: на ASCII-байте граница целая; на
+-- continuation-байте (0x80..0xBF) отступаем назад; на lead-байте (0xC0..0xF4)
+-- последовательность началась и не закончилась — отбрасываем её целиком.
+-- Глобальная функция: главный чанк на 197 локалах из 200 в Lua 5.1.
+function NspCut(s, n)
+    if type(s) ~= "string" or type(n) ~= "number" or n < 1 then return s end
+    if #s <= n then return s end
+    local cut = s:sub(1, n)
+    local i = #cut
+    -- Шаг назад по continuation-байтам: 0x80..0xBF продолжают символ, начатый
+    -- левее. Останавливаемся на lead-байте (>= 0xC0) или на ASCII.
+    local lead = i
+    while lead > 0 and cut:byte(lead) >= 0x80 and cut:byte(lead) < 0xC0 do
+        lead = lead - 1
+    end
+    if lead == 0 then return "" end                   -- в куске нет целого символа
+    local b = cut:byte(lead)
+    if b < 0x80 then return cut end                   -- граница пришлась на ASCII
+    local need
+    if b >= 0xF0 then need = 4
+    elseif b >= 0xE0 then need = 3
+    elseif b >= 0xC0 then need = 2
+    else return cut:sub(1, lead - 1) end              -- 0x80..0xBF началом быть не может
+    -- Символ целый только если от lead до конца куска ровно need байт.
+    -- Иначе (обрезали на середине) — отбрасываем начатую последовательность.
+    if i - lead + 1 == need then return cut end
+    return cut:sub(1, lead - 1)
+end
+
 -- Untrusted chat text: strip control chars and pipe escapes before it reaches
 -- chat or the SV ring (a peer name must not be able to inject markup).
 -- Global on purpose — a local function would cost a slot in the main chunk.
@@ -1632,7 +1752,7 @@ function PeerEsc(s, maxLen)
     if canaccessvalue and not canaccessvalue(s) then return "[secret]" end
     s = s:gsub("[%c|]", "?")
     maxLen = maxLen or 60
-    if #s > maxLen then s = s:sub(1, maxLen) .. "..." end
+    if #s > maxLen then s = NspCut(s, maxLen) .. "..." end
     return s
 end
 local function PeerField(s, maxLen)
@@ -3753,6 +3873,10 @@ function NspPruneDebug(db)
         -- счётчик показывает, что механизм ещё нужен; когда рост прекратится —
         -- его пора убирать (см. NspResolveZoneId)
         zoneResolved = true,
+        -- разовый проход «zoneId по тексту зоны» и след снятой API-пробы
+        -- (25.11.2026): счётчики исправленных/досстановленных id, отметка о
+        -- вычистке probe
+        zoneIdFixed = true, zoneIdAdded = true, probePruned = true,
         cvarErr = true, hardcoreDeathCount = true, hardcoreDeathSamples = true,
         pruned = true, prunedAt = true,
         -- this migration's own bookkeeping
@@ -4670,7 +4794,7 @@ local function CheckWhoThrottle(msg)
     if msg:find("[Пп]ерац") or msg:find("[Мм]одификац") then
         -- hard anti-bot ("Интересная операция…"): 5-minute pause, stop the scan
         db.debug.whoThrottled = (db.debug.whoThrottled or 0) + 1
-        db.debug.lastErrorMsg = msg:sub(1, 120)
+        db.debug.lastErrorMsg = NspCut(msg, 120)
         db.whoPauseUntil = time() + 300
         if whoScan then FinishZoneScan("stopped: server throttles /who") end
         P(L("WHO_THROTTLED"))
@@ -4689,7 +4813,7 @@ local function CheckWhoThrottle(msg)
         or msg:find("noch einen Moment") then
         -- soft command cooldown (a couple of seconds) — note it, don't stop the scan
         db.debug.whoSoft = (db.debug.whoSoft or 0) + 1
-        db.debug.lastErrorMsg = msg:sub(1, 120)
+        db.debug.lastErrorMsg = NspCut(msg, 120)
         return true
     end
     return false
@@ -4712,7 +4836,7 @@ local function LogSysMsg(chan, msg)
     local db = GetDB()
     db.debug.msgLog = db.debug.msgLog or {}
     local log = db.debug.msgLog
-    log[#log + 1] = chan .. "|" .. msg:sub(1, 220)
+    log[#log + 1] = chan .. "|" .. NspCut(msg, 220)
     if #log > 10 then table.remove(log, 1) end
 end
 
@@ -5930,7 +6054,7 @@ function PeerRealmTag(realm, mine)
     local tag = table.concat(theirs, " ", i)
     if tag == "" then tag = realm end
     -- 24 chars + ellipsis: past that it collides with the profile column
-    if #tag > 24 then tag = tag:sub(1, 24) .. "..." end
+    if #tag > 24 then tag = NspCut(tag, 24) .. "..." end
     return tag
 end
 
