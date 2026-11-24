@@ -58,6 +58,33 @@ class SecretSysMsgTests(unittest.TestCase):
         self.assertTrue(bool(handled))
         self.assertEqual(1, self.db["debug"]["whoThrottled"])
 
+    def test_soft_cooldown_russian_text(self):
+        g = self.lua.globals()
+        handled = g["TestThrottle"](
+            "Для повторного использования команды /кто необходимо немного подождать")
+        self.assertTrue(bool(handled))
+        self.assertEqual(1, self.db["debug"]["whoSoft"])
+
+    def test_soft_cooldown_german_text(self):
+        """Немецкий текст кулдауна /who — из живого SV, не выдуманный.
+
+        Замер 24.11.2026 на deDE клиенте: в db.debug.msgLog дважды пришло
+        «Wartet noch einen Moment, bis Ihr /wer erneut verwenden könnt.», а
+        whoSoft остался 140 — гейт знал только русскую формулировку.
+        """
+        g = self.lua.globals()
+        handled = g["TestThrottle"](
+            "Wartet noch einen Moment, bis Ihr /wer erneut verwenden könnt.")
+        self.assertTrue(bool(handled), "немецкий кулдаун не распознан")
+        self.assertEqual(1, self.db["debug"]["whoSoft"])
+
+    def test_unrelated_german_message_is_not_a_throttle(self):
+        """Обычные немецкие системные сообщения не должны считаться паузой."""
+        g = self.lua.globals()
+        handled = g["TestThrottle"]("Ihr seid zu weit entfernt.")
+        self.assertFalse(bool(handled))
+        self.assertIsNone(self.db["debug"]["whoSoft"])
+
     def test_syslog_gate_skips_inaccessible_message(self):
         g = self.lua.globals()
         g["ACCESSIBLE"] = False

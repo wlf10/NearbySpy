@@ -4545,7 +4545,17 @@ local function CheckWhoThrottle(msg)
         P(L("WHO_THROTTLED"))
         return true
     end
-    if msg:find("[Пп]одожд") then
+    if msg:find("[Пп]одожд")
+        -- German cooldown text, captured live on a deDE client (24.11.2026,
+        -- db.debug.msgLog): "Wartet noch einen Moment, bis Ihr /wer erneut
+        -- verwenden könnt." Two of those arrived and whoSoft did NOT move —
+        -- the gate only knew the Russian wording, so the pause was never
+        -- noted. Stable part is "noch einen Moment"; the command name
+        -- ("/wer" = /who on deDE) may differ in other builds.
+        -- ⚠️ Never invent another locale's text: add it only when it actually
+        -- shows up in db.debug.msgLog, otherwise the gate looks fine and
+        -- silently does nothing.
+        or msg:find("noch einen Moment") then
         -- soft command cooldown (a couple of seconds) — note it, don't stop the scan
         db.debug.whoSoft = (db.debug.whoSoft or 0) + 1
         db.debug.lastErrorMsg = msg:sub(1, 120)
