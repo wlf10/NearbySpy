@@ -44,11 +44,35 @@ function CreateFrame(kind, name, parent, template)
     f.SetSize = function(self, w, h) self.w, self.h = w, h end
     f.GetHeight = function(self) return self.h end
     f.GetWidth = function(self) return self.w end
-    f.SetPoint = function(self, ...) self.__points[#self.__points + 1] = { ... } end
+    f.SetPoint = function(self, ...)
+        local a = { ... }
+        self.__points[#self.__points + 1] = a
+        -- Высота из анкоров TOPLEFT/BOTTOMRIGHT к родителю — как в клиенте:
+        -- ScrollFrame в справке размеров не задаёт, он растянут анкорами.
+        -- Анкор без родителя: ("TOPLEFT", x, y) — y это ТРЕТИЙ элемент, а не
+        -- пятый (пятый был бы у формы с родителем).
+        if a[1] == "TOPLEFT" and type(a[3]) == "number" then self.__top = -a[3] end
+        if a[1] == "BOTTOMRIGHT" and type(a[3]) == "number" then self.__bottom = a[3] end
+        if self.__top and self.__bottom and self.__parent and self.__parent.h then
+            self.h = self.__parent.h - self.__top - self.__bottom
+        end
+    end
     f.ClearAllPoints = function(self) self.__points = {} end
     f.GetNumPoints = function(self) return #self.__points end
     f.SetScrollChild = function(self, child) self.__scrollChild = child end
     f.GetScrollChild = function(self) return self.__scrollChild end
+    -- Состояние прокрутки, как у настоящего ScrollFrame
+    f.__vscroll = 0
+    f.GetVerticalScroll = function(self) return self.__vscroll end
+    f.SetVerticalScroll = function(self, v) self.__vscroll = v end
+    f.GetVerticalScrollRange = function(self)
+        -- диапазон = высота холста минус видимая высота скролла
+        local child = self.__scrollChild
+        if not child or not child.h or not self.h then return 0 end
+        local r = child.h - self.h
+        return (r > 0) and r or 0
+    end
+    f.EnableMouseWheel = function(self, on) self.__wheel = on and true or false end
     f.SetScript = function(self, ev, fn) self.__scripts[ev] = fn end
     f.Show = function(self) self.shown = true end
     f.Hide = function(self) self.shown = false end
@@ -245,6 +269,59 @@ class HelpWindowLayoutTests(unittest.TestCase):
         self.assertGreater(height_de, 0)
         # немецкие строки длиннее → холст не может стать меньше
         self.assertGreaterEqual(height_de, height_en)
+
+    # --- прокрутка ------------------------------------------------------
+    def test_wheel_handler_is_installed_on_the_scroll_frame(self):
+        # Шаблон UIPanelScrollFrameTemplate в этом клиенте обработчик колеса НЕ
+        # вешает: без своего OnMouseWheel окно не крутится вовсе (жалоба
+        # «скролл не работает»).
+        _, g = self.build()
+        sf = g["TestHelp"]["scroll"]
+        handlers = sf["__scripts"] or {}
+        self.assertIn("OnMouseWheel", dict(handlers), "на ScrollFrame нет обработчика колеса")
+        self.assertTrue(sf["__wheel"], "колесо должно быть включено (EnableMouseWheel)")
+
+    def test_wheel_handler_is_installed_on_the_canvas_too(self):
+        # Курсор чаще стоит на тексте, а не на пустой полосе — колесо должно
+        # работать и там.
+        _, g = self.build()
+        content = g["TestHelp"]["content"]
+        handlers = content["__scripts"] or {}
+        self.assertIn("OnMouseWheel", dict(handlers), "на холсте нет обработчика колеса")
+
+    def test_wheel_scrolls_down_and_up_within_the_range(self):
+        lua, g = self.build(screen_h=768)   # тесный экран: содержимое выше окна
+        sf = g["TestHelp"]["scroll"]
+        range_ = lua.eval("function() return NspHelp.scroll:GetVerticalScrollRange() end")()
+        self.assertGreater(range_, 0, "на тесном экране прокрутка обязана быть ненулевой")
+        # колесо от себя — вниз
+        lua.eval("function() NspHelpScrollBy(1) end")()
+        self.assertEqual(32, sf["__vscroll"])
+        # и обратно
+        lua.eval("function() NspHelpScrollBy(-1) end")()
+        self.assertEqual(0, sf["__vscroll"])
+
+    def test_wheel_never_scrolls_below_zero(self):
+        lua, g = self.build(screen_h=768)
+        lua.eval("function() NspHelpScrollBy(-5) end")()
+        self.assertEqual(0, g["TestHelp"]["scroll"]["__vscroll"],
+                         "прокрутка ушла в отрицательные значения — верх окна станет пустым")
+
+    def test_wheel_never_scrolls_past_the_end(self):
+        lua, g = self.build(screen_h=768)
+        range_ = lua.eval("function() return NspHelp.scroll:GetVerticalScrollRange() end")()
+        for _ in range(50):
+            lua.eval("function() NspHelpScrollBy(1) end")()
+        self.assertEqual(range_, g["TestHelp"]["scroll"]["__vscroll"],
+                         "прокрутка ушла за конец содержимого")
+
+    def test_reopening_starts_from_the_first_row(self):
+        lua, g = self.build(screen_h=768)
+        lua.eval("function() NspHelpScrollBy(1) end")()
+        self.assertGreater(g["TestHelp"]["scroll"]["__vscroll"], 0)
+        g["TestShow"]()
+        self.assertEqual(0, g["TestHelp"]["scroll"]["__vscroll"],
+                         "после повторного открытия окно должно стоять в начале")
 
     def test_every_command_has_a_description_in_every_locale(self):
         # Ключевая связка окна: HELP_TEXT позиционный, и пропуск строки в локали

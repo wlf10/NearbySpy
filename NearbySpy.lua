@@ -5505,6 +5505,9 @@ function HelpLayout()
         y = y - rowH - 7
     end
     H.content:SetSize(H.CMD_W + H.DESC_W + 7, -y + 2)
+    -- Открываем всегда с первой строки: иначе после листания окно
+    -- открывается «в середине», и первая же команда выглядит пропавшей.
+    if H.scroll then pcall(function() H.scroll:SetVerticalScroll(0) end) end
     -- Потолок высоты — экран, а не константа: на 1366x768 окно в 600 px уже
     -- перекрывает пол-экрана, и кнопка закрытия уезжает под курсор.
     local cap = 600
@@ -5517,6 +5520,42 @@ function HelpLayout()
     local h = (needH < cap) and needH or cap
     if h < 240 then h = 240 end
     helpWin:SetSize(670, h)
+end
+
+-- Прокрутка колесом. Шаблон UIPanelScrollFrameTemplate в этом клиенте НЕ вешает
+-- обработчик колеса: в аддоне не было ни одного OnMouseWheel, и окно справки
+-- крутиться не хотело (в Mastercraft рядом то же делают вручную, через
+-- GetVerticalScrollRange). Поэтому обработчик ставим сами и на сам ScrollFrame,
+-- и на холст: иначе колесо работает только когда курсор попал в узкую полосу,
+-- не занятую текстом.
+-- Все вызовы под pcall: в другой сборке API может не быть, а падение здесь
+-- означало бы нерабочее окно целиком.
+function NspHelpScrollBy(delta)
+    local sf = NspHelp.scroll
+    if not sf then return end
+    local ok, cur = pcall(function() return sf:GetVerticalScroll() end)
+    if not ok or type(cur) ~= "number" then cur = 0 end
+    local range = 0
+    local okR, r = pcall(function() return sf:GetVerticalScrollRange() end)
+    if okR and type(r) == "number" then range = r end
+    -- delta > 0 — колесо от себя: содержимое едет ВВЕРХ, то есть значение
+    -- вертикальной прокрутки РАСТЁТ. Знак был перепутан, и колесо упиралось в
+    -- ноль на первом же щелчке (тест это и поймал).
+    local step = 32 * (delta or 0)
+    local next_ = cur + step
+    if next_ < 0 then next_ = 0 end
+    if next_ > range then next_ = range end
+    pcall(function() sf:SetVerticalScroll(next_) end)
+end
+
+function NspHelpHookWheel(frame)
+    if not frame then return end
+    if frame.EnableMouseWheel then pcall(frame.EnableMouseWheel, frame, true) end
+    if frame.SetScript then
+        pcall(frame.SetScript, frame, "OnMouseWheel", function(_, delta)
+            NspHelpScrollBy(delta)
+        end)
+    end
 end
 
 local function ShowHelpWindow()
@@ -5571,6 +5610,16 @@ local function ShowHelpWindow()
         local content = CreateFrame("Frame", nil, sf)
         content:SetSize(NspHelp.CMD_W + NspHelp.DESC_W + 7, 1)
         sf:SetScrollChild(content)
+        -- Колесо вешаем на ОБА фрейма: на сам ScrollFrame (курсор между
+        -- колонками и у края) и на холст (курсор на тексте). Шаблон в этом
+        -- клиенте этого не делает — иначе окно не крутится вовсе.
+        NspHelpHookWheel(sf)
+        NspHelpHookWheel(content)
+        -- Холст не должен перекрывать полосу прокрутки шаблона: справа 18 px
+        -- уходят под неё, иначе за неё не взяться мышью.
+        if sf.SetScrollChild and content.SetWidth then
+            pcall(function() content:SetWidth(NspHelp.CMD_W + NspHelp.DESC_W + 7) end)
+        end
         NspHelp.content = content
         local descRows, cmds = {}, {}
         helpWin.__descRows = descRows
