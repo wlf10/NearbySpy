@@ -38,6 +38,17 @@ GetLocale = function() return CLIENT_LOCALE end
 LuaType = function(v) return type(v) end
 DB = { locale = nil }
 GetDB = function() return DB end
+-- OptTextHeight объявлен НИЖЕ среза (в блоке настроек), а окно справки
+-- измеряет им высоту описаний: без заглушки раскладка падает на
+-- "attempt to call global 'OptTextHeight' (a nil value)". Модель — одна строка
+-- на 52 символа, как у шрифта окна.
+function OptTextHeight(fs, fallback)
+    local t = (fs and (fs.__text or fs.GetText and fs:GetText())) or ""
+    if type(t) ~= "string" then t = "" end
+    local lines = math.max(1, math.ceil(#t / 52))
+    return lines * 12
+end
+NspKeyboardPropagate = function() end
 """
 
 

@@ -5469,8 +5469,56 @@ local HELP_TEXT = {
     frFR = {"Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Compteurs et diagnostic", "Activer/désactiver les annonces de rencontres", "Activer/désactiver les journaux techniques", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "État et compteurs du partage", "Ce que le canal a livré - nouveaux uniquement", "Tout ce que le canal a livré (mises à jour incluses)", "Forcer l'envoi de la file (sans clic dans le monde)", "Demander aux pairs ce qu'ils ont vu - avec un nom, un seul joueur (list = qui est là)", "Dictionnaire des zones : reconstruire et rapporter (sans /who)", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
     koKR = {"플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "통계 및 진단", "새 만남 채팅 알림 전환", "기술 로그 채팅 출력 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "공유 상태 및 통계", "채널에서 받은 신규 기록만", "채널에서 받은 전체 기록 (갱신 포함)", "대기열 강제 전송 (월드 클릭 없이)", "피어에게 목격 기록을 요청 — 이름을 넣으면 한 명에게만 (list = 채널 참여자)", "지역 사전: 재구성 및 보고 (/who 불필요)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
 }
-local helpWin
 local EffectiveLocale -- forward: defined with the settings selectors below
+local helpWin
+-- Скролл, холст, подписи команд и ширины колонок — ОДНОЙ глобальной таблицей.
+-- Не локалами: главный чанк уже стоит на потолке Lua 5.1 в 200 локалов, и пять
+-- «удобных» локалов не дают файлу скомпилироваться вовсе («main function has
+-- more than 200 local variables»).
+NspHelp = {CMD_W = 155, DESC_W = 440}
+
+-- Раскладка пересчитывается на КАЖДОМ показе, а не строится один раз.
+-- Причины, обе — воспроизведённые дефекты:
+--   • описания берутся из таблицы локали, поэтому их ВЫСОТА зависит от языка:
+--     русская и немецкая строка переносится на две строки там, где английская
+--     помещается в одну. Шаг 25 px при этом накладывал строки друг на друга;
+--   • 22 команды при том же шаге давали последнюю строку на y = -574 при окне
+--     высотой 480 — пять нижних строк рисовались ВНЕ рамки.
+-- Теперь шаг = высота самой высокой части строки + отступ, высота холста = сумма
+-- строк, а окно растёт под содержимое и упирается в потолок экрана; всё, что не
+-- влезло, доступно скроллом.
+function HelpLayout()
+    local H = NspHelp
+    if not helpWin or not H.content then return end
+    local descriptions = HELP_TEXT[EffectiveLocale()] or HELP_TEXT.enUS
+    local y = 0
+    for i = 1, #HELP_COMMANDS do
+        local cmd, desc = H.cmd[i], helpWin.__descRows[i]
+        desc:SetText(descriptions[i] or "")
+        local descH = OptTextHeight(desc, 26)
+        local labH = OptTextHeight(cmd, 14)
+        local rowH = (descH > labH) and descH or labH
+        if cmd.ClearAllPoints then cmd:ClearAllPoints() end
+        cmd:SetPoint("TOPLEFT", H.content, "TOPLEFT", 0, y)
+        if desc.ClearAllPoints then desc:ClearAllPoints() end
+        desc:SetPoint("TOPLEFT", H.content, "TOPLEFT", H.CMD_W + 7, y)
+        y = y - rowH - 7
+    end
+    H.content:SetSize(H.CMD_W + H.DESC_W + 7, -y + 2)
+    -- Потолок высоты — экран, а не константа: на 1366x768 окно в 600 px уже
+    -- перекрывает пол-экрана, и кнопка закрытия уезжает под курсор.
+    local cap = 600
+    local okH, screenH = pcall(function() return UIParent:GetHeight() end)
+    if okH and type(screenH) == "number" and screenH > 0 then
+        local s = math.floor(screenH * 0.8)
+        if s < cap then cap = s end
+    end
+    local needH = -y + 44 + 20
+    local h = (needH < cap) and needH or cap
+    if h < 240 then h = 240 end
+    helpWin:SetSize(670, h)
+end
+
 local function ShowHelpWindow()
     if not helpWin then
         helpWin = CreateFrame("Frame", "NearbySpyHelpWindow", UIParent)
@@ -5513,28 +5561,34 @@ local function ShowHelpWindow()
             label:SetText("X")
             btn:SetScript("OnClick", function() helpWin:Hide() end)
         end
-        local descRows = {}
+        -- Скролл, как в окне игроков: тот же шаблон, та же защита pcall (в этом
+        -- клиенте шаблон может быть вырезан — тогда обычный ScrollFrame).
+        local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, helpWin, "UIPanelScrollFrameTemplate")
+        if not okSf or not sf then sf = CreateFrame("ScrollFrame", nil, helpWin) end
+        sf:SetPoint("TOPLEFT", 16, -44)
+        sf:SetPoint("BOTTOMRIGHT", -34, 16)
+        NspHelp.scroll = sf
+        local content = CreateFrame("Frame", nil, sf)
+        content:SetSize(NspHelp.CMD_W + NspHelp.DESC_W + 7, 1)
+        sf:SetScrollChild(content)
+        NspHelp.content = content
+        local descRows, cmds = {}, {}
         helpWin.__descRows = descRows
+        NspHelp.cmd = cmds
         for i, command in ipairs(HELP_COMMANDS) do
-            local y = -49 - (i - 1) * 25
-            local cmd = NewText(helpWin, 12, 0.5, 1, 0.6)
-            cmd:SetPoint("TOPLEFT", 16, y)
-            cmd:SetWidth(155)
+            local cmd = NewText(content, 12, 0.5, 1, 0.6)
+            cmd:SetWidth(NspHelp.CMD_W)
             cmd:SetJustifyH("LEFT")
             cmd:SetText(command)
-            local desc = NewText(helpWin, 12, 0.9, 0.9, 0.9)
-            desc:SetPoint("TOPLEFT", 178, y)
-            desc:SetWidth(475)
+            cmds[i] = cmd
+            local desc = NewText(content, 12, 0.9, 0.9, 0.9)
+            desc:SetWidth(NspHelp.DESC_W)
             desc:SetJustifyH("LEFT")
             descRows[i] = desc
         end
     end
-    -- the settings language override may have changed since the window was
-    -- built — relabel on every show (EffectiveLocale: override > client > enUS)
-    local descriptions = HELP_TEXT[EffectiveLocale()] or HELP_TEXT.enUS
-    for i, desc in ipairs(helpWin.__descRows) do
-        desc:SetText(descriptions[i])
-    end
+    -- Тексты и раскладка — на каждый показ: язык мог смениться в настройках.
+    HelpLayout()
     helpWin:Show()
 end
 
