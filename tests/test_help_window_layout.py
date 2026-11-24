@@ -41,7 +41,26 @@ function CreateFrame(kind, name, parent, template)
         __kind = kind, __name = name, __parent = parent, __template = template,
         __points = {}, __children = {}, __scripts = {},
     }
-    f.SetSize = function(self, w, h) self.w, self.h = w, h end
+    -- Ребёнок знает о родителе: при смене размера родителя его анкоры обязаны
+    -- пересчитаться, как в клиенте. Без этого высота ScrollFrame оставалась от
+    -- ПЕРВОНАЧАЛЬНОГО размера окна, и прокрутка считалась не от того числа.
+    if parent then
+        parent.__children = parent.__children or {}
+        parent.__children[#parent.__children + 1] = f
+    end
+    local function relayout(child)
+        if child.__top and child.__bottom and child.h == nil then
+            -- только если высоту не задали явно
+        end
+        if child.__top and child.__bottom and child.__parent and child.__parent.h then
+            child.h = child.__parent.h - child.__top - child.__bottom
+        end
+    end
+    f.__relayout = relayout
+    f.SetSize = function(self, w, h)
+        self.w, self.h = w, h
+        for _, child in ipairs(self.__children or {}) do child.__relayout(child) end
+    end
     f.GetHeight = function(self) return self.h end
     f.GetWidth = function(self) return self.w end
     f.SetPoint = function(self, ...)
@@ -248,13 +267,24 @@ class HelpWindowLayoutTests(unittest.TestCase):
                            "высота окна не связана с содержимым")
 
     def test_small_screen_caps_the_window_instead_of_clipping(self):
-        # На 1366x768 окно в 600 px перекрывало бы пол-экрана; потолок считается
-        # от экрана, а остальное отдаётся скроллу.
-        _, g = self.build(screen_h=768)
+        # На маленьком экране окно не может расти бесконечно: потолок считается
+        # от экрана, а остальное обязано прокручиваться. После чистки справки
+        # (16 команд вместо 22) на обычном экране прокрутки уже нет — поэтому
+        # тесный экран берётся явно, иначе проверка ничего не проверяет.
+        _, g = self.build(screen_h=300)
         win = g["TestWin"]()
-        self.assertLessEqual(win["h"], int(768 * 0.8))
+        self.assertLessEqual(win["h"], int(420 * 0.8))
         self.assertGreater(self.content_height(g), win["h"] - 60,
                            "на маленьком экране содержимое должно прокручиваться, а не обрезаться молча")
+
+    def test_full_content_fits_without_scrolling_on_a_normal_screen(self):
+        # Смысл чистки: на обычном экране все 16 строк видны сразу, крутить
+        # нечего. Если снова добавят десяток диагностических строк — тест
+        # напомнит, что справка опять перестала влезать.
+        _, g = self.build(screen_h=1080)
+        win = g["TestWin"]()
+        self.assertLessEqual(self.content_height(g), win["h"] - 60,
+                             "справка снова не влезает целиком — пора чистить список команд")
 
     # --- язык -----------------------------------------------------------
     def test_language_switch_rebuilds_texts_and_layout(self):
@@ -290,7 +320,7 @@ class HelpWindowLayoutTests(unittest.TestCase):
         self.assertIn("OnMouseWheel", dict(handlers), "на холсте нет обработчика колеса")
 
     def test_wheel_scrolls_down_and_up_within_the_range(self):
-        lua, g = self.build(screen_h=768)   # тесный экран: содержимое выше окна
+        lua, g = self.build(screen_h=300)   # совсем тесный экран: нужно несколько щелчков
         sf = g["TestHelp"]["scroll"]
         range_ = lua.eval("function() return NspHelp.scroll:GetVerticalScrollRange() end")()
         self.assertGreater(range_, 0, "на тесном экране прокрутка обязана быть ненулевой")
@@ -302,13 +332,13 @@ class HelpWindowLayoutTests(unittest.TestCase):
         self.assertEqual(0, sf["__vscroll"])
 
     def test_wheel_never_scrolls_below_zero(self):
-        lua, g = self.build(screen_h=768)
+        lua, g = self.build(screen_h=300)
         lua.eval("function() NspHelpScrollBy(-5) end")()
         self.assertEqual(0, g["TestHelp"]["scroll"]["__vscroll"],
                          "прокрутка ушла в отрицательные значения — верх окна станет пустым")
 
     def test_wheel_never_scrolls_past_the_end(self):
-        lua, g = self.build(screen_h=768)
+        lua, g = self.build(screen_h=300)
         range_ = lua.eval("function() return NspHelp.scroll:GetVerticalScrollRange() end")()
         for _ in range(50):
             lua.eval("function() NspHelpScrollBy(1) end")()
@@ -316,7 +346,7 @@ class HelpWindowLayoutTests(unittest.TestCase):
                          "прокрутка ушла за конец содержимого")
 
     def test_reopening_starts_from_the_first_row(self):
-        lua, g = self.build(screen_h=768)
+        lua, g = self.build(screen_h=300)
         lua.eval("function() NspHelpScrollBy(1) end")()
         self.assertGreater(g["TestHelp"]["scroll"]["__vscroll"], 0)
         g["TestShow"]()
