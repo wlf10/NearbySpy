@@ -1,5 +1,5 @@
 --[[
-    NearbySpy 1.6.3
+    NearbySpy 1.6.4
     Records players near you into SavedVariables (NearbySpy.lua).
 
     Data sources — passive, main mode (no user action required):
@@ -979,29 +979,21 @@ end
 -- чанк стоит у потолка Lua 5.1 в 200 top-level locals, поэтому здесь только
 -- глобальные функции. Обе объявлены глобальными намеренно.
 
--- Новая запись в позиционной схеме. Все слоты заполняются сразу (`false` вместо
--- nil): дырка в array-части ломает и `#`, и запись SavedVariables.
--- `key` в записи НЕ хранится с v3: он совпадал с ключом таблицы в 100% живых
--- записей (55 768 из 55 768), а Inspect получает ключ аргументом
--- (J.Request(unit, key) → pending.key) и поле записи не читает вовсе.
--- `classLoc` тоже не хранится: ClassDisplayName выводит локализованное имя из
--- файлового ключа класса (ClassLocFromFile), поэтому слот дублировал `class`.
+-- Новая запись в позиционной схеме v4 (16 слотов). Все слоты заполняются сразу
+-- (`false` вместо nil): дырка в array-части ломает и `#`, и запись SavedVariables.
+--
+-- v4 держит 16 слотов не случайно: array-часть таблицы в Lua 5.1 выделяется под
+-- степень двойки, поэтому 17–32 слота занимают одинаково (замер на 53 570
+-- записях: 21 слот = 30.43 МБ, 16 = 17.35 МБ). Отсюда упаковка:
+--   class + faction + source → слот cfs (маска), peerNew + peerForeign → peerFlags;
+--   x, y удалены — это была позиция наблюдателя, приёмники её не читали.
+-- Наружу поля отдаёт метатаблица, поэтому `p.class` и `p.source` не изменились.
 function NspNewPlayerRec(key, data, observed, nowT)
     local peer = (data.source == "peer")
     local place = observed or peer
-    -- Round4 — local главного чанка: в вырезанном тестовом блоке его нет, и
-    -- обращение к нему стало бы nil-глобалом. Фолбэк с той же формулой ценой
-    -- одной проверки; в проде всегда берётся настоящая Round4.
-    local round = Round4
-    if not round then
-        round = function(v)
-            if type(v) ~= "number" then return nil end
-            return math.floor(v * 10000 + 0.5) / 10000
-        end
-    end
     local rec = {
         data.name or false,                                     -- 1  name
-        data.class or false,                                    -- 2  class
+        0,                                                      -- 2  cfs (маска)
         data.level or false,                                    -- 3  level
         data.realm or false,                                    -- 4  realm
         (place and data.zone) or false,                         -- 5  zone
@@ -1009,20 +1001,22 @@ function NspNewPlayerRec(key, data, observed, nowT)
         observed and nowT or 0,                                 -- 7  lastSeen
         observed and nowT or 0,                                 -- 8  firstSeen
         observed and 1 or 0,                                    -- 9  count
-        (place and data.x and round(data.x)) or false,           -- 10 x
-        (place and data.y and round(data.y)) or false,           -- 11 y
-        data.source or false,                                   -- 12 source
-        data.race or false,                                     -- 13 race
-        data.faction or false,                                  -- 14 faction
-        data.guid or false,                                     -- 15 guid
-        peer and nowT or false,                                 -- 16 peerAt
-        peer or false,                                          -- 17 peerNew
-        data.peerRealm or false,                                -- 18 peerRealm
-        data.peerForeign or false,                              -- 19 peerForeign
-        data.peerFrom or false,                                 -- 20 peerFrom
-        false,                                                  -- 21 gear
+        data.race or false,                                     -- 10 race
+        data.guid or false,                                     -- 11 guid
+        peer and nowT or false,                                 -- 12 peerAt
+        0,                                                      -- 13 peerFlags
+        data.peerRealm or false,                                -- 14 peerRealm
+        data.peerFrom or false,                                 -- 15 peerFrom
+        false,                                                  -- 16 gear
     }
-    return setmetatable(rec, NSP_REC.MT)
+    setmetatable(rec, NSP_REC.MT)
+    -- маски заполняем через метатаблицу: она знает коды и не затирает соседей
+    rec.class = data.class
+    rec.faction = data.faction
+    rec.source = data.source
+    rec.peerNew = peer or nil
+    rec.peerForeign = data.peerForeign
+    return rec
 end
 
 -- Приведение базы к позиционной схеме.
@@ -1032,43 +1026,41 @@ end
 -- при КАЖДОЙ загрузке, даже когда db.recSchema уже равен текущей версии — он
 -- навешивает метатаблицу и добивает недостающие слоты.
 --
--- Схем три, и все три обязаны читаться:
+-- Схем четыре, и все обязаны читаться:
 --   hash (совсем старые файлы) — поля по именам, позиций нет;
---   v2 (recSchema=2)           — 23 слота, включая classLoc и key;
---   v3 (recSchema=3, текущая)  — 21 слот без них.
+--   v2 (recSchema=2)           — 23 слота, с classLoc и key;
+--   v3 (recSchema=3)           — 21 слот, без них;
+--   v4 (recSchema=4, текущая)  — 16 слотов, class/faction/source в маске cfs,
+--                                peerNew/peerForeign в peerFlags, x/y удалены.
 -- Таблицу нельзя подменить прямо в pairs(), поэтому ключи собираются заранее.
 --
--- Список полей и числовые слоты живут в NSP_REC (NSP_REC.V3_FIELDS/NUMERIC):
--- этот чанк стоит у потолка Lua 5.1 в 200 top-level locals, и два новых local
--- здесь могли бы выбить именно его — с падением «too many local variables»
--- при загрузке аддона, то есть аддон просто не появился бы.
+-- Список полей и числовые слоты живут в NSP_REC (NSP_REC.FIELDS/NUMERIC): этот
+-- чанк стоит у потолка Lua 5.1 в 200 top-level locals, и лишние local'ы могли бы
+-- выбить именно его — с падением «too many local variables» при загрузке, то есть
+-- аддон просто не появился бы.
 function NspMigrateRecords(db)
     if type(db) ~= "table" or type(db.players) ~= "table" then return 0, 0 end
     local SLOTS = NSP_REC.SLOTS
-    local FIELDS = NSP_REC.V3_FIELDS
+    local FIELDS = NSP_REC.FIELDS
     local NUMERIC = NSP_REC.NUMERIC
     local attached, converted = 0, 0
-    -- Файл без метки recSchema — это либо hash, либо v2; различает IsPositional.
+    -- Файл без метки recSchema — это hash либо v2; различает IsPositional.
     local fromSchema = tonumber(db.recSchema) or 2
-    local todoHash, todoV2 = nil, nil
+    local todoHash, todoOld = nil, nil
     for k, p in pairs(db.players) do
         if type(p) == "table" then
             if not NSP_REC.IsPositional(p) then
                 todoHash = todoHash or {}
                 todoHash[#todoHash + 1] = k
-            elseif fromSchema < NSP_REC.SCHEMA
-                and (rawget(p, NSP_REC.V2.key) ~= nil or rawget(p, NSP_REC.V2.gear) ~= nil) then
-                -- v2: на месте слот key (22) или gear (23). Смотрим ДЛИНУ, а не
-                -- только метку: файл без recSchema — это v2, а «добить до SLOTS»
-                -- старый код мог и не успеть, поэтому полнота 23 слотов не
-                -- гарантирована. Проверять только 23-й нельзя: v2-запись без
-                -- снимка экипировки короче, и её разложило бы по v3-индексам —
-                -- поля после level поехали бы молча.
-                todoV2 = todoV2 or {}
-                todoV2[#todoV2 + 1] = k
+            elseif fromSchema < NSP_REC.SCHEMA then
+                -- метка версии младше текущей: записи ещё в прежней раскладке.
+                -- Длину записи здесь не проверяем — её определяет SourceLayout,
+                -- потому что короткая v2 (без снимка экипировки) короче v3.
+                todoOld = todoOld or {}
+                todoOld[#todoOld + 1] = k
             else
-                -- добить недостающие слоты (база, сохранённая старой версией
-                -- раскладки с меньшим числом полей) и навесить метатаблицу
+                -- добить недостающие слоты (база, сохранённая версией с меньшим
+                -- числом полей) и навесить метатаблицу
                 for i = 1, SLOTS do
                     if rawget(p, i) == nil then rawset(p, i, false) end
                 end
@@ -1080,11 +1072,28 @@ function NspMigrateRecords(db)
         end
     end
 
-    -- Пересборка одной записи по именам полей: srcIndex — откуда взять позицию
-    -- поля в источнике (nil для hash-схемы, NSP_REC.V2 для v2).
+    -- Раскладка источника: v2 (23), v3 (21). Определяем по длине записи, а не
+    -- только по метке: файл без recSchema — это v2, а короткая v2-запись (без
+    -- снимка экипировки) не должна разложиться по v3 — иначе поля после level
+    -- поедут молча.
+    local function SourceLayout(p)
+        local n = #p
+        if n >= 23 or rawget(p, NSP_REC.V2.key) ~= nil then return NSP_REC.V2 end
+        return NSP_REC.V3
+    end
+
+    -- Пересборка одной записи по именам полей.
+    -- srcIndex — таблица «имя поля -> позиция» в источнике (nil для hash-схемы).
+    -- Поле, у которого в v4 нет своего слота (class/faction/source/peerNew/
+    -- peerForeign), пишется по имени — метатаблица кладёт его в маску.
     local function Rebuild(src, srcIndex)
         local rec = {}
         for i = 1, SLOTS do rec[i] = false end
+        -- маски начинаются с нуля: иначе первое же присваивание в пустую
+        -- array-ячейку дало бы nil и метатаблица упала бы на арифметике
+        rec[NSP_REC.cfs] = 0
+        rec[NSP_REC.peerFlags] = 0
+        setmetatable(rec, NSP_REC.MT)
         for _, f in ipairs(FIELDS) do
             local v
             if srcIndex then
@@ -1093,12 +1102,25 @@ function NspMigrateRecords(db)
             else
                 v = src[f]
             end
-            if v == nil then
-                v = NUMERIC[f] and 0 or false
+            if v == nil or v == false then
+                v = NUMERIC[f] and 0 or nil
             end
-            rec[NSP_REC[f]] = v
+            local slot = NSP_REC[f]
+            if slot then
+                -- ⚠️ НЕ `(v == nil) and false or v`: в Lua `false or nil` = nil,
+                -- поэтому такая идиома записывает в слот nil вместо false и рвёт
+                -- array-часть (проверено: 10 слотов из 16 оказывались nil).
+                if v == nil then
+                    rec[slot] = false
+                else
+                    rec[slot] = v
+                end
+            else
+                -- поле из маски: nil очищает биты, значение — ставит код
+                rec[f] = v
+            end
         end
-        return setmetatable(rec, NSP_REC.MT)
+        return rec
     end
 
     if todoHash then
@@ -1107,11 +1129,11 @@ function NspMigrateRecords(db)
             converted = converted + 1
         end
     end
-    if todoV2 then
-        for _, k in ipairs(todoV2) do
-            -- classLoc и key из v2 НЕ переносятся: они выводимы (ClassLocFromFile,
-            -- ключ таблицы). Ради этого схема и менялась.
-            db.players[k] = Rebuild(db.players[k], NSP_REC.V2)
+    if todoOld then
+        for _, k in ipairs(todoOld) do
+            -- classLoc и key из v2, x/y из v3 НЕ переносятся: первые два
+            -- выводимы, координаты были позицией наблюдателя и не читались.
+            db.players[k] = Rebuild(db.players[k], SourceLayout(db.players[k]))
             converted = converted + 1
         end
     end
@@ -1187,10 +1209,9 @@ local function UpsertPlayer(db, data)
         -- test_peer_place_does_not_overwrite_our_own_sighting.
         if data.zone and data.source ~= "peer" then entry.zone = data.zone end
         if data.zoneId and data.source ~= "peer" then entry.zoneId = data.zoneId end
-        if data.x and data.source ~= "peer" then
-            entry.x = Round4(data.x)
-            entry.y = Round4(data.y)
-        end
+        -- x/y больше не храним (v4): это была позиция НАБЛЮДАТЕЛЯ, а не цели,
+        -- и приёмники её не читали. Слоты убраны ради перехода в блок на 16
+        -- ячеек — именно он даёт −13 МБ памяти клиента.
     end
     -- Journal (1.5.7): a known player seen again is an encounter too, but only
     -- our own sighting counts (peer rows also carry observe=true).
@@ -1243,10 +1264,6 @@ local function UpsertPlayer(db, data)
         else
             if not entry.zone and data.zone then entry.zone = data.zone end
             if not entry.zoneId and data.zoneId then entry.zoneId = data.zoneId end
-        end
-        if not entry.x and data.x then
-            entry.x = Round4(data.x)
-            entry.y = Round4(data.y)
         end
     end
     -- Обновление для канала: /who (или другая наша встреча) показала знакомого

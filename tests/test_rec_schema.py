@@ -108,7 +108,10 @@ class RecSchemaTests(unittest.TestCase):
         self.assertTrue(self.get(rec, "peerNew"))
         self.assertTrue(self.get(rec, "peerForeign"))
         self.assertEqual(self.get(rec, "peerFrom"), "Sender")
-        self.assertAlmostEqual(float(self.get(rec, "x")), 0.1235, places=4)
+        # x/y удалены в v4: это была позиция НАБЛЮДАТЕЛЯ, а не цели, и
+        # приёмники её не читали. Поле обязано читаться как nil, а не false.
+        self.assertIsNone(self.get(rec, "x"))
+        self.assertIsNone(self.get(rec, "y"))
 
     def test_profile_only_has_no_place(self):
         # observe=false (ростер гильдии): места нет, встреча не засчитана
@@ -168,7 +171,7 @@ class RecSchemaTests(unittest.TestCase):
         # classLoc и key в v3 не переносятся — они выводимы
         self.assertIsNone(self.get(rec, "key"))
         self.assertIsNone(self.get(rec, "classLoc"))
-        self.assertEqual(int(db["recSchema"]), 3)
+        self.assertEqual(int(db["recSchema"]), 4)
 
     def test_migration_is_idempotent(self):
         db = self.lua.table()
@@ -203,8 +206,8 @@ class RecSchemaTests(unittest.TestCase):
         self.migrate(db)
         self.assertEqual(self.lua.eval('(function(d) return d.players["A-Realm"].class end)')(db), "MAGE")
 
-    def test_v2_record_migrates_to_v3_layout(self):
-        """Запись v2 (23 слота) переезжает в v3 (21) без сдвига полей.
+    def test_v2_record_migrates_to_v4_layout(self):
+        """Запись v2 (23 слота) переезжает в v4 (16) без сдвига полей.
 
         Ровно здесь ломается тихо: если переложить по индексам v2, но объявить
         v3, то level окажется на месте realm и вся запись поедет — без ошибки.
@@ -230,8 +233,9 @@ class RecSchemaTests(unittest.TestCase):
         self.assertEqual(int(self.get(rec, "lastSeen")), 900)
         self.assertEqual(int(self.get(rec, "firstSeen")), 800)
         self.assertEqual(int(self.get(rec, "count")), 3)
-        self.assertAlmostEqual(float(self.get(rec, "x")), 0.5, places=4)
-        self.assertAlmostEqual(float(self.get(rec, "y")), 0.25, places=4)
+        # x/y в v2 лежали в слотах 11/12 — в v4 они не переносятся
+        self.assertIsNone(self.get(rec, "x"))
+        self.assertIsNone(self.get(rec, "y"))
         self.assertEqual(self.get(rec, "source"), "unit")
         self.assertEqual(self.get(rec, "race"), "Human")
         self.assertEqual(self.get(rec, "faction"), "Alliance")
@@ -241,8 +245,8 @@ class RecSchemaTests(unittest.TestCase):
         self.assertIsNone(self.get(rec, "key"))
         self.assertIsNone(self.get(rec, "gear"))
         length = int(self.lua.eval("(function(r) return #r end)")(rec))
-        self.assertEqual(length, 21, "длина записи не равна SLOTS новой схемы")
-        self.assertEqual(int(db["recSchema"]), 3)
+        self.assertEqual(length, 16, "длина записи не равна SLOTS новой схемы")
+        self.assertEqual(int(db["recSchema"]), 4)
 
     def test_v3_record_without_schema_marker_is_not_reindexed(self):
         """Запись v3 без метки recSchema не должна переезжать по индексам v2.
@@ -257,12 +261,70 @@ class RecSchemaTests(unittest.TestCase):
             900, 800, 1, 0.5, 0.5, "unit", "Human", "Alliance",
             "P-1", False, False, False, False, False, False,
         ])
-        # recSchema отсутствует — как будто метку потеряли
+        # метку потеряли: recSchema нет, но запись 21 слот (v3) —
+        # SourceLayout обязан распознать её по длине и не разложить по v2
         self.migrate(db)
         rec = db["players"]["A-Realm"]
         self.assertEqual(int(self.get(rec, "level")), 30, "level уехал на чужой слот")
         self.assertEqual(self.get(rec, "realm"), "Realm")
         self.assertEqual(int(self.get(rec, "zoneId")), 1429)
+
+    # -- маски v4 ----------------------------------------------------------
+    def test_class_faction_source_share_one_slot(self):
+        """Три поля в одной маске: запись одного не стирает соседей.
+
+        Именно здесь была ошибка при разработке: коды писались, но чтение
+        возвращало nil, потому что CLASS_NAME заполнялась наоборот
+        (pairs отдаёт ключ первым). Тест держит оба направления.
+        """
+        rec = self.make({"key": "A-Realm", "name": "A", "source": "unit"})
+        self.lua.eval('(function(r) r.class = "MAGE"; r.faction = "Horde"; r.source = "who" end)')(rec)
+        # значения разложились по битам одного слота
+        raw = int(self.lua.eval('(function(r) return rawget(r, NSP_REC.cfs) end)')(rec))
+        # class=7 (MAGE), faction=2<<4=32, source=2<<6=128 → 167
+        self.assertEqual(raw, 7 + 32 + 128, f"маска собрана неверно: {raw}")
+        # и читаются обратно по именам
+        self.assertEqual(self.get(rec, "class"), "MAGE")
+        self.assertEqual(self.get(rec, "faction"), "Horde")
+        self.assertEqual(self.get(rec, "source"), "who")
+
+    def test_unset_mask_field_reads_as_nil(self):
+        rec = self.make({"key": "A-Realm", "name": "A"})
+        for field in ("class", "faction", "source", "peerNew", "peerForeign"):
+            self.assertIsNone(self.get(rec, field), f"{field}: код 0 обязан читаться как nil")
+
+    def test_unknown_class_does_not_become_another_class(self):
+        """Класс вне таблицы кодов не должен читаться как чужой.
+
+        Появится новый класс на сервере — код 0 («нет данных») честнее, чем
+        попадание в чужую ячейку через арифметику.
+        """
+        rec = self.lua.eval('(function() local r = NspNewPlayerRec("X-R", '
+                            '{name="X", class="EVOKER", source="unit"}, true, 1000) '
+                            'return r end)')()
+        self.assertIsNone(self.get(rec, "class"))
+        self.assertEqual(int(self.lua.eval('(function(r) return rawget(r, NSP_REC.cfs) % 16 end)')(rec)), 0)
+
+    def test_peer_flags_pack_both_bits(self):
+        """peerNew и peerForeign в одной маске: второй не стирает первый.
+
+        Ошибка при разработке: запись peerForeign обнуляла младший бит, и
+        peerNew терялся (в файле оставалось 2 вместо 3).
+        """
+        rec = self.lua.eval('(function() return NspNewPlayerRec("P-R", '
+                            '{name="P", source="peer", peerForeign=true}, true, 1000) end)')()
+        raw = int(self.lua.eval('(function(r) return rawget(r, NSP_REC.peerFlags) end)')(rec))
+        self.assertEqual(raw, 3, f"обе галочки должны дать 3, получили {raw}")
+        self.assertTrue(self.get(rec, "peerNew"))
+        self.assertTrue(self.get(rec, "peerForeign"))
+
+    def test_peer_new_alone_keeps_foreign_clear(self):
+        rec = self.lua.eval('(function() return NspNewPlayerRec("P-R", '
+                            '{name="P", source="peer"}, true, 1000) end)')()
+        raw = int(self.lua.eval('(function(r) return rawget(r, NSP_REC.peerFlags) end)')(rec))
+        self.assertEqual(raw, 1)
+        self.assertTrue(self.get(rec, "peerNew"))
+        self.assertIsNone(self.get(rec, "peerForeign"))
 
     def test_short_array_is_padded(self):
         # база, сохранённая версией с меньшим числом слотов
@@ -343,7 +405,7 @@ class GetDBOrderTests(unittest.TestCase):
         name = self.lua.eval('(function(d) return d.players["Old-Realm"].name end)')(db)
         self.assertEqual(name, "Old")
         schema = int(self.lua.eval("(function(d) return d.recSchema end)")(db))
-        self.assertEqual(schema, 3)
+        self.assertEqual(schema, 4)
 
 
 if __name__ == "__main__":

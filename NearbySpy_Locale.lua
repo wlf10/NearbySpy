@@ -107,10 +107,24 @@ NSP_CONST = {
 --
 -- Записи v2 (23 слота) читаются миграцией NspMigrateRecords: раскладка ниже
 -- сохранена в NSP_REC.V2 именно для неё.
+-- v4 (2026-11-24): 16 слотов. Память клиента падает не от каждого снятого
+-- поля, а только при переходе через границу блока: array-часть таблицы в
+-- Lua 5.1 выделяется под ближайшую степень двойки, поэтому 17–32 слота
+-- занимают одинаково. Замер на 53 570 записях (tests/bench_record_memory.py):
+--   23 слота → 30.43 МБ, 21 → 30.43 МБ, 16 → 17.35 МБ, 33 → 56.58 МБ.
+-- Отсюда пакет ровно до 16:
+--   class + faction + source → одно число-маска cfs (4 + 2 + 3 бита);
+--   peerNew + peerForeign   → одно число-маска peerFlags (2 бита);
+--   x, y                    → УДАЛЕНЫ: это была позиция НАБЛЮДАТЕЛЯ, а не
+--     цели (PlayerXY() = GetPlayerMapPosition(mapID, "player")), и приёмники
+--     их не читали вовсе — в Player struct нет полей X/Y, в таблице players
+--     нет таких колонок. Мёртвый вес на 0.42 МБ.
+-- Наружу поля отдаются как раньше: распаковку делает метатаблица, поэтому
+-- `p.class`, `p.faction`, `p.source`, `p.peerNew` в остальном коде не меняются.
 NSP_REC = {
     -- индексы слотов: имя поля -> позиция
     name = 1,
-    class = 2,
+    cfs = 2,          -- маска: class | faction<<4 | source<<6
     level = 3,
     realm = 4,
     zone = 5,
@@ -118,23 +132,46 @@ NSP_REC = {
     lastSeen = 7,
     firstSeen = 8,
     count = 9,
-    x = 10,
-    y = 11,
-    source = 12,
-    race = 13,
-    faction = 14,
-    guid = 15,
-    peerAt = 16,
-    peerNew = 17,
-    peerRealm = 18,
-    peerForeign = 19,
-    peerFrom = 20,
-    gear = 21,
+    race = 10,
+    guid = 11,
+    peerAt = 12,
+    peerFlags = 13,   -- маска: peerNew(1) | peerForeign(2)
+    peerRealm = 14,
+    peerFrom = 15,
+    gear = 16,
+    SLOTS = 16,
+    -- Версия раскладки в SavedVariables (db.recSchema).
+    -- 2 = позиционная с classLoc/key, 3 = без них, 4 = 16 слотов с масками.
+    SCHEMA = 4,
+}
+
+-- Коды перечислений. Порядок НЕ менять: коды записаны в файлах игроков.
+-- Незнакомое значение кодируется как 0 («нет данных») — выдумывать код для
+-- новой расы/класса нельзя, иначе приёмник прочтёт её как чужую.
+NSP_REC.CLASS_CODE = {
+    WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5,
+    SHAMAN = 6, MAGE = 7, WARLOCK = 8, DRUID = 9,
+}
+NSP_REC.CLASS_NAME = {}
+-- pairs отдаёт (ключ, значение): ключ здесь ИМЯ класса, значение — код.
+-- Перепутать местами легко, и тогда CLASS_NAME[7] = nil, то есть поле читается
+-- пустым при том, что в файл пишется правильный код.
+for name, code in pairs(NSP_REC.CLASS_CODE) do NSP_REC.CLASS_NAME[code] = name end
+
+NSP_REC.FACTION_CODE = {Alliance = 1, Horde = 2}
+NSP_REC.FACTION_NAME = {[1] = "Alliance", [2] = "Horde"}
+
+NSP_REC.SOURCE_CODE = {unit = 1, who = 2, chat = 3, peer = 4, guild = 5}
+NSP_REC.SOURCE_NAME = {}
+for name, code in pairs(NSP_REC.SOURCE_CODE) do NSP_REC.SOURCE_NAME[code] = name end
+
+-- Раскладка v3 (21 слот): для миграции файлов, сохранённых аддоном 1.6.3.
+NSP_REC.V3 = {
+    name = 1, class = 2, level = 3, realm = 4, zone = 5, zoneId = 6,
+    lastSeen = 7, firstSeen = 8, count = 9, x = 10, y = 11, source = 12,
+    race = 13, faction = 14, guid = 15, peerAt = 16, peerNew = 17,
+    peerRealm = 18, peerForeign = 19, peerFrom = 20, gear = 21,
     SLOTS = 21,
-    -- Версия раскладки в SavedVariables (db.recSchema). 2 = позиционная с
-    -- classLoc и key, 3 = позиционная без них. Смена числа заставит пересобрать
-    -- записи при следующем входе.
-    SCHEMA = 3,
 }
 
 -- Раскладка v2: только для миграции уже сохранённых файлов (23 слота).
@@ -147,14 +184,18 @@ NSP_REC.V2 = {
     SLOTS = 23,
 }
 
--- Поля текущей раскладки в порядке слотов: по ним миграция пересобирает запись,
--- а позиции берёт из самого NSP_REC (единственный источник истины).
+-- Полный список ЛОГИЧЕСКИХ полей записи (не слотов): по нему миграция
+-- пересобирает запись из любой старой раскладки. У поля может быть свой слот
+-- (тогда позиция берётся из NSP_REC), а может не быть — class/faction/source
+-- живут в маске cfs, peerNew/peerForeign — в peerFlags. Миграция смотрит на
+-- NSP_REC[f]: есть слот — пишет туда, нет — пишет по имени, и это раскладывает
+-- метатаблица. Так список остаётся один и не разъезжается с раскладкой.
 -- Лежит здесь, а не local в NearbySpy.lua: тот чанк у потолка 200 top-level
 -- locals, и лишние local'ы валят загрузку аддона целиком.
-NSP_REC.V3_FIELDS = {
+NSP_REC.FIELDS = {
     "name", "class", "level", "realm", "zone", "zoneId", "lastSeen", "firstSeen",
-    "count", "x", "y", "source", "race", "faction", "guid", "peerAt", "peerNew",
-    "peerRealm", "peerForeign", "peerFrom", "gear",
+    "count", "race", "faction", "guid", "peerAt", "peerNew", "peerForeign",
+    "peerRealm", "peerFrom", "source", "gear",
 }
 
 -- Числовые слоты: nil превращается в 0, а не в false — иначе парсер сайта
@@ -162,8 +203,33 @@ NSP_REC.V3_FIELDS = {
 NSP_REC.NUMERIC = {lastSeen = true, firstSeen = true, count = true}
 
 -- Метатаблица записи: отдаёт полям их прежние имена.
+--
+-- С v4 три поля живут в одной маске (cfs), ещё два — во второй (peerFlags), а
+-- x/y не хранятся вовсе. Распаковка здесь, а не в вызывающем коде: `p.class` и
+-- `p.source` читаются в десятках мест аддона, и правка каждого была бы источником
+-- тихих опечаток. Поле, которого нет (x/y), отдаётся как nil — ровно как false.
 NSP_REC.MT = {
     __index = function(t, i)
+        if i == "class" or i == "faction" or i == "source" then
+            local m = rawget(t, NSP_REC.cfs)
+            if type(m) ~= "number" then return nil end
+            if i == "class" then
+                local code = m % 16
+                return code ~= 0 and NSP_REC.CLASS_NAME[code] or nil
+            elseif i == "faction" then
+                local code = math.floor(m / 16) % 4
+                return code ~= 0 and NSP_REC.FACTION_NAME[code] or nil
+            end
+            local code = math.floor(m / 64) % 8
+            return code ~= 0 and NSP_REC.SOURCE_NAME[code] or nil
+        elseif i == "peerNew" or i == "peerForeign" then
+            local m = rawget(t, NSP_REC.peerFlags)
+            if type(m) ~= "number" then return nil end
+            if i == "peerNew" then return (m % 2 == 1) or nil end
+            return (math.floor(m / 2) % 2 == 1) or nil
+        elseif i == "x" or i == "y" then
+            return nil   -- с v4 координаты наблюдателя не хранятся
+        end
         local n = NSP_REC[i]
         if not n then return nil end
         local v = rawget(t, n)
@@ -171,6 +237,43 @@ NSP_REC.MT = {
         return v
     end,
     __newindex = function(t, i, v)
+        -- Запись масок: три поля пишутся в один слот, не затирая соседей.
+        if i == "class" or i == "faction" or i == "source" then
+            local m = rawget(t, NSP_REC.cfs)
+            if type(m) ~= "number" then m = 0 end
+            local shift, bits
+            if i == "class" then shift, bits = 0, 16
+            elseif i == "faction" then shift, bits = 4, 4
+            else shift, bits = 6, 8 end
+            local code = 0
+            if v ~= nil and v ~= false then
+                if i == "class" then code = NSP_REC.CLASS_CODE[v] or 0
+                elseif i == "faction" then code = NSP_REC.FACTION_CODE[v] or 0
+                else code = NSP_REC.SOURCE_CODE[v] or 0 end
+            end
+            -- вычистить прежние биты и вписать новые
+            local div = 2 ^ shift
+            m = m - (math.floor(m / div) % bits) * div
+            rawset(t, NSP_REC.cfs, m + code * div)
+            return
+        end
+        if i == "peerNew" or i == "peerForeign" then
+            local m = rawget(t, NSP_REC.peerFlags)
+            if type(m) ~= "number" then m = 0 end
+            local bit = (v == true or v == 1) and 1 or 0
+            if i == "peerNew" then
+                -- младший бит: сохранить старшие, заменить младший
+                m = math.floor(m / 2) * 2 + bit
+            else
+                -- старший бит: сохранить младший, заменить старший
+                m = (m % 2) + bit * 2
+            end
+            rawset(t, NSP_REC.peerFlags, m)
+            return
+        end
+        if i == "x" or i == "y" then
+            return   -- координат больше нет; запись игнорируем, как неизвестное поле
+        end
         local n = NSP_REC[i]
         if not n then
             -- Неизвестное ИМЯ писать нельзя: в таблице появился бы именованный

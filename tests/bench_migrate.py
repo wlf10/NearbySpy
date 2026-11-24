@@ -62,7 +62,7 @@ check = lua.eval('''(function(d)
        .. "|" .. tostring(r.class) .. "|" .. tostring(#r)
 end)''')
 ok = check(lua.globals()["DB"])
-print(f"контроль:   {ok}  (ждём 30|CAMWOW EU5 Realm 1 PvE|1453|MAGE|21)")
+print(f"контроль:   {ok}  (ждём 30|CAMWOW EU5 Realm 1 PvE|1453|MAGE|16)")
 
 # второй прогон не должен ничего перекладывать
 t0 = time.perf_counter()
@@ -70,7 +70,7 @@ conv2, _ = migrate(lua.globals()["DB"])
 dt2 = time.perf_counter() - t0
 print(f"повторный:  {int(conv2)} переложено, {dt2 * 1000:.0f} мс (ждём 0)")
 
-if ok != "30|CAMWOW EU5 Realm 1 PvE|1453|MAGE|21":
+if ok != "30|CAMWOW EU5 Realm 1 PvE|1453|MAGE|16":
     sys.exit(1)
 if int(conv2) != 0:
     sys.exit(1)

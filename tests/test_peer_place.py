@@ -174,8 +174,11 @@ class PeerPlaceTests(unittest.TestCase):
         # ZoneNameById(1429) = "Goldshire Inn", поэтому ждём его, а не "Elwynn".
         self.assertEqual("Goldshire Inn", row["zone"])
         self.assertEqual(1429, row["zoneId"])
-        self.assertAlmostEqual(0.5231, row["x"], places=4)
-        self.assertAlmostEqual(0.7113, row["y"], places=4)
+        # Координаты из пакета (слоты 11/12) в v4 не сохраняются: это позиция
+        # НАБЛЮДАТЕЛЯ, а не цели, и приёмники её не читали. Пакет по-прежнему
+        # несёт x/y (валидация диапазона остаётся), но в запись они не идут.
+        self.assertIsNone(row["x"])
+        self.assertIsNone(row["y"])
 
     def recv(self, message):
         self.lua.globals()["TestReceive"](message, "Sender-Realm")
