@@ -1462,6 +1462,11 @@ PeerSync = function()
         askSkipped = peerStats.askSkipped or 0,
         askEmpty = peerStats.askEmpty or 0,
         askIn = peerStats.askIn or 0,
+        -- Ответы ЧУЖИМ nonce (и пакеты A1 без своего запроса). Отдельный
+        -- счётчик, потому что это и есть работа нового тега: посторонний
+        -- клиент такие пакеты выбрасывает, и в SV должно быть видно, что они
+        -- приходили, а не «в канале тишина».
+        askStray = peerStats.askStray or 0,
         askPending = (type(peerStats.askPending) == "table") and true or false,
     }
 end
@@ -1902,6 +1907,9 @@ QueuePeerNew = function(db, data)
     peerQueue[#peerQueue + 1] = {
         key = key, rec = rec, name = data.name, at = time(),
         game = db.game, realm = data.realm,
+        -- Ответ на запрос (Q1) уходит под своим тегом A1: «nonce» здесь —
+        -- единственное, что отличает адресный ответ от обычного вещания.
+        ans = data.answerNonce,
         -- Текстовая запись N4 для переходного режима PEER_PROTO == "N5":
         -- собирается здесь, а не при отправке, чтобы не тащить в очередь
         -- исходные поля ради редкого случая.
@@ -1975,6 +1983,9 @@ function PeerQueueGear(key, snapshot, opts)
         -- получателя без строки он уйдёт в orphan (живой SV 22.11.2026: 68
         -- пакетов, 68 orphan). Пока ключ встречи стоит в очереди, снапшот ждёт.
         afterKey = (type(opts) == "table" and opts.afterKey) or nil,
+        -- Ответ на запрос: снапшот тоже уходит под A1, иначе его запишут все
+        -- клиенты канала, а не только тот, кто просил.
+        ans = (type(opts) == "table" and opts.answerNonce) or nil,
     }
     D(("Peer gear queued: %s (%s, %d slots) q=%d"):format(
         PeerEsc(entry.name, 40), PeerEsc(db.game, 12), (snapshot.slots or tonumber(
@@ -2073,6 +2084,19 @@ function PeerDrainGear(db)
         table.remove(q, 1)
         peerStats.gearEmpty = (peerStats.gearEmpty or 0) + 1
         return false
+    end
+    -- Снапшот-ответ на запрос уходит под тегом A1: иначе его запишут ВСЕ
+    -- клиенты канала, хотя он адресован одному. Внутри — обычный G7, поэтому
+    -- приём переиспользует тот же разбор.
+    if q[1].ans then
+        payload = "A1;" .. tostring(q[1].ans) .. ";" .. payload
+        if #payload > PEER_PAYLOAD_MAX then
+            local big = table.remove(q, 1)
+            peerStats.gearEmpty = (peerStats.gearEmpty or 0) + 1
+            D(("Peer gear skipped: %s (answer wrapper over budget)")
+                :format(PeerEsc(big and big.name or "?", 40)))
+            return false
+        end
     end
     local ok, result = pcall(sender, payload, "CHANNEL", nil, channel)
     if NspNoteSendRet(db, ok, result, nowT) then
@@ -2280,14 +2304,37 @@ local function DrainPeerQueue()
     -- любом режиме — приём различает код и имя по длине.
     local headRealm = head.realm
     if PEER_PROTO ~= "N5" then headRealm = PeerRealmCode(head.realm) or head.realm end
+    -- ── Ответ на запрос — своим тегом A1 (24.11.2026) ───────────────────────
+    -- Владелец потребовал отдельный код протокола для ответов, и это
+    -- правильнее «рядового трафика»: ответ адресован ОДНОМУ запросившему, а
+    -- если он уходит как N7, его записывают ВСЕ клиенты канала — чужие базы
+    -- наполняются данными, которых никто не просил.
+    --   A1;nonce;<внутренний пакет, как есть>   →  A1;nonce;N7;f;realm;rec1,rec2
+    -- Клиент без поддержки A1 отбивает пакет на незнакомом протоколе; клиент с
+    -- поддержкой применяет его только при совпадении nonce со СВОИМ запросом.
+    -- Обёртка стоит ~10 байт, поэтому бюджет внутреннего пакета уменьшается —
+    -- иначе пачка вылезла бы за предел сообщения.
+    local headAns = head.ans
+    local wrapper = headAns and ("A1;" .. tostring(headAns) .. ";") or ""
+    local payloadMax = PEER_PAYLOAD_MAX - #wrapper
+    -- Заголовок "N6;game;realm;" входит в лимит сообщения, поэтому считается
+    -- сразу: без него пачка вылезала за PEER_PAYLOAD_MAX (живой прогон теста:
+    -- 252 байта при лимите 240).
+    -- Мир в заголовке — КОДОМ (20.11.2026): 1 байт вместо 22 у "CAMWOW EU4
+    -- Realm 6 PvP". В режиме N5 мир уходит ТЕКСТОМ: старый клиент код не
+    -- поймёт, а он для этого режима и нужен. Мир вне таблицы уходит текстом в
+    -- любом режиме — приём различает код и имя по длине.
     local headerLen = #PEER_PROTO + 1 + #headGame + 1 + #headRealm + 1
     local batch, batchLen = { head }, headerLen + #head.rec
     local i = 2
     while i <= #peerQueue and #batch < PEER_BATCH_MAX do
         local it = peerQueue[i]
         if it.game ~= head.game or it.realm ~= head.realm then break end
+        -- Ответы разных запросов в одну пачку не склеиваются: nonce — часть
+        -- обёртки, и второй nonce сделал бы пакет нечитаемым для получателя.
+        if it.ans ~= headAns then break end
         local add = 1 + #it.rec           -- разделитель + сама запись
-        if batchLen + add > PEER_PAYLOAD_MAX then break end
+        if batchLen + add > payloadMax then break end
         batch[#batch + 1] = it
         batchLen = batchLen + add
         i = i + 1
@@ -2307,6 +2354,8 @@ local function DrainPeerQueue()
         for k = 1, #batch do parts[k] = recFor(batch[k]) end
         payload = PEER_PROTO .. ";" .. gameForWire .. ";" .. headRealm .. ";" .. table.concat(parts, PEER_BATCH_SEP)
     end
+    -- Обёртка ответа (A1): снаружи чужой nonce, внутри — готовый обычный пакет.
+    if headAns then payload = wrapper .. payload end
 
     -- Последняя защита перед отправкой: сервер отклоняет сообщение с '|' как
     -- «Invalid escape code», и пакет с ним не уходит НИКОГДА (проверено в игре
@@ -2348,16 +2397,19 @@ local function DrainPeerQueue()
     PeerSync()
 end
 
--- ── Запрос базы у пиров: пакет Q1 (24.11.2026) ──────────────────────────────
+-- ── Запрос базы у пиров: пакеты Q1 (запрос) и A1 (ответ) — 24.11.2026 ──────
 -- Обмен был односторонним: N7 — встречи, G7 — экипировка и билд. Запроса
--- «пришли, что у тебя есть» в протоколе не было, поэтому добавлен ОДИН
--- управляющий пакет, а ответ приходит ОБЫЧНЫМИ N7/G7:
+-- «пришли, что у тебя есть» в протоколе не было, поэтому добавлены ДВА тега:
 --
---   запрос: Q1;game;realm;minutes;nonce        (~20 байт)
+--   запрос: Q1;game;realm;minutes;nonce          (~26 байт)
+--   ответ:  A1;nonce;<обычный пакет>             → A1;k3f;N7;f;realm;rec1,rec2
+--                                                 → A1;k3f;G7;f;realm;name;…
 --
--- Почему ответ обычными тегами: клиент, который Q1 не знает, ничего не теряет —
--- для него записи ответа это рядовой трафик канала, а не «неизвестный
--- протокол». Новый тег ответа сломал бы приём у всех, кто не обновился.
+-- Почему у ответа СВОЙ тег (требование владельца 24.11.2026): ответ адресован
+-- одному запросившему, а обычные N7/G7 записывают ВСЕ клиенты канала — чужие
+-- базы наполнялись бы данными, которых никто не просил. С тегом A1 посторонний
+-- клиент выбрасывает пакет (старый — на незнакомом протоколе, новый — на
+-- несовпадении nonce), а наш разбор переиспользует обычный код внутри обёртки.
 --
 -- Ответ ограничен не размером базы, а каналом: ~10 сообщений в минуту, значит
 -- верхушка по свежести (NSP_CONST.ASK_ROWS) плюс несколько снапшотов
@@ -2480,6 +2532,7 @@ function PeerAnswerDue(db)
                 PeerQueueGear(row.key, snap, {
                     force = true,
                     afterKey = db.game .. "|" .. row.key .. "|a" .. tostring(req.nonce),
+                    answerNonce = req.nonce,
                 })
                 local gAfter = type(peerStats.gearQueue) == "table"
                     and #peerStats.gearQueue or 0
@@ -2651,6 +2704,12 @@ local function ReceivePeerMessage(message, sender, fromBatch)
     -- (5 полей), поэтому проверяется ДО валидации числа полей у встреч.
     if fields[1] == "Q1" then
         return ReceivePeerAsk(fields, sender)
+    end
+
+    -- Ответ на запрос (A1, 24.11.2026) — тоже до проверки числа полей: снаружи
+    -- у него 3 поля, а записи внутри. Чужой ответ отбрасывается по nonce.
+    if fields[1] == "A1" then
+        return ReceivePeerAnswer(message, sender)
     end
 
     -- Признак пачки — разделитель PEER_BATCH_SEP (запятая). Он ЗАПРЕЩЁН в
@@ -2902,17 +2961,65 @@ local function ReceivePeerMessage(message, sender, fromBatch)
         -- the channel is alive: source="peer" never appears for those rows.
         peerStats.merged = peerStats.merged + 1
     end
-    -- Ответ на НАШ запрос (Q1, 24.11.2026): тега у ответа нет намеренно — это
-    -- обычные записи N7, — поэтому «сколько пришло по запросу» считается по
-    -- времени: окно открывается в момент постановки запроса в очередь.
-    if peerStats.askWindowUntil and nowT <= peerStats.askWindowUntil then
-        peerStats.askIn = (peerStats.askIn or 0) + 1
-    end
+    -- Ответ на НАШ запрос приходит под тегом A1 и обрабатывается в
+    -- ReceivePeerAnswer — здесь счётчика по времени больше нет: с обёрткой
+    -- принадлежность ответа определяется точно, по nonce.
     D(("Peer in: %s %s %d (%s) %s%s"):format(
         PeerEsc(name), PeerEsc(class, 20), level, PeerEsc(faction, 10),
         isNew and "new" or "merged",
         foreign and (" [realm=" .. PeerEsc(realm, 40) .. "]") or ""))
     PeerSync()
+end
+
+-- ── Ответ на запрос: пакет A1 (24.11.2026) ─────────────────────────────────
+--   A1;<nonce>;<внутренний пакет как есть>   →  A1;k3f;N7;f;realm;rec1,rec2
+--
+-- Зачем отдельный тег, а не обычный N7/G7 (требование владельца): ответ
+-- адресован ОДНОМУ запросившему, а N7 записывают ВСЕ клиенты канала — чужие
+-- базы наполнялись бы данными, которых никто не просил. С тегом A1:
+--   • клиент без поддержки отвечает «unknown protocol A1» и выбрасывает пакет;
+--   • клиент с поддержкой применяет его ТОЛЬКО при совпадении nonce со своим
+--     открытым запросом, иначе считает в askStray и выбрасывает.
+-- Внутри — готовый обычный пакет, поэтому разбор переиспользуется целиком:
+-- валидация, нормализация расы, правила провенанса и orphan-логика G7 уже
+-- написаны и не дублируются.
+function ReceivePeerAnswer(message, sender)
+    local db = GetDB()
+    local function Ignore(reason)
+        peerStats.askStray = (peerStats.askStray or 0) + 1
+        local tag = "answer:" .. reason
+        if peerStats.rejectLogged and not peerStats.rejectLogged[tag] then
+            peerStats.rejectLogged[tag] = true
+            D(("Peer answer ignored: %s (from %s)"):format(reason, PeerEsc(sender or "?", 40)))
+        end
+        PeerSync()
+    end
+    if type(db) ~= "table" or not db.peerEnabled then return Ignore("sharing disabled") end
+    -- Обёртка разбирается до общей проверки полей: у A1 снаружи три поля.
+    local nonce, inner = message:match("^A1;([^;]*);(.+)$")
+    if not nonce or not inner then return Ignore("bad wrapper") end
+    if not PeerField(nonce, 8) then return Ignore("bad nonce") end
+    -- ЧУЖОЙ ответ (или ответ на давно закрытый запрос) — выбрасываем. Это и
+    -- есть смысл отдельного тега: третий клиент канала не должен записывать
+    -- адресный ответ в свою базу.
+    if type(peerStats.askNonce) ~= "string" or peerStats.askNonce ~= nonce then
+        return Ignore("answer for another request")
+    end
+    if not peerStats.askWindowUntil or time() > peerStats.askWindowUntil then
+        peerStats.askNonce = nil
+        return Ignore("answer window closed")
+    end
+    -- Вложенность запрещена: A1 внутри A1 — это либо порча, либо попытка
+    -- обойти проверку nonce. Внутри допустимы только «обычные» пакеты.
+    if inner:sub(1, 2) == "A1" then return Ignore("nested answer") end
+    if not (inner:match("^N%d;") or inner:match("^G%d;")) then
+        return Ignore("bad inner packet")
+    end
+    peerStats.askIn = (peerStats.askIn or 0) + 1
+    PeerSync()
+    -- fromBatch = true: сообщение уже посчитано снаружи, второй раз seen не
+    -- увеличиваем (как и у записей внутри пачки).
+    return ReceivePeerMessage(inner, sender, true)
 end
 
 -- ── Приём снапшота экипировки/билда (пакет G7, 20.11.2026) ─────────────────
@@ -7669,11 +7776,11 @@ SlashCmdList["NEARBYSPY"] = function(msg)
         -- остаётся "peer" (чужое наблюдение не становится нашим).
         local arg = msg:match("^peer ask%s+(%S+)$")
         if arg == "status" then
-            P(("peer ask: sent=%d, requests_in=%d, answer_rows=%d, answer_gear=%d, skipped=%d, empty=%d, in=%d")
+            P(("peer ask: sent=%d, requests_in=%d, answer_rows=%d, answer_gear=%d, skipped=%d, empty=%d, in=%d, stray=%d")
                 :format(peerStats.askSent or 0, peerStats.askReqIn or 0,
                         peerStats.askQueued or 0, peerStats.askGearQueued or 0,
                         peerStats.askSkipped or 0, peerStats.askEmpty or 0,
-                        peerStats.askIn or 0))
+                        peerStats.askIn or 0, peerStats.askStray or 0))
             P(("peer ask: pending=%s, receive window=%s, last answer=%s")
                 :format(tostring(type(peerStats.askPending) == "table"),
                         (peerStats.askWindowUntil and peerStats.askWindowUntil > time())
