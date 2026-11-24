@@ -190,6 +190,88 @@ class RaceLocaleTest(unittest.TestCase):
         self.assertEqual(got, ["Mort-vivant", "Orc", "Tauren", "Troll"],
                          "состав очереди Horde (frFR): %s" % got)
 
+    # Реальный learn.whoName из SV на НЕМЕЦКОМ клиенте (24.11.2026): четыре расы
+    # уже пришли по-немецки, четыре остались русскими от прежних сессий —
+    # таблица накопительная и не чистится. whoName приоритетнее RACE_BY_LOCALE,
+    # поэтому без гейта по алфавиту на deDE в очередь уходили «Нежить»/«Таурен»,
+    # и сервер отвечал пустым списком ровно в плотных срезах.
+    LEARN_MIXED_WHO = """
+LEARN = {
+    whoName = {
+        NightElf = "Nachtelf", Scourge = "Нежить", Orc = "Орк",
+        Dwarf = "Zwerg", Tauren = "Таурен", Human = "Mensch",
+        Gnome = "Gnom", Troll = "Тролль",
+    },
+    raceLoc2File = {
+        ["Nachtelfe"] = "NightElf", ["Zwerg"] = "Dwarf", ["Mensch"] = "Human",
+        ["Gnom"] = "Gnome", ["Таурен"] = "Tauren", ["Нежить"] = "Scourge",
+    },
+}
+"""
+
+    def queue(self, learn_lua, loc, faction="Horde"):
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        chunk = (
+            PRELUDE + learn_lua + locale_block()
+            + '\nCURRENT_LOCALE = "%s"\n' % loc
+            + "local out = {}\n"
+            + "for n in pairs(RaceFilterNames({learn = LEARN}, '%s')) do out[#out+1] = n end\n" % faction
+            + "table.sort(out)\nreturn out\n"
+        )
+        return [str(x) for x in lua.execute(chunk).values()]
+
+    def test_mixed_who_name_does_not_leak_other_locale(self):
+        """whoName от чужой локали не должен перебивать таблицу текущей.
+
+        Живой замер: на deDE клиенте очередь рас была
+        ['Нежить', 'Орк', 'Таурен', 'Тролль'] — все четыре запроса заведомо
+        пустые, потому что сервер ждёт немецкое написание.
+        """
+        got = self.queue(self.LEARN_MIXED_WHO, "deDE")
+        self.assertEqual(got, ["Orc", "Tauren", "Troll", "Untoter"],
+                         "на deDE в очередь ушли имена чужой локали: %s" % got)
+        cyr = [n for n in got if any(0x400 <= ord(c) <= 0x4FF for c in n)]
+        self.assertEqual(cyr, [], "кириллица в очереди deDE: %s" % cyr)
+
+    def test_russian_client_keeps_who_canon(self):
+        """Обратная сторона: на ruRU русский whoName остаётся приоритетным."""
+        got = self.queue(self.LEARN_MIXED_WHO, "ruRU")
+        for ru in ("Нежить", "Орк", "Таурен", "Тролль"):
+            self.assertIn(ru, got, "потерян канон ruRU: %s" % got)
+
+    def test_english_client_does_not_take_german_names(self):
+        """Алфавит латинских локалей неразличим — нужна метка локали.
+
+        «Mensch»/«Zwerg» — обычный ASCII, поэтому алфавитного гейта мало:
+        на enUS в очередь уходили немецкие имена из общего SavedVariables.
+        """
+        got = self.queue(self.LEARN_MIXED_WHO, "enUS")
+        self.assertEqual(got, ["Orc", "Tauren", "Troll", "Undead"],
+                         "на enUS взяты имена другой локали: %s" % got)
+
+    # Написание, выученное именно на этом клиенте, помечается локалью и снова
+    # получает приоритет над таблицей: сервер мог назвать расу нестандартно.
+    LEARN_TAGGED = """
+LEARN = {
+    whoName = { Human = "Mensch", Scourge = "Untoter", Orc = "Orc",
+                Tauren = "Tauren", Troll = "Troll", Dwarf = "Zwerg",
+                NightElf = "Nachtelf", Gnome = "Gnom" },
+    whoNameLoc = { Human = "deDE", Scourge = "deDE", Orc = "deDE",
+                   Tauren = "deDE", Troll = "deDE", Dwarf = "deDE",
+                   NightElf = "deDE", Gnome = "deDE" },
+}
+"""
+
+    def test_learned_in_this_locale_wins(self):
+        """Метка совпала с клиентом — whoName снова приоритетнее таблицы."""
+        got = self.queue(self.LEARN_TAGGED, "deDE")
+        self.assertEqual(got, ["Orc", "Tauren", "Troll", "Untoter"], str(got))
+
+    def test_tagged_for_other_locale_is_ignored(self):
+        """Метка deDE, клиент enUS — берём таблицу, а не немецкое написание."""
+        got = self.queue(self.LEARN_TAGGED, "enUS")
+        self.assertEqual(got, ["Orc", "Tauren", "Troll", "Undead"], str(got))
+
     def test_ru_locale_excludes_english_names(self):
         """Главное: на русском клиенте в очередь скана не попадает латиница.
 

@@ -3421,6 +3421,12 @@ local RACE_LOCALE = {
     ["Elfe de la nuit"] = "NightElf",
     ["Mort-vivant"] = "Scourge", ["Morte-vivante"] = "Scourge",
     ["Taurène"] = "Tauren", ["Trollesse"] = "Troll",
+    -- Кастомная раса сервера (Skyborne) на немецком клиенте. Написание взято
+    -- из живого SavedVariables 24.11.2026 (debug.whoSampleNoRace:
+    -- "raceStr=Himmelsgeborener des Hohen Ordens; ... classStr=Druide;
+    -- area=Der Friedhof \"Stille Gärten\"") — сервер прислал его сам, это не
+    -- перевод. Без этой строки такие записи теряли расу (debug.raceUnresolved).
+    ["Himmelsgeborener des Hohen Ordens"] = "Skyborne",
 }
 
 -- LearnedFactions — НАБОР фракций, в которых наблюдалась раса.
@@ -4437,12 +4443,20 @@ local function RaceFilterNames(db, faction)
     --    learn.raceLoc2File не нужен вовсе — там лежат ещё и женские формы.
     local canonical = {}
     local whoName = (db and db.learn and db.learn.whoName) or nil
+    -- В какой локали выучено написание. whoName копится годами и хранит имена
+    -- ВСЕХ клиентов, а латинские локали (en/de/fr) по алфавиту неразличимы:
+    -- без метки английский клиент брал немецкое «Mensch» (ASCII проходит
+    -- алфавитный гейт), а немецкий — русское «Нежить». Метка ставится при
+    -- записи (см. HandleWhoList); у старых записей её нет, и для рас с
+    -- известным каноном это значит «доверять таблице, а не whoName».
+    local whoLoc = (db and db.learn and db.learn.whoNameLoc) or nil
     local locTable = RACE_BY_LOCALE[loc]
     if locTable then
         for raceFile, locName in pairs(locTable) do
             if want(raceFile) then
-                local canon = (whoName and whoName[raceFile]) or locName
-                names[canon] = true
+                local canon = whoName and whoName[raceFile]
+                if canon and (not whoLoc or whoLoc[raceFile] ~= loc) then canon = nil end
+                names[canon or locName] = true
                 canonical[raceFile] = true
             end
         end
@@ -4450,9 +4464,16 @@ local function RaceFilterNames(db, faction)
     -- расы вне эталона (кастомные), для которых сервер уже вернул написание
     if whoName then
         for raceFile, locName in pairs(whoName) do
-            if not canonical[raceFile] and want(raceFile) and NameFitsLocale(locName, loc) then
-                names[locName] = true
-                canonical[raceFile] = true
+            if not canonical[raceFile] and want(raceFile) then
+                -- та же метка локали: написание годится, если выучено на этом
+                -- клиенте, либо (у старых записей без метки) если алфавит свой
+                local tag = whoLoc and whoLoc[raceFile]
+                local okLoc = (tag ~= nil and tag == loc)
+                    or (tag == nil and NameFitsLocale(locName, loc))
+                if okLoc then
+                    names[locName] = true
+                    canonical[raceFile] = true
+                end
             end
         end
     end
@@ -4751,8 +4772,14 @@ function SCAN.RaceName(db, raceFile)
     if not raceFile or raceFile == "" then return nil end
     local loc = (GetLocale and GetLocale()) or ""
     local learn = db and db.learn
+    -- whoName накопительный, поэтому написание берётся только если оно
+    -- выучено на ЭТОМ клиенте (whoNameLoc); у старых записей без метки —
+    -- если алфавит совпадает с локалью. Иначе падаем на канон таблицы.
     if learn and learn.whoName and learn.whoName[raceFile] then
-        return learn.whoName[raceFile]
+        local tag = learn.whoNameLoc and learn.whoNameLoc[raceFile]
+        local okLoc = (tag ~= nil and tag == loc)
+            or (tag == nil and NameFitsLocale(learn.whoName[raceFile], loc))
+        if okLoc then return learn.whoName[raceFile] end
     end
     local locTable = RACE_BY_LOCALE[loc]
     if locTable then
@@ -5077,6 +5104,11 @@ local function HandleWhoList()
                 db.learn = db.learn or {}
                 db.learn.whoName = db.learn.whoName or {}
                 db.learn.whoName[raceFile] = raceLoc
+                -- в какой локали выучено (24.11.2026): whoName накопительный,
+                -- а латинские локали по алфавиту неразличимы — без метки
+                -- английский клиент брал немецкое «Mensch» из общего SV
+                db.learn.whoNameLoc = db.learn.whoNameLoc or {}
+                db.learn.whoNameLoc[raceFile] = (GetLocale and GetLocale()) or ""
             elseif raceLoc and raceLoc ~= "" then
                 -- Раса пришла, но в наших таблицах её нет: без диагностики такие
                 -- записи молча теряют расу И фракцию (/who отдаёт до 10% таких),
