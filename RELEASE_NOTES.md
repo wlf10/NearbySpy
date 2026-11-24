@@ -1,26 +1,65 @@
-## NearbySpy 1.6.1
+## NearbySpy 1.6.2
 
-### Fixed: gear and talent sharing delivered nothing
+### The saved-variables file and the client's memory are much smaller
 
-- Every receiver rejected the snapshots, our own client included: when the
-  sending client did not report its realm, the realm field came out empty and
-  the packet was thrown away as unreadable. The sender still counted it as
-  sent, so sharing looked alive while nothing arrived. A recorded session shows
-  the whole picture — 9 packets in the channel, 9 rejected, 0 accepted.
-- Records saved without a realm also split in two: the same player appeared
-  once under the proper realm and once under a name with an empty one, and the
-  second copy reached the site as a separate player.
+- Records are now stored as a fixed layout instead of a table with a named field
+  per value, and two fields that always duplicated another value were dropped.
+  Measured on a real save of 53 570 players: the player section shrank from
+  16.1 MB to 11.6 MB, so the file goes from 18.6 MB to about 14.2 MB.
+- The memory the addon holds in the client dropped from 30.4 MB to 17.4 MB on
+  the same save. That win came from crossing a threshold, not from trimming
+  bytes: Lua sizes a table's array part to a power of two, so a record with 17
+  to 32 slots costs the same as one with 17. The layout now uses 16.
+- Saves written by 1.6.1 stored every field by name and are larger still, so the
+  reduction there is bigger than the numbers above.
+- Coordinates are no longer stored per player. They were the observer's position
+  at the time of the encounter, not the player's own, and nothing ever read them
+  back — including the site, which has no column for them.
 
-### Fixed: a realm reported as an empty string is no longer trusted
+### New: records older than 7 days are removed automatically
 
-- The client is asked for the realm name and sometimes answers with an empty
-  string, which was stored as if it were a real value. The last known realm is
-  kept now, and a one-time pass repairs the records that were already saved
-  without one — 729 of them in a real save, with 54 names duplicated.
+- The player list was the only part of the save that grows with every encounter,
+  and it grows forever. Old records are pruned on logout; the default retention
+  is 7 days. **This is a change in behaviour: if you have been collecting for
+  longer, records past the window will be gone after the first logout.**
+- `/nspy retain` shows the setting and how many records would be removed without
+  removing anything. `/nspy retain 30` keeps a month, `/nspy retain off` disables
+  pruning entirely (your file will keep growing).
+- Back up a full snapshot before the first logout if you want to keep the
+  history: the pruning is not reversible.
 
-### Improved: packets from older clients are accepted instead of dropped
+### Improved: far more players show equipment on the site
 
-- A snapshot that arrives with an empty realm is stored under the reading
-  client's realm and marked as such, so data from clients that have not been
-  updated is not lost. Updated clients send the realm properly and carry no
-  mark; `/nspy peer` shows how much of the traffic still comes in unmarked.
+- Snapshots of gear and talent builds are kept for 6 000 players instead of
+  2 000. The old cap silently discarded the oldest snapshots as new ones came in,
+  which is why a character you had met many times could still show "no snapshot
+  yet". The cost is about 0.8 MB of file size.
+
+### New: ask other clients for what they have seen recently
+
+- `/nspy peer ask [minutes]` sends a request over the sharing channel and the
+  other running clients answer with their most recent sightings from that window
+  — up to 15 encounters and 5 gear snapshots, which fits in under a minute of
+  channel traffic. `/nspy peer ask status` shows the counters.
+- Answers travel under their own packet type, so clients that did not ask for
+  them drop them instead of writing them into their database. Only the client
+  that made the request accepts the reply.
+- Nothing about your own database changes: records received this way are marked
+  as someone else's observation, exactly like the regular sharing channel.
+
+### Fixed: a snapshot without a realm was accepted but never stored
+
+- When a packet arrived without a realm, the addon guessed its own realm to make
+  the packet readable — but the resulting key did not exist when the player was
+  known under a different realm of the cluster. A recorded session showed 68
+  packets received and 68 orphans: all accepted, none stored.
+- Such snapshots are now attached by name when exactly one player matches. If the
+  name exists on several realms, nothing is guessed. A player the database has
+  never seen still gets no row: a snapshot alone carries no class or level.
+
+### Cleanup: removed the finished diagnostics
+
+- The talent/inspect probe and the debug dumps it left behind are gone from the
+  save. SavedVariables merges rather than overwrites, so old probe output stayed
+  in the file even after the code that wrote it was removed — about 98 KB of
+  accumulated debug data is cleaned up once.

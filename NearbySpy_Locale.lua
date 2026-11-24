@@ -165,7 +165,8 @@ NSP_REC.SOURCE_CODE = {unit = 1, who = 2, chat = 3, peer = 4, guild = 5}
 NSP_REC.SOURCE_NAME = {}
 for name, code in pairs(NSP_REC.SOURCE_CODE) do NSP_REC.SOURCE_NAME[code] = name end
 
--- Раскладка v3 (21 слот): для миграции файлов, сохранённых аддоном 1.6.3.
+-- Раскладка v3 (21 слот): только для миграции. Никогда не публиковалась — это
+-- внутренний шаг внутри цикла 1.6.2 (публичная нумерация: 1.6.1 → 1.6.2).
 NSP_REC.V3 = {
     name = 1, class = 2, level = 3, realm = 4, zone = 5, zoneId = 6,
     lastSeen = 7, firstSeen = 8, count = 9, x = 10, y = 11, source = 12,
