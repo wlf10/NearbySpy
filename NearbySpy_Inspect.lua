@@ -54,8 +54,18 @@ local PER_PLAYER_COOLDOWN = 6 * 3600   -- same player: at most once per 6 hours
 -- ожидания для последнего, и он гарантированно уходит до запроса. Подняли до
 -- 80 и ОДНОВРЕМЕННО ужесточили MAX_AGE (см. ниже) — держать длинную очередь
 -- имеет смысл только если старые записи в ней отбрасываются быстро.
-local MAX_QUEUE = 80                   -- pending requests, rest are dropped
-local MAX_PER_SESSION = 200            -- hard stop: never flood the server
+--
+-- 25.11.2026: 80 → 160 и 200 → 600. Замер по живому SV (59 375 записей, сессия
+-- 24.11): из 3 877 unit-встреч за сутки снимок получили 2 029 (52%), а
+-- droppedFull за все сессии — 1 500. При шаге 0.9–1.8 с потолок 200 выбирался
+-- за ~5 минут игры, после чего новые встречи уже не инспектировались вовсе —
+-- и это было НЕ ВИДНО, потому что оба выхода из-за потолка молчали. Теперь
+-- отказ по потолку считается (sessionFull / sessionDrain): если счётчик растёт,
+-- потолок снова стал узким местом. 600 запросов — это 9–18 минут игры.
+-- Частоту (шаг) не трогаем: замер 19.11 показал, что сервер держит 0.9–1.8 с
+-- (timeout всего 3.9% от sent), теряются запросы на ушедшем игроке, не на флуде.
+local MAX_QUEUE = 160                  -- pending requests, rest are dropped
+local MAX_PER_SESSION = 600            -- hard stop: never flood the server
 -- Сколько снимков экипировки держать в SavedVariables.
 --
 -- Было 2000, и это оказалось узким местом: встреч в файле ~55 тысяч, снимков
@@ -227,6 +237,124 @@ end
 -- в nil-глобал (Lua 5.1 видит только уже объявленные локалы).
 J.Store = function(key, snapshot) return Store(key, snapshot) end
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- orphan-буфер peer-снапшотов (25.11.2026)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Проблема: пакет G7 и запись о встрече N7 идут по каналу НЕЗАВИСИМО, и
+-- снапшот часто приходит первым. Приём (ReceivePeerGear) прикрепляет снапшот
+-- к уже существующей строке игрока и без строки выбрасывает его — «создавать
+-- запись из одного снапшота нельзя, она придёт на сайт без класса и уровня».
+-- Замер по живому SV 25.11.2026: gearIn=25 против gearOrphan=19, то есть 43%
+-- принятых снапшотов терялись ровно так. По всей базе это 1 561 снимок из
+-- peer при нуле собственных инспектов у 41 250 peer-записей (конверсия 3.8%
+-- против 29% у unit) — самый дешёвый источник данных в аддоне.
+--
+-- Решение: подержать снапшот 15 минут и прикрепить, когда строка появится.
+-- Границы жёсткие: 200 имён, TTL 900 с, при переполнении вытесняется самый
+-- старый. Имя — ключ буфера, потому что мир в пакете может быть подставлен
+-- получателем (баг 1.6.0 с пустым GetRealmName), и ключ name-realm тогда не
+-- сходится; сравнение по имени без регистра (ник в пакете мог прийти из /who
+-- другого клиента с другим регистром).
+--
+-- Что НЕ делаем: снапшот из буфера не создаёт строку сам и не уходит обратно в
+-- канал (у него стоит from, а PeerQueueGear такие не отправляет).
+local ORPHAN_MAX = 200
+local ORPHAN_TTL = 900
+local orphanBuf, orphanStats = {}, {buffered = 0, adopted = 0, expired = 0, evicted = 0, stale = 0}
+
+local function OrphanHeld()
+    local n = 0
+    for _ in pairs(orphanBuf) do n = n + 1 end
+    return n
+end
+
+-- Drop entries whose player never showed up. Called on every insert: 200
+-- entries make this a rounding error, and it keeps a long session from
+-- accumulating names that will never be adopted.
+local function OrphanSweep(nowT)
+    for lk, it in pairs(orphanBuf) do
+        if nowT - (it.at or 0) > ORPHAN_TTL then
+            orphanBuf[lk] = nil
+            orphanStats.expired = orphanStats.expired + 1
+        end
+    end
+end
+
+function J.BufferPeerGear(name, snapshot, realm)
+    if type(name) ~= "string" or name == "" or type(snapshot) ~= "table" then return false end
+    if type(snapshot.ids) ~= "string" and type(snapshot.imp) ~= "string" then return false end
+    local nowT = time()
+    OrphanSweep(nowT)
+    local lk = name:lower()
+    local prev = orphanBuf[lk]
+    -- Уже держим более свежий снапшот этого игрока — старый не нужен.
+    if prev and (tonumber(prev.snap and prev.snap.at) or 0) >= (tonumber(snapshot.at) or 0) then
+        orphanStats.stale = orphanStats.stale + 1
+        return false
+    end
+    if not prev and OrphanHeld() >= ORPHAN_MAX then
+        local oldKey, oldAt
+        for k, it in pairs(orphanBuf) do
+            local a = tonumber(it.at) or 0
+            if not oldAt or a < oldAt then oldKey, oldAt = k, a end
+        end
+        if oldKey then
+            orphanBuf[oldKey] = nil
+            orphanStats.evicted = orphanStats.evicted + 1
+        end
+    end
+    orphanBuf[lk] = {
+        name = name,
+        snap = snapshot,
+        at = nowT,
+        realm = type(realm) == "string" and realm or "",
+    }
+    orphanStats.buffered = orphanStats.buffered + 1
+    return true
+end
+
+-- Adopt a buffered snapshot for a player row that has just appeared. Called from
+-- UpsertPlayer on the CREATE branch (NearbySpy.lua): only there can a row be new
+-- to us while its snapshot is already waiting.
+function J.AdoptPeerGear(key, name)
+    if type(name) ~= "string" or name == "" then return false end
+    local db = J.DB()
+    if not db or type(db.players) ~= "table" then return false end
+    local entry = db.players[key]
+    if type(entry) ~= "table" then return false end
+    local lk = name:lower()
+    local it = orphanBuf[lk]
+    if not it then return false end
+    local snap = it.snap
+    orphanBuf[lk] = nil
+    if type(snap) ~= "table" then return false end
+    -- Строка могла успеть получить снапшот другим путём (свой инспект, другой
+    -- peer): свежайший выигрывает, старый буферный выбрасываем.
+    local have = type(entry.gear) == "table" and entry.gear or nil
+    if have and (tonumber(have.at) or 0) >= (tonumber(snap.at) or 0) then
+        orphanStats.stale = orphanStats.stale + 1
+        return false
+    end
+    -- Пишем через Store: он ведёт кольцо вытеснения, иначе усыновлённый
+    -- снапшот жил бы в файле вечно.
+    if not Store(key, snap) then return false end
+    orphanStats.adopted = orphanStats.adopted + 1
+    return true
+end
+
+-- Counters for the /nspy report and for db.debug.peer (Visibility rule: a
+-- buffered snapshot that is never adopted must be countable, not silent).
+function J.OrphanStats()
+    return {
+        buffered = orphanStats.buffered,
+        adopted = orphanStats.adopted,
+        expired = orphanStats.expired,
+        evicted = orphanStats.evicted,
+        stale = orphanStats.stale,
+        held = OrphanHeld(),
+    }
+end
+
 local function RecentGear(key)
     local db = J.DB()
     if not db or type(db.players) ~= "table" then return nil end
@@ -267,7 +395,12 @@ end
 function J.Request(unit, key)
     if not J.Enabled() then return end
     if type(unit) ~= "string" or type(key) ~= "string" or key == "" then return end
-    if sentThisSession >= MAX_PER_SESSION then return end
+    -- Потолок сессии обязан быть ВИДЕН: раньше здесь был молчаливый return, и
+    -- «новые встречи не инспектируются» никак не отличалось от «инспект выключен».
+    if sentThisSession >= MAX_PER_SESSION then
+        Counter("sessionFull")
+        return
+    end
     if pending then
         if pending.guid and pending.guid == (UnitGUID(unit) or "") then return end
     end
@@ -312,7 +445,13 @@ function NextStep()
     local item = table.remove(queue)
     if not item then return end
     queuedGuid[item.key] = nil
-    if sentThisSession >= MAX_PER_SESSION then return end
+    -- Второй выход по потолку: запись уже стояла в очереди, когда лимит
+    -- кончился. Она выбрасывается — считаем отдельно от sessionFull, иначе
+    -- нельзя понять, теряем мы новые встречи или уже поставленные в очередь.
+    if sentThisSession >= MAX_PER_SESSION then
+        Counter("sessionDrain")
+        return
+    end
 
     -- a request that waited in the queue too long describes a moment that has
     -- passed; asking the server about it wastes one of the few allowed calls
@@ -461,11 +600,12 @@ function J.Report()
         :format(J.Enabled() and "on" or "off", #queue,
             pending and ("yes (" .. tostring(pending.key) .. ")") or "no",
             sentThisSession, MAX_PER_SESSION, stored, withImp))
-    J.Say(("gear counters: queued=%d sent=%d ok=%d empty=%d timeout=%d cannot=%d gone=%d relocated=%d lostAfterEvent=%d expired=%d cooldown=%d full=%d stale=%d")
+    J.Say(("gear counters: queued=%d sent=%d ok=%d empty=%d timeout=%d cannot=%d gone=%d relocated=%d lostAfterEvent=%d expired=%d cooldown=%d full=%d stale=%d cap=%d/%d")
         :format(c.queued or 0, c.sent or 0, c.ok or 0, c.emptySlots or 0, c.timeout or 0,
             c.skipCannot or 0, c.skipGone or 0,
             (c.relocated or 0) + (c.relocatedOnRead or 0), c.lostAfterEvent or 0,
-            c.expired or 0, c.skipCooldown or 0, c.droppedFull or 0, c.staleEvent or 0))
+            c.expired or 0, c.skipCooldown or 0, c.droppedFull or 0, c.staleEvent or 0,
+            (c.sessionFull or 0) + (c.sessionDrain or 0), MAX_PER_SESSION))
     -- The number that matters: how many answers turned into a stored snapshot.
     -- A low ratio means the queue is chasing players who are already gone.
     if (c.sent or 0) > 0 then

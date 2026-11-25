@@ -1347,6 +1347,13 @@ local function UpsertPlayer(db, data)
         -- замер по живому SV 24.11.2026 — 72 из 209 записей /who остались без
         -- zoneId, хотя все их названия есть в таблице.
         NspResolveZoneId(db.players[key])
+        -- Усыновление отложенного peer-снапшота (25.11.2026): пакет G7 мог
+        -- прийти РАНЬШЕ этой записи и лежать в orphan-буфере (NSP_INSPECT).
+        -- Прикрепляем здесь: строка только что появилась и она уже полная —
+        -- класс, уровень и мир есть, значит на сайт снапшот уйдёт осмысленным.
+        if NSP_INSPECT and type(NSP_INSPECT.AdoptPeerGear) == "function" then
+            pcall(NSP_INSPECT.AdoptPeerGear, key, data.name or db.players[key].name)
+        end
         -- Journal (1.5.7): a player that entered the database is a real
         -- encounter. Peer packets are excluded — someone else reporting a
         -- sighting is not our meeting (same contract as the alert feature).
@@ -1629,6 +1636,14 @@ PeerSync = function()
     -- whole call then aborts inside somebody else's pcall. Assign to a local
     -- first: an assignment keeps only the first value.
     local channelId = GetChannelName(PeerChannelName())
+    -- Orphan-буфер живёт в NSP_INSPECT (свой файл), а кладём его числа в
+    -- db.debug.peer: там вся peer-диагностика, и по SV видно эффект правки без
+    -- входа в игру.
+    local orphanStats = nil
+    if NSP_INSPECT and type(NSP_INSPECT.OrphanStats) == "function" then
+        local okO, s = pcall(NSP_INSPECT.OrphanStats)
+        if okO and type(s) == "table" then orphanStats = s end
+    end
     db.debug.peer = {
         enabled = db.peerEnabled and true or false,
         channel = tonumber(channelId) or 0,
@@ -1677,6 +1692,15 @@ PeerSync = function()
         gearRealmGuessed = peerStats.gearRealmGuessed or 0,
         gearOrphanFixed = peerStats.gearOrphanFixed or 0,
         gearAmbiguous = peerStats.gearAmbiguous or 0,
+        -- Orphan-буфер (25.11.2026): снапшот, пришедший раньше записи о встрече,
+        -- больше не теряется. Видно три числа: сколько отложено (buffered),
+        -- сколько усыновлено (adopted), сколько ждёт прямо сейчас (held) и
+        -- сколько протухло, не дождавшись строки (expired). Без них «gearIn
+        -- растёт» не отличить от «снапшоты лежат в буфере и протухают».
+        gearBuffered = peerStats.gearBuffered or 0,
+        gearAdopted = (orphanStats and orphanStats.adopted) or 0,
+        gearOrphanHeld = (orphanStats and orphanStats.held) or 0,
+        gearOrphanExpired = (orphanStats and orphanStats.expired) or 0,
         -- Запрос базы у пиров (Q1, 24.11.2026). Без этих полей вся диагностика
         -- запроса жила бы только в памяти до логаута — ровно та же ошибка, что
         -- была с throttled и gear-счётчиками: в кольце строка есть, в файле
@@ -3533,19 +3557,12 @@ function ReceivePeerGear(fields, sender)
             peerStats.gearAmbiguous = (peerStats.gearAmbiguous or 0) + 1
         end
     end
-    if type(entry) ~= "table" then
-        -- Игрока ещё нет в базе: прикрепить снапшот не к чему. Создавать
-        -- строку из одного снапшота нельзя — она придёт на сайт без класса и
-        -- уровня. Считаем такие случаи: по счётчику видно, теряем ли мы данные.
-        peerStats.gearOrphan = (peerStats.gearOrphan or 0) + 1
-        return
-    end
-    local have = type(entry.gear) == "table" and entry.gear or nil
+    -- Снапшот собирается ДО проверки строки: с 25.11.2026 он не выбрасывается,
+    -- если игрока ещё нет в базе, а ждёт в orphan-буфере (см. ниже и
+    -- NSP_INSPECT.BufferPeerGear). Поля «из уже известного» берутся из строки,
+    -- только если она есть.
+    local have = (type(entry) == "table" and type(entry.gear) == "table") and entry.gear or nil
     local haveAt = have and tonumber(have.at) or 0
-    if haveAt >= ts then
-        peerStats.gearStale = (peerStats.gearStale or 0) + 1
-        return
-    end
     local snap = {
         at = ts,
         from = sender,                  -- релей-защита: такой снапшот не уходит
@@ -3558,6 +3575,26 @@ function ReceivePeerGear(fields, sender)
         realmGuessed = guessedRealm or nil,
     }
     if type(snap.ids) ~= "string" and type(snap.imp) ~= "string" then return end
+    if type(entry) ~= "table" then
+        -- Игрока ещё нет в базе. Создавать строку из одного снапшота НЕЛЬЗЯ: она
+        -- придёт на сайт без класса и уровня. Но и терять снапшот незачем —
+        -- G7 и запись о встрече N7 идут по каналу независимо, и снапшот часто
+        -- приходит первым. Держим его 15 минут в orphan-буфере и прикрепляем,
+        -- когда строка появится (замер 25.11.2026: 19 из 44 G7 уходили в orphan,
+        -- — то есть 43% принятых снапшотов терялись именно так).
+        peerStats.gearOrphan = (peerStats.gearOrphan or 0) + 1
+        if NSP_INSPECT and type(NSP_INSPECT.BufferPeerGear) == "function" then
+            local okB, buffered = pcall(NSP_INSPECT.BufferPeerGear, name, snap, realm)
+            if okB and buffered then
+                peerStats.gearBuffered = (peerStats.gearBuffered or 0) + 1
+            end
+        end
+        return
+    end
+    if haveAt >= ts then
+        peerStats.gearStale = (peerStats.gearStale or 0) + 1
+        return
+    end
     -- Пишем ТЕМ ЖЕ путём, что и собственный инспект: он ведёт кольцо вытеснения
     -- (db.gearRing). Обойти его — значит растить файл без границы.
     local okStore = false
@@ -8522,6 +8559,17 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                         peerStats.gearSentCount or 0, peerStats.gearIn or 0,
                         peerStats.gearOrphan or 0, peerStats.gearStale or 0,
                         peerStats.gearBad or 0))
+            -- Orphan-буфер (25.11.2026): отложенные снапшоты, которые ждут
+            -- появления строки игрока. Если adopted не растёт, а held упирается
+            -- в 200 — записи о встречах до нас не доходят, и буфер не при чём.
+            if NSP_INSPECT and type(NSP_INSPECT.OrphanStats) == "function" then
+                local okO, s = pcall(NSP_INSPECT.OrphanStats)
+                if okO and type(s) == "table" then
+                    P(("peer gear orphan buffer: held=%d buffered=%d adopted=%d expired=%d evicted=%d stale=%d")
+                        :format(s.held or 0, s.buffered or 0, s.adopted or 0,
+                                s.expired or 0, s.evicted or 0, s.stale or 0))
+                end
+            end
         end
         if PeerSync then pcall(PeerSync) end
     elseif msg == "peer ask" or msg:match("^peer ask%s") then
