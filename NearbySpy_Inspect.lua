@@ -50,21 +50,18 @@ local J = NSP_INSPECT
 -- ⚠️ Если `timeout` вырастет выше ~10% от sent — вернуть 1.5/3.0.
 local GAP_MIN, GAP_MAX = 0.9, 1.8
 local PER_PLAYER_COOLDOWN = 6 * 3600   -- same player: at most once per 6 hours
--- Очередь: сколько запросов копится. Было 40, но при шаге ~1 с это 40 секунд
--- ожидания для последнего, и он гарантированно уходит до запроса. Подняли до
--- 80 и ОДНОВРЕМЕННО ужесточили MAX_AGE (см. ниже) — держать длинную очередь
--- имеет смысл только если старые записи в ней отбрасываются быстро.
+-- Очередь: сколько запросов копится. Было 40, потом 80, потом 160.
 --
--- 25.11.2026: 80 → 160 и 200 → 600. Замер по живому SV (59 375 записей, сессия
--- 24.11): из 3 877 unit-встреч за сутки снимок получили 2 029 (52%), а
--- droppedFull за все сессии — 1 500. При шаге 0.9–1.8 с потолок 200 выбирался
--- за ~5 минут игры, после чего новые встречи уже не инспектировались вовсе —
--- и это было НЕ ВИДНО, потому что оба выхода из-за потолка молчали. Теперь
--- отказ по потолку считается (sessionFull / sessionDrain): если счётчик растёт,
--- потолок снова стал узким местом. 600 запросов — это 9–18 минут игры.
--- Частоту (шаг) не трогаем: замер 19.11 показал, что сервер держит 0.9–1.8 с
--- (timeout всего 3.9% от sent), теряются запросы на ушедшем игроке, не на флуде.
-local MAX_QUEUE = 160                  -- pending requests, rest are dropped
+-- ⚠️ 25.11.2026: 160 — ОШИБКА, и замер это показал. LIFO-разбор берёт СВЕЖИЕ
+-- записи с конца, а запись, простоявшая больше MAX_AGE (12 с), выбрасывается
+-- как «момент уже прошёл». При шаге 0.9–1.8 с очередь физически способна
+-- обслужить 7–13 записей: всё, что лежит глубже, истечёт, не дойдя до сервера.
+-- То есть из 160 слотов полезны ~9, а остальные 150 — мёртвый вес, который
+-- не пускает новые встречи под видом «очередь полна» (живой SV, сессия
+-- 25.11: expired=100 из queued=293 — треть очереди была именно этим).
+-- 32 = двойной запас над замеренной глубиной: всплеск переживём, свалку нет.
+-- Плюс SweepExpired чистит истёкшее до проверки на полноту.
+local MAX_QUEUE = 32
 local MAX_PER_SESSION = 600            -- hard stop: never flood the server
 -- Сколько снимков экипировки держать в SavedVariables.
 --
@@ -80,7 +77,13 @@ local MAX_PER_SESSION = 600            -- hard stop: never flood the server
 --
 -- Верхнюю границу всё равно держим: без кольца файл растёт с каждой новой
 -- встречей, а это единственная часть SV, которая растёт с цензом.
-local MAX_GEAR = 6000                  -- snapshots kept in SavedVariables
+-- 25.11.2026: 6000 → 12000. Смысл кольца — не «сколько влезет», а буфер на
+-- простой выгрузки: крон забирает снимки раз в 30 минут, и кольцо чистит
+-- ТОЛЬКО SV (в БД снимок остаётся навсегда). 6000 при живых ~6200 снимках —
+-- это меньше суток запаса, и первый же день без игры начал бы вытеснять то,
+-- что ещё не уехало бы, случись простой крона. 12000 ≈ 2.4 МБ при файле
+-- 18.8 МБ и лимите SV 128 МБ: цена нулевая, запас шесть суток.
+local MAX_GEAR = 12000                 -- snapshots kept in SavedVariables
 local SLOT_FIRST, SLOT_LAST = 1, 19
 local TIMEOUT = 8                      -- seconds to wait for INSPECT_READY
 -- A queued request older than this describes a player who has already walked
@@ -213,6 +216,58 @@ local function Evict(db)
         local entry = oldKey and db.players and db.players[oldKey]
         if entry then entry.gear = nil end
     end
+end
+
+-- Обратная миграция кольца (25.11.2026).
+--
+-- Снимок, у которого ключа в `gearRing` нет, не вытесняется НИКОГДА: кольцо
+-- удаляет только то, что в нём записано. Такие сироты появились до того, как
+-- регистрация стала обязательной, — живой SV 25.11.2026 показал 642 снимка
+-- (все от 20–22.11) вне кольца при 4926 записанных. То есть файл держал на
+-- 642 снимка больше задуманного лимита, и снять их было нечем.
+--
+-- Ставим их В ГОЛОВУ кольца, в порядке возрастания времени снимка: вытеснение
+-- идёт с головы, значит первыми уйдут самые старые — то же, что сделало бы
+-- кольцо, если бы вело их с самого начала. Повторный запуск инертен (ключ уже
+-- в кольце), поэтому вызывать можно каждую сессию.
+--
+-- Объявлено ПОСЛЕ Evict: Lua 5.1 видит только уже объявленные локалы, и вызов
+-- Evict выше его определения разрешился бы в nil-глобал.
+--
+-- На сайт это не влияет: кольцо чистит только SV, а в БД снимок лежит вечно.
+local function BackfillRing(db)
+    if type(db) ~= "table" or type(db.players) ~= "table" then return 0 end
+    local ring = db.gearRing
+    if type(ring) ~= "table" then
+        ring = {}
+        db.gearRing = ring
+    end
+    local inRing = {}
+    for i = 1, #ring do
+        local k = ring[i]
+        if type(k) == "string" then inRing[k] = true end
+    end
+    local missing = {}
+    for key, entry in pairs(db.players) do
+        if type(key) == "string" and type(entry) == "table"
+            and type(entry.gear) == "table" and not inRing[key] then
+            missing[#missing + 1] = key
+        end
+    end
+    if #missing == 0 then return 0 end
+    -- Детерминированный порядок: pairs() обходит таблицу в разном порядке, и
+    -- без второго критерия одинаковое время снимка давало бы разный файл.
+    table.sort(missing, function(a, b)
+        local aa = tonumber(db.players[a].gear.at) or 0
+        local ba = tonumber(db.players[b].gear.at) or 0
+        if aa ~= ba then return aa < ba end
+        return a < b
+    end)
+    for i = 1, #missing do
+        table.insert(ring, i, missing[i])
+    end
+    Evict(db)
+    return #missing
 end
 
 local function Store(key, snapshot)
@@ -382,12 +437,42 @@ function J.Start()
     end
     db.debug.inspectQueue = {}
     sentThisSession = 0
+    -- Обратная миграция кольца: снимки, записанные до того, как регистрация в
+    -- gearRing стала обязательной, не вытеснялись никогда (живой SV 25.11.2026:
+    -- 642 штуки). Проход идемпотентный, поэтому стоит здесь — раз за сессию.
+    local backfilled = BackfillRing(db)
+    if backfilled > 0 then
+        db.debug.ringBackfilled = (db.debug.ringBackfilled or 0) + backfilled
+        J.Say(("gear: %d snapshots were outside the eviction ring, registered"):format(backfilled))
+    end
 end
 
 function J.Enabled()
     local db = J.DB()
     if db and db.gearOff then return false end
     return rawget(_G, "NotifyInspect") ~= nil
+end
+
+-- Выбросить записи, которые уже не описывают текущий момент.
+--
+-- Зачем отдельный проход, если NextStep и так выбрасывает просроченное: тот
+-- разбор идёт LIFO, то есть до старых записей доходит ПОСЛЕДНИМИ, а места в
+-- очереди они занимают наравне со свежими. Замер 25.11.2026: expired=100 из
+-- queued=293 — треть очереди была мёртвым весом, и новые встречи получали
+-- «droppedFull», хотя инспектировать было нечего. Считаем их тем же счётчиком
+-- expired: для владельца это одна потеря — запрос не дошёл до сервера.
+local function SweepExpired(nowT)
+    nowT = nowT or time()
+    local i = #queue
+    while i >= 1 do
+        local item = queue[i]
+        if type(item) == "table" and item.at and nowT - item.at > MAX_AGE then
+            if item.key then queuedGuid[item.key] = nil end
+            table.remove(queue, i)
+            Counter("expired")
+        end
+        i = i - 1
+    end
 end
 
 -- Called from the addon's Record() for every player it meets. Everything cheap
@@ -405,9 +490,19 @@ function J.Request(unit, key)
         if pending.guid and pending.guid == (UnitGUID(unit) or "") then return end
     end
     if queuedGuid[key] then return end
+    -- Истёкшее чистим ДО проверки на полноту, иначе мёртвые записи объявят
+    -- очередь полной. Порог: при короткой очереди мёртвого веса нет, и
+    -- перебирать её на каждой встрече незачем.
+    if #queue >= 8 then SweepExpired() end
     if #queue >= MAX_QUEUE then
+        -- Очередь полна — но LIFO обслуживает СВЕЖИЕ записи: новая встреча
+        -- ценнее той, что лежит в голове и до которой уже не дойдёт разбор.
+        -- Раньше здесь был отказ новичку, то есть выбрасывалась ровно самая
+        -- перспективная запись (игрок стоит перед нами), а мёртвая голова
+        -- оставалась занимать слот.
+        local old = table.remove(queue, 1)
+        if type(old) == "table" and old.key then queuedGuid[old.key] = nil end
         Counter("droppedFull")
-        return
     end
     -- freshness: a snapshot younger than the cooldown is not worth a request
     local gear = RecentGear(key)

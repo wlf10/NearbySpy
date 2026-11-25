@@ -3895,6 +3895,9 @@ function NspPruneDebug(db)
         whoSampleNoRace = true, whoThrottled = true, whoTest = true,
         -- passive inspects and gear snapshots
         inspectQueue = true, inspectTotal = true, gearSample = true,
+        -- обратная миграция кольца вытеснения (25.11.2026): сколько снимков
+        -- было ВНЕ gearRing и потому не вытеснялось никогда
+        ringBackfilled = true,
         -- session/digest counters
         ticks = true, lastTickAt = true, lastPlayers = true, lastPlates = true,
         addedEvents = true, src = true,

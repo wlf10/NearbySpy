@@ -165,12 +165,35 @@ class InspectLimitsTests(unittest.TestCase):
         self.assertEqual(int(self.counters()["sessionDrain"] or 0), 1,
                          "запись, выброшенная из очереди по потолку, не посчитана")
 
-    def test_caps_were_raised_for_the_measured_workload(self):
-        # Потолок 200 выбирался за ~5 минут игры — это и было узкое место.
-        self.assertGreaterEqual(self.cap, 600,
-                                "потолок сессии ниже замера: 600 запросов = 9-18 минут игры")
-        self.assertGreaterEqual(self.queue_cap, 160,
-                                "очередь меньше двух шагов потолка: встречи будут отбрасываться")
+    def test_queue_depth_is_bounded_by_what_it_can_actually_serve(self):
+        """Очередь не должна быть свалкой.
+
+        LIFO-разбор обслуживает свежие записи, а запись старше MAX_AGE
+        выбрасывается. Значит обслуживаемая глубина = MAX_AGE / шаг, и всё, что
+        лежит глубже, истечёт не дойдя до сервера — но слот занимает и объявляет
+        очередь полной. Замер 25.11.2026 при MAX_QUEUE=160: expired=100 из
+        queued=293, то есть треть очереди была мёртвым весом.
+
+        Нижняя граница — чтобы всплеск не отбрасывался целиком.
+        """
+        src = self.src
+        gap = re.search(r"local GAP_MIN, GAP_MAX = ([\d.]+), ([\d.]+)", src)
+        self.assertIsNotNone(gap, "шаг инспекта не найден — тест не может проверить границу")
+        gap_min, gap_max = float(gap.group(1)), float(gap.group(2))
+        age = const(src, "MAX_AGE")
+
+        serviceable = age / gap_min          # сколько влезает на самом быстром шаге
+        burst = age / gap_max                # сколько влезает на самом медленном
+
+        self.assertLessEqual(
+            self.queue_cap, serviceable * 4,
+            "очередь %d при обслуживаемой глубине ~%.0f — это свалка: "
+            "глубже %.0f записей всё равно истечёт до разбора" % (
+                self.queue_cap, serviceable, serviceable))
+        self.assertGreaterEqual(
+            self.queue_cap, burst * 2,
+            "очередь %d меньше двух медленных шагов (%.0f) — всплеск встреч "
+            "будет отбрасываться целиком" % (self.queue_cap, burst * 2))
 
 
 class InspectOrphanBufferTests(unittest.TestCase):
@@ -275,6 +298,179 @@ class InspectOrphanBufferTests(unittest.TestCase):
         self.assertFalse(self.J["BufferPeerGear"]("Stranger",
                                                   self.lua.eval('{ at = 1 }'), REALM))
         self.assertEqual(int(self.stats()["held"]), 0)
+
+
+class RingBackfillTests(unittest.TestCase):
+    """Обратная миграция кольца: снимок вне gearRing не вытесняется никогда."""
+
+    def setUp(self):
+        self.src = INSPECT_FILE.read_text(encoding="utf-8")
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(PRELUDE)
+        self.J = self.lua.execute(self.src)
+        self.g = self.lua.globals()
+        self.db = self.g["DB"]
+        self.J["P"] = self.g["PStub"]
+        self.J["GetDB"] = self.lua.eval("function() return DB end")
+        self.max = const(self.src, "MAX_GEAR")
+
+    def add(self, key, at, in_ring=False):
+        self.db["players"][key] = self.lua.eval(
+            '{ name = "%s", realm = "Realm" }' % key.split("-")[0])
+        self.db["players"][key]["gear"] = self.lua.table_from(
+            {"at": at, "ids": "5:3283", "slots": 1})
+        if in_ring:
+            if self.db["gearRing"] is None:
+                self.db["gearRing"] = self.lua.eval("{}")
+            self.db["gearRing"][len(self.db["gearRing"]) + 1] = key
+
+    def ring(self):
+        return [str(v) for v in self.db["gearRing"].values()]
+
+    def test_orphan_snapshot_is_registered_by_start(self):
+        # живой случай 25.11.2026: 642 снимка от 20-22.11 вне кольца
+        self.add("Old-Realm", 900)
+        self.J["Start"]()
+        self.assertIn("Old-Realm", self.ring(),
+                      "снимок вне кольца так и не зарегистрирован — он не вытеснится никогда")
+        self.assertEqual(int(self.db["debug"]["ringBackfilled"]), 1)
+
+    def test_backfill_is_idempotent(self):
+        self.add("Old-Realm", 900)
+        self.J["Start"]()
+        self.J["Start"]()
+        self.assertEqual(self.ring().count("Old-Realm"), 1,
+                         "повторный проход задвоил ключ в кольце")
+        self.assertEqual(int(self.db["debug"]["ringBackfilled"]), 1,
+                         "счётчик миграции накручивается на каждом входе")
+
+    def test_orphans_go_to_the_head_oldest_first(self):
+        # вытеснение идёт с головы: сироты обязаны уйти ПЕРВЫМИ, и самый
+        # старый — раньше остальных, иначе кольцо снимет свежие снимки
+        self.add("Fresh-Realm", 3000, in_ring=True)
+        self.add("Newer-Realm", 2000)
+        self.add("Oldest-Realm", 1000)
+        self.J["Start"]()
+        r = self.ring()
+        self.assertEqual(r[0], "Oldest-Realm")
+        self.assertEqual(r[1], "Newer-Realm")
+        self.assertEqual(r[2], "Fresh-Realm")
+
+    def test_backfill_respects_the_ring_cap(self):
+        # больше снимков, чем лимит: кольцо обязано остаться ограниченным
+        for i in range(self.max + 10):
+            self.add("P%d-Realm" % i, 1000 + i)
+        self.J["Start"]()
+        self.assertLessEqual(len(self.ring()), self.max,
+                             "миграция пробила потолок кольца")
+        # выжили самые свежие, самые старые снимки сняты
+        self.assertIsNone(self.db["players"]["P0-Realm"]["gear"],
+                          "вытеснение сняло не самый старый снимок")
+
+    def test_player_without_snapshot_is_not_registered(self):
+        self.db["players"]["NoGear-Realm"] = self.lua.eval('{ name = "NoGear", realm = "Realm" }')
+        self.J["Start"]()
+        self.assertNotIn("NoGear-Realm", self.ring())
+
+
+class ExpiredSweepTests(unittest.TestCase):
+    """Истёкшие записи не должны занимать слоты и объявлять очередь полной."""
+
+    def setUp(self):
+        self.src = INSPECT_FILE.read_text(encoding="utf-8")
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(PRELUDE)
+        self.J = self.lua.execute(self.src)
+        self.g = self.lua.globals()
+        self.db = self.g["DB"]
+        self.J["P"] = self.g["PStub"]
+        self.J["GetDB"] = self.lua.eval("function() return DB end")
+        self.age = const(self.src, "MAX_AGE")
+        self.qcap = const(self.src, "MAX_QUEUE")
+
+    def counters(self):
+        return self.db["debug"]["inspectQueue"]
+
+    def test_stale_entries_do_not_block_fresh_encounters(self):
+        """Главный смысл: мёртвый вес не должен давать droppedFull.
+
+        Один запрос держим в полёте, остальные слоты забиваем записями,
+        которые уже протухли, затем переводим часы вперёд и просим инспект
+        новой встречи — она обязана попасть в очередь.
+        """
+        self.g["UNITS"] = self.lua.eval('{ target = { guid = "Player-1-00000001" } }')
+        self.J["Request"]("target", "Hold-Realm")     # in flight, держит очередь живой
+        for i in range(self.qcap):
+            key = "Old%d-Realm" % i
+            self.db["players"][key] = self.lua.eval('{ name = "x", realm = "Realm" }')
+            self.g["UNITS"]["target"]["guid"] = "Player-1-%08d" % (i + 2)
+            self.J["Request"]("target", key)
+
+        # всё, что стоит в очереди, теперь старше MAX_AGE
+        self.g["NOW"] = 1000000 + self.age + 5
+        self.g["UNITS"]["target"]["guid"] = "Player-2-00000001"
+        self.db["players"]["New-Realm"] = self.lua.eval('{ name = "New", realm = "Realm" }')
+        self.J["Request"]("target", "New-Realm")
+
+        self.assertEqual(int(self.counters()["droppedFull"] or 0), 0,
+                         "просроченные записи объявили очередь полной")
+        self.assertGreater(int(self.counters()["expired"] or 0), 0,
+                           "очистка ничего не выбросила — она не работает")
+
+    def test_queued_entries_do_not_leave_dedupe_ghosts(self):
+        """Ключ выброшенной записи обязан исчезнуть из queuedGuid.
+
+        Иначе игрок навсегда останется «уже в очереди» и его больше никогда
+        не инспектируют в этой сессии.
+        """
+        key = "Ghost-Realm"
+        self.db["players"][key] = self.lua.eval('{ name = "Ghost", realm = "Realm" }')
+        self.db["players"]["Another-Realm"] = self.lua.eval('{ name = "Another", realm = "Realm" }')
+        self.g["UNITS"] = self.lua.eval('{ target = { guid = "Player-1-00000001" } }')
+        self.J["Request"]("target", "Another-Realm")   # in flight
+        self.g["UNITS"]["target"]["guid"] = "Player-1-00000002"
+        self.J["Request"]("target", key)               # queued
+        self.g["NOW"] = 1000000 + self.age + 5
+        # любая следующая встреча запускает очистку (порог #queue >= 8 не нужен:
+        # чистим и при малой очереди через явный вызов NextStep)
+        self.g["UNITS"]["target"]["guid"] = "Player-1-00000003"
+        self.db["players"]["Third-Realm"] = self.lua.eval('{ name = "Third", realm = "Realm" }')
+        self.J["Request"]("target", "Third-Realm")
+        self.J["OnInspectReady"]("Player-1-00000001")
+        self.g["FireTimers"](50)
+        # теперь тот же игрок снова может быть поставлен в очередь
+        self.g["UNITS"]["target"]["guid"] = "Player-1-00000002"
+        before = int(self.counters()["queued"] or 0)
+        self.db["players"][key] = self.lua.eval('{ name = "Ghost", realm = "Realm" }')
+        self.J["Request"]("target", key)
+        self.assertGreater(int(self.counters()["queued"] or 0), before,
+                           "после очистки ключ остался в queuedGuid — игрок больше не инспектируется")
+
+    def test_full_queue_evicts_the_head_not_the_newcomer(self):
+        """Полная очередь обязана выбросить голову, а не отказать новичку.
+
+        LIFO обслуживает с конца: новичок будет обслужен СЛЕДУЮЩИМ, а голова
+        не будет обслужена никогда. Отказ новичку выбрасывал ровно самую
+        перспективную запись — того, кто сейчас стоит перед нами.
+        """
+        self.g["UNITS"] = self.lua.eval('{ target = { guid = "Player-1-00000001" } }')
+        self.J["Request"]("target", "Hold-Realm")            # in flight
+        for i in range(self.qcap):
+            key = "Q%d-Realm" % i
+            self.db["players"][key] = self.lua.eval('{ name = "x", realm = "Realm" }')
+            self.g["UNITS"]["target"]["guid"] = "Player-1-%08d" % (i + 2)
+            self.J["Request"]("target", key)
+
+        before = int(self.counters()["queued"] or 0)
+        self.db["players"]["Newcomer-Realm"] = self.lua.eval('{ name = "Newcomer", realm = "Realm" }')
+        self.g["UNITS"]["target"]["guid"] = "Player-2-00000001"
+        self.J["Request"]("target", "Newcomer-Realm")
+
+        self.assertEqual(int(self.counters()["droppedFull"] or 0), 1,
+                         "вытеснение головы не посчитано")
+        self.assertGreater(int(self.counters()["queued"] or 0), before,
+                           "новичок выброшен вместо головы — LIFO обслужит его первым, "
+                           "а голова не будет обслужена никогда")
 
 
 class WiringTests(unittest.TestCase):
