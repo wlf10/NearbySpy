@@ -6262,17 +6262,20 @@ local HELP_COMMANDS = {
     "/nspy [show]", "/nspy help", "/nspy suggest",
     "/nspy who", "/nspy whostop", "/nspy announce",
     "/nspy peer on", "/nspy peer off", "/nspy peer new",
+    -- ask добавлен 26.11.2026: команда существовала, но в справке её не было —
+    -- узнать о ней можно было только из чужого сообщения.
+    "/nspy ask", "/nspy ask status",
     "/nspy reset", "/nspy server", "/nspy menu",
     "/nspy minimap", "/nspy settings", "/nspy me",
 }
 
 local HELP_TEXT = {
-    enUS = { "Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Toggle new-encounter chat messages", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "What the channel delivered - new to us only", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)", "This character's journal: playtime, zones, encounters, level"},
-    zhCN = { "玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "切换新遇见玩家的聊天提示", "加入可选的玩家共享频道", "退出频道并清空待发队列", "频道带来的新记录（仅新增）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)", "本角色的日志：游戏时长、区域、遇见、等级"},
-    ruRU = { "Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Вкл/выкл сообщения о новых встречах", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Что пришло из канала — только новые для нас", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)", "Журнал персонажа: время в игре, зоны, встречи, уровень"},
-    deDE = { "Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Meldungen über neue Begegnungen umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Was der Kanal geliefert hat - nur neue für uns", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)", "Journal dieses Charakters: Spielzeit, Zonen, Begegnungen, Stufe"},
-    frFR = { "Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Activer/désactiver les annonces de rencontres", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "Ce que le canal a livré - nouveaux uniquement", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
-    koKR = { "플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "새 만남 채팅 알림 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "채널에서 받은 신규 기록만", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
+    enUS = { "Player window", "This command list", "Assisted /who: you click search; repeat to stop", "Assisted wide /who: you click search", "Stop a /who scan", "Toggle new-encounter chat messages", "Join the optional player-sharing channel", "Leave the channel and clear pending sends", "What the channel delivered - new to us only", "Ask peers for their newest records over the channel", "Ask: counters and open requests, nothing sent", "Clear the player database", "Server census window (needs NearbySpy_Data)", "Menu window (hub)", "Show/hide the minimap button", "Settings window (peer sharing)", "This character's journal: playtime, zones, encounters, level"},
+    zhCN = { "玩家窗口", "命令列表", "辅助 /who：点击搜索；再次输入可停止", "辅助广域 /who：点击搜索", "停止 /who 扫描", "切换新遇见玩家的聊天提示", "加入可选的玩家共享频道", "退出频道并清空待发队列", "频道带来的新记录（仅新增）", "通过频道向其他玩家请求他们的最新记录", "请求：计数器和待答请求（不发送）", "清空玩家数据库", "服务器普查窗口(需要 NearbySpy_Data)", "菜单窗口 (hub)", "显示/隐藏小地图按钮", "设置窗口 (共享开关)", "本角色的日志：游戏时长、区域、遇见、等级"},
+    ruRU = { "Окно игроков", "Список команд", "Помощник /who: нажимай лупу; повтор — стоп", "Широкий /who: жми лупу", "Остановить скан /who", "Вкл/выкл сообщения о новых встречах", "Вступить в канал обмена игроками", "Покинуть канал и очистить очередь", "Что пришло из канала — только новые для нас", "Спросить у пиров их свежие записи через канал", "Запрос: счётчики и открытые запросы, без отправки", "Очистить базу игроков", "Окно ценза сервера (нужен NearbySpy_Data)", "Окно меню (hub)", "Показать/скрыть кнопку миникарты", "Окно настроек (обмен)", "Журнал персонажа: время в игре, зоны, встречи, уровень"},
+    deDE = { "Spielerfenster", "Befehlsübersicht", "Assistiertes /who: Suche anklicken; erneut = Stopp", "Breites /who: Suche anklicken", "/who-Scan stoppen", "Meldungen über neue Begegnungen umschalten", "Optionalem Austauschkanal beitreten", "Kanal verlassen und Warteschlange leeren", "Was der Kanal geliefert hat - nur neue für uns", "Andere Spieler über den Kanal nach ihren neuesten Einträgen fragen", "Abfrage: Zähler und offene Anfragen, ohne Senden", "Spielerdatenbank leeren", "Server-Zensusfenster (benötigt NearbySpy_Data)", "Menüfenster (Hub)", "Minimap-Button ein-/ausblenden", "Einstellungsfenster (Peer-Austausch)", "Journal dieses Charakters: Spielzeit, Zonen, Begegnungen, Stufe"},
+    frFR = { "Fenêtre des joueurs", "Liste des commandes", "/who assisté : cliquer sur recherche ; répéter pour arrêter", "/who large assisté : cliquer recherche", "Arrêter le scan /who", "Activer/désactiver les annonces de rencontres", "Rejoindre le canal de partage facultatif", "Quitter le canal et vider la file", "Ce que le canal a livré - nouveaux uniquement", "Demander aux autres joueurs leurs entrées les plus récentes via le canal", "Requête : compteurs et demandes en attente, sans envoi", "Effacer la base des joueurs", "Fenêtre de recensement (nécessite NearbySpy_Data)", "Fenêtre de menu (hub)", "Afficher/masquer le bouton de la minicarte", "Fenêtre des réglages (partage peer)", "Journal du personnage : temps de jeu, zones, rencontres, niveau"},
+    koKR = { "플레이어 창", "명령어 목록", "보조 /who: 검색 클릭, 다시 입력하면 중지", "보조 전체 /who: 검색 클릭", "/who 스캔 중지", "새 만남 채팅 알림 전환", "선택적 플레이어 공유 채널 참가", "채널 나가기 및 전송 대기열 비우기", "채널에서 받은 신규 기록만", "채널로 다른 플레이어에게 최신 기록을 요청합니다", "요청: 카운터와 대기 중인 요청 (전송 없음)", "플레이어 데이터베이스 삭제", "서버 센서스 창 (NearbySpy_Data 필요)", "메뉴 창 (허브)", "미니맵 버튼 표시/숨기기", "설정 창 (피어 공유)", "이 캐릭터의 일지: 플레이 시간, 지역, 만남, 레벨"},
 }
 local EffectiveLocale -- forward: defined with the settings selectors below
 local helpWin
@@ -8536,6 +8539,35 @@ end
 
 SLASH_NEARBYSPY1 = "/nearbyspy"
 SLASH_NEARBYSPY2 = "/nspy"
+-- NspParseAsk(rest) — разбор аргументов запроса базы у пиров (26.11.2026).
+--
+-- rest — хвост после слова ask: для `/nspy ask 60` это «60».
+-- Возвращает target (кому), window (минуты), mode ("status" / "list" / nil).
+--
+-- Вынесено из диспетчера, потому что разбор нужно ПРОВЕРЯТЬ ТЕСТОМ, а не
+-- глазами по сорока строкам ветки: команда `/nspy ask ...` долго не
+-- существовала вовсе (живой случай 26.11.2026: «/nspy ask 60 не работает»,
+-- ввод уходил в else и открывал окно помощи), и заметить это можно было
+-- только запуском.
+-- global: в главном чанке 195 локалов из 200.
+function NspParseAsk(rest)
+    if type(rest) ~= "string" then return nil, nil, nil end
+    rest = rest:gsub("^%s+", ""):gsub("%s+$", "")
+    if rest == "" then return nil, nil, nil end
+    if rest == "status" or rest == "list" then return nil, nil, rest end
+    -- «имя [минуты]»: имя двусловное у всех (замер по живому SV: 240
+    -- отправителей, ни одного однословного), поэтому последний токен считаем
+    -- минутами ТОЛЬКО если это чистое число.
+    local name, num = rest:match("^(.-)%s+(%d+)$")
+    if name and name ~= "" then
+        -- Копипаст из чата/`list` тащит лишние пробелы: «Wolff  Magy» после
+        -- схлопывания совпадёт с именем персонажа.
+        return (name:gsub("%s+", " ")), num, nil
+    end
+    if rest:match("^%d+$") then return nil, rest, nil end
+    return (rest:gsub("%s+", " ")), nil, nil
+end
+
 SlashCmdList["NEARBYSPY"] = function(msg)
     msg = string.lower((msg or ""):gsub("^%s+", ""):gsub("%s+$", ""))
     local db = GetDB()
@@ -8902,39 +8934,26 @@ SlashCmdList["NEARBYSPY"] = function(msg)
             end
         end
         if PeerSync then pcall(PeerSync) end
-    elseif msg == "peer ask" or msg:match("^peer ask%s") then
+    elseif msg == "peer ask" or msg == "ask"
+        or msg:match("^peer ask%s") or msg:match("^ask%s") then
         -- Запрос базы у пиров (Q1/A1, 24.11.2026):
-        --   /nspy peer ask                запрос всем, за последний час
-        --   /nspy peer ask 180            запрос всем, за 3 часа (кламп 5…1440)
-        --   /nspy peer ask Wolff          только этому игроку, окно по умолчанию
-        --   /nspy peer ask Wolff 180      только ему, за 3 часа
-        --   /nspy peer ask list           кто вообще говорил в канале (для обхода)
-        --   /nspy peer ask status         состояние и счётчики, без отправки
+        --   /nspy ask                     запрос всем, за последний час
+        --   /nspy ask 180                 запрос всем, за 3 часа (кламп 5…1440)
+        --   /nspy ask Wolff               только этому игроку, окно по умолчанию
+        --   /nspy ask Wolff 180           только ему, за 3 часа
+        --   /nspy ask list                кто вообще говорил в канале (для обхода)
+        --   /nspy ask status              состояние и счётчики, без отправки
+        -- Приставка "peer" необязательна: игрок ищет команду по смыслу («спросить
+        -- у пиров»), а не по внутреннему имени узла. Живой случай 26.11.2026:
+        -- `/nspy ask 60` молча открывал окно помощи, потому что ветки для "ask"
+        -- не было ни одной.
         -- Имя нужно, чтобы спрашивать по очереди: иначе на каждый запрос
         -- отвечают ВСЕ участники, а канал держит ~10 сообщений в минуту.
         -- Ник приводится к нижнему регистру диспетчером команд — сравнение на
         -- приёме тоже регистронезависимое, поэтому это не мешает.
-        local rest = msg:match("^peer ask%s+(.+)$")
-        local target, window
-        if rest then
-            -- «имя [минуты]»: имя двусловное у всех (замер по живому SV: 240
-            -- отправителей, ни одного однословного), поэтому последний токен
-            -- считаем минутами ТОЛЬКО если это чистое число.
-            local name, num = rest:match("^(.-)%s+(%d+)$")
-            if name and name ~= "" then
-                target, window = name, num
-            elseif rest:match("^%d+$") then
-                window = rest
-            else
-                target = rest
-            end
-            if target then
-                -- Копипаст из чата/`list` тащит лишние пробелы: «Wolff  Magy»
-                -- после схлопывания совпадёт с именем персонажа.
-                target = target:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-            end
-        end
-        if rest == "status" then
+        local rest = msg:match("^peer ask%s+(.+)$") or msg:match("^ask%s+(.+)$")
+        local target, window, askMode = NspParseAsk(rest)
+        if askMode == "status" then
             P(("peer ask: sent=%d, outgoing=%d, requests_in=%d, answer_rows=%d, answer_gear=%d, skipped=%d, empty=%d, in=%d, stray=%d")
                 :format(peerStats.askSent or 0, peerStats.askOut or 0,
                         peerStats.askReqIn or 0, peerStats.askQueued or 0,
@@ -8961,7 +8980,7 @@ SlashCmdList["NEARBYSPY"] = function(msg)
                         peerStats.askNotMe or 0, peerStats.askWrongSender or 0,
                         tostring(peerStats.askLastFrom or "nobody")))
             P("peer ask: an answer is the newest rows the peer saw in the window - the channel carries ~10 messages a minute, not a whole dump")
-        elseif rest == "list" then
+        elseif askMode == "list" then
             local peers = PeerAskKnownPeers(db)
             if #peers == 0 then
                 P("peer ask list: nobody has spoken in this channel yet - turn sharing on (/nspy peer on) and wait for other players")
