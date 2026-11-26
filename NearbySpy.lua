@@ -6571,6 +6571,29 @@ local function TacticalVisible(p, now, filt)
     return true
 end
 
+-- NspShortNum(v) — компактная запись больших счётчиков: 20257 → «20.3k».
+--
+-- В окне числа бывают шестизначными (всего в базе 63 401, «новых» за сессию
+-- 20 257), и они распирали табы и карточки. До тысячи печатаем как есть —
+-- точность там ещё что-то значит; дальше k/M с одним знаком после точки,
+-- хвостовой «.0» убираем (1000 → «1k», 12400 → «12.4k»).
+-- Точка, а не запятая: так в примере владельца (26.11.2026: «20.2k»).
+-- global: в главном чанке 195 локалов из 200, новые сущности — только глобалы.
+function NspShortNum(v)
+    v = tonumber(v) or 0
+    if v < 1000 then return tostring(math.floor(v + 0.5)) end
+    local div, unit = 1000, "k"
+    -- 999 500 при округлении превращается в «1000k»; это уже мега, поэтому
+    -- перескакиваем единицу заранее (проверено на границах 999499/999500).
+    if v >= 999500 then div, unit = 1000000, "M" end
+    if v >= 999500000 then div, unit = 1000000000, "B" end
+    local x = v / div
+    -- три знака перед точкой уже не сокращаются, дробь только мешает
+    local s = (x >= 100) and string.format("%.0f", x) or string.format("%.1f", x)
+    s = string.gsub(s, "%.0$", "")
+    return s .. unit
+end
+
 -- NspTabCounts(now) — числа на табах.
 --
 -- Два разных смысла, так решил владелец 26.11.2026:
@@ -7061,12 +7084,12 @@ TacticalUpdate = function()
         -- Карточки-статистики (всего в базе, фракции, уровни, классы, 15m/1h)
         -- остаются по всей базе: они про базу, а не про список.
         local tabN = NspTabCounts(time())
-        tactical.total.value:SetText(tostring(st.total))
-        tactical.total.detail:SetText("+" .. tostring(tabN.newAll) .. " " .. L("UI_NEW_SHORT"))
-        tactical.fresh.value:SetText(tostring(tabN.fresh))
-        tactical.fresh.detail:SetText(("15m %d; 1h %d"):format(st.f15, st.f60))
-        tactical.factions.value:SetText(("|cffff6666%s %d|r ; |cff6699ff%s %d|r"):format(L("HORDE"), st.horde, L("ALLIANCE"), st.alliance))
-        tactical.factions.detail:SetText(st.unknown > 0 and ("? " .. st.unknown) or "")
+        tactical.total.value:SetText(NspShortNum(st.total))
+        tactical.total.detail:SetText("+" .. NspShortNum(tabN.newAll) .. " " .. L("UI_NEW_SHORT"))
+        tactical.fresh.value:SetText(NspShortNum(tabN.fresh))
+        tactical.fresh.detail:SetText(("15m %s; 1h %s"):format(NspShortNum(st.f15), NspShortNum(st.f60)))
+        tactical.factions.value:SetText(("|cffff6666%s %s|r ; |cff6699ff%s %s|r"):format(L("HORDE"), NspShortNum(st.horde), L("ALLIANCE"), NspShortNum(st.alliance)))
+        tactical.factions.detail:SetText(st.unknown > 0 and ("? " .. NspShortNum(st.unknown)) or "")
 
         local maxCount, peakLevel = 0, 0
         for level = 1, 60 do
@@ -7080,7 +7103,9 @@ TacticalUpdate = function()
             else bar:SetColorTexture(0.12, 0.55 + level / 400, 0.42 + level / 500, 0.92) end
         end
         if maxCount > 0 then
-            tactical.chartLabel:SetText(L("CHART_LABEL"):format(st.levelN, maxCount, peakLevel, st.levelSum / st.levelN))
+            tactical.chartLabel:SetText(L("CHART_LABEL"):format(
+                NspShortNum(st.levelN), NspShortNum(maxCount),
+                peakLevel, st.levelSum / st.levelN))
         else tactical.chartLabel:SetText(L("CHART_EMPTY")) end
 
         for i = 1, NSP_CONST.CLASS_BARS do
@@ -7092,7 +7117,7 @@ TacticalUpdate = function()
                 row.label:SetTextColor(0.85, 0.82, 0.75)
                 -- count + share of all players: the top classes are nearly
                 -- equal (3026/2992/2894), a pure max-relative bar looks flat
-                row.value:SetText(("%d (%.0f%%)"):format(item.count, 100 * item.count / math.max(1, st.total)))
+                row.value:SetText(("%s (%.0f%%)"):format(NspShortNum(item.count), 100 * item.count / math.max(1, st.total)))
                 local r, g, b = ClassColorRGB(item.file)
                 if row.bar then
                     row.bar:SetMinMaxValues(0, st.top[1].count)
@@ -7110,11 +7135,11 @@ TacticalUpdate = function()
         -- даже если в список помещается только 500. У «Все» числа нет: это
         -- размер базы, а не список (решение владельца 26.11.2026).
         tactical.filters.all.label:SetText(L("UI_ALL"))
-        tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. tabN.fresh)
-        tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. tabN.newAll)
-        tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. tabN.peern)
+        tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. NspShortNum(tabN.fresh))
+        tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. NspShortNum(tabN.newAll))
+        tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. NspShortNum(tabN.peern))
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
-        tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
+        tactical.count:SetText(NspShortNum(TacticalRows()) .. " / " .. NspShortNum(st.total))
         tactical.status:SetText("|cff45dc9b+|r " .. L("UI_LIVE") .. " ; " .. TacticalSources())
     end)
     if not ok then P(L("ERR_LIST") .. tostring(err)) end
