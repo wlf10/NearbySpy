@@ -1746,6 +1746,15 @@ PeerSync = function()
         -- dropped: потеря управляющего пакета лишает десятков записей, и её
         -- нельзя смешивать с потерей одной встречи.
         askExpired = peerStats.askExpired or 0,
+        -- Транспорт (26.11.2026): сколько отправлено аддон-сообщением и сколько
+        -- старым каналом, сколько принято по префиксу, сколько отправлено
+        -- таймером. Без них «sent растёт» не отличает новый путь от старого, а
+        -- «тишина в приёме» — «префикс не сработал» от «никто не слал».
+        viaAddon = peerStats.viaAddon or 0,
+        viaChannel = peerStats.viaChannel or 0,
+        addonIn = peerStats.addonIn or 0,
+        timerSent = peerStats.timerSent or 0,
+        timerFail = peerStats.timerFail or 0,
         -- Адресные запросы (24.11.2026): сколько запросов отправлено и сколько
         -- сейчас открыто. При обходе пиров по очереди это главные числа —
         -- по ним видно, чей ответ ещё не пришёл.
@@ -2457,6 +2466,122 @@ function PeerDrainGear(db)
     return true
 end
 
+-- PeerWireSend(db, payload, channel) — ОДНА точка отправки пакета в канал.
+-- С 26.11.2026 основной транспорт — аддон-сообщение по префиксу: замер зондом
+-- NSGateProbe показал, что оно НЕ требует hardware-события (уходит из C_Timer),
+-- в отличие от SendChatMessage, который клиент пускает только с клика по миру.
+-- Отправка идёт в тот же канал (тип "CHANNEL" + номер), но отдельной полосой:
+-- в чате её не видно, а слышат её только аддоны, зарегистрировавшие префикс.
+-- Совместимость: старые клиенты префикс не регистрируют, поэтому НАШИ пакеты
+-- они больше не слышат — принятое решение владельца (26.11.2026). Обратное
+-- направление сохранено: приём идёт и с CHAT_MSG_CHANNEL, и с CHAT_MSG_ADDON,
+-- поэтому старые клиенты продолжают кормить нас как раньше.
+-- Возврат: ok, result, transport. global — в главном чанке 197 локалов из 200.
+function PeerWireSend(db, payload, channel)
+    local api = C_ChatInfo
+    local addon = api and api.SendAddonMessage
+    local useAddon = type(addon) == "function" and not (type(db) == "table" and db.peerViaAddon == false)
+    if useAddon then
+        local ok, r1 = pcall(addon, NSP_CONST.PEER_PREFIX, payload, "CHANNEL", channel)
+        if ok then
+            if type(db) == "table" and type(db.debug) == "table" then
+                db.debug.peerTransport = "addon"
+                peerStats.viaAddon = (peerStats.viaAddon or 0) + 1
+            end
+            return true, r1, "addon"
+        end
+        -- Исключение внутри API — падать в канал не надо, это тот же гейт:
+        -- сообщаем наверх как ошибку транспорта.
+        return false, tostring(r1), "addon"
+    end
+    local send = (api and api.SendChatMessage) or SendChatMessage
+    if type(send) ~= "function" then return false, "no send api", "none" end
+    local ok, r = pcall(send, payload, "CHANNEL", nil, channel)
+    if type(db) == "table" and type(db.debug) == "table" then
+        db.debug.peerTransport = "channel"
+        peerStats.viaChannel = (peerStats.viaChannel or 0) + 1
+    end
+    return ok, r, "channel"
+end
+
+-- PeerRegisterPrefix() — объявить префикс клиенту. Без регистрации приёмник
+-- НЕ получает CHAT_MSG_ADDON по этому префиксу вовсе, поэтому вызывается на
+-- каждом входе и результат пишется в SV (иначе «тишина в канале» не отличить
+-- от «префикс не зарегистрировался»).
+function PeerRegisterPrefix(db)
+    local api = C_ChatInfo
+    if not api or type(api.RegisterAddonMessagePrefix) ~= "function" then
+        if type(db) == "table" and type(db.debug) == "table" then
+            db.debug.prefix = "api missing"
+        end
+        return false
+    end
+    local ok, r = pcall(api.RegisterAddonMessagePrefix, NSP_CONST.PEER_PREFIX)
+    local registered
+    if api.IsAddonMessagePrefixRegistered then
+        local ok2, r2 = pcall(api.IsAddonMessagePrefixRegistered, NSP_CONST.PEER_PREFIX)
+        registered = ok2 and tostring(r2) or ("error:" .. tostring(r2))
+    end
+    if type(db) == "table" and type(db.debug) == "table" then
+        db.debug.prefix = ("%s/%s reg=%s"):format(
+            NSP_CONST.PEER_PREFIX, tostring(type(ok) == "boolean" and r or ok), tostring(registered))
+    end
+    return ok == true or registered == "true"
+end
+
+-- PeerStartTimer() — слив очереди по таймеру (26.11.2026).
+--
+-- До этой правки очередь уходила ТОЛЬКО с клика по 3D-миру: клиент пускал
+-- SendChatMessage в канал лишь из hardware-события (замер: 66 893 клика = все
+-- отправки, а движение/каст/цель/ролл = 7 000+ попыток и НОЛЬ отправок плюс
+-- попапы ADDON_ACTION_BLOCKED). Живой SV показывал queued=60 при sent=0.
+-- Аддон-сообщение такого гейта не имеет (проверено зондом NSGateProbe), поэтому
+-- слив переносится на таймер.
+--
+-- Шаг NSP_CONST.PEER_TIMER_STEP (1.2 с): замер показал пачку ~10 и устойчивые
+-- ~1 сообщение в секунду; всё сверх одного в секунду сервер выбрасывает МОЛЧА
+-- (526 из 600 при 10/с). 1.2 с = 50 сообщений в минуту при потолке ~65.
+--
+-- Своя проверка интервала НЕ дублирует DrainPeerQueue: там PEER_GAP считается
+-- для старого транспорта, а здесь свой шаг. Поэтому PEER_GAP при работе таймера
+-- не мешает: таймер вызывает слив, когда сам решит.
+function PeerStartTimer()
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return false end
+    if peerStats.timerOn then return true end
+    peerStats.timerOn = true
+    local function Step()
+        local okDb, db = pcall(GetDB)
+        if okDb and type(db) == "table" and db.peerEnabled then
+            -- Только когда есть что отправлять: пустой тик не тратит канал.
+            local gearQ = peerStats.gearQueue
+            local hasGear = type(gearQ) == "table" and #gearQ > 0
+            if #peerQueue > 0 or hasGear then
+                local ok, err = pcall(DrainPeerTimer)
+                if not ok then DbgErr("peerTimerDrain", err) end
+            end
+        end
+        C_Timer.After(NSP_CONST.PEER_TIMER_STEP, Step)
+    end
+    C_Timer.After(NSP_CONST.PEER_TIMER_STEP, Step)
+    return true
+end
+
+-- PeerWireTimerSend(db, payload, channel) — отправка из таймера.
+-- Отдельная от PeerWireSend только затем, чтобы считать счётчик timerSent и
+-- чтобы ошибка таймера не смешивалась с ошибкой отправки по клику.
+function PeerWireTimerSend(db, payload, channel)
+    local ok, result, transport = PeerWireSend(db, payload, channel)
+    if ok and result ~= false then
+        peerStats.timerSent = (peerStats.timerSent or 0) + 1
+    else
+        peerStats.timerFail = (peerStats.timerFail or 0) + 1
+        if type(db) == "table" and type(db.debug) == "table" then
+            db.debug.peerSendError = tostring(result):sub(1, 150)
+        end
+    end
+    return ok, result, transport
+end
+
 -- Замер возврата канала (15.11.2026). Гейт клиента сообщает о себе СОБЫТИЕМ
 -- ADDON_ACTION_BLOCKED, а не результатом вызова, поэтому заблокированная
 -- отправка выглядела ровно как успешная: в живом SV три строки BLOCKED стояли
@@ -2592,9 +2717,13 @@ local function DrainPeerQueue()
         end
         return
     end
-    -- The beta may require a hardware input event for sending channel chat.
+    -- Транспорт выбирает PeerWireSend: аддон-сообщение (основной) с фолбэком на
+    -- SendChatMessage. Здесь достаточно убедиться, что есть ХОТЯ БЫ один —
+    -- раньше проверялся только канальный, и клиент без него не отправил бы
+    -- ничего, даже если аддон-сообщения работают.
+    local hasAddon = C_ChatInfo and type(C_ChatInfo.SendAddonMessage) == "function"
     local send = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
-    if not send then return end
+    if not hasAddon and type(send) ~= "function" then return end
 
     -- ── Управляющий пакет (запрос Q1, 24.11.2026) ───────────────────────────
     -- Он уже собран целиком и в пачку не пакуется: это одно короткое
@@ -2609,14 +2738,14 @@ local function DrainPeerQueue()
             PeerSync()
             return
         end
-        local okC, resultC = pcall(send, ctl.raw, "CHANNEL", nil, channel)
+        local okC, resultC, trC = PeerWireSend(db, ctl.raw, channel)
         if NspNoteSendRet(db, okC, resultC, nowT) then
             D(("Peer gate: a block fired with this ask send (total %d)")
                 :format(db.debug.peerGate or 0))
         end
         if not okC or resultC == false then
             db.debug.peerSendError = tostring(resultC):sub(1, 150)
-            D(("Peer ask send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
+            D(("Peer ask send error (%s): %s"):format(tostring(trC), PeerEsc(db.debug.peerSendError, 120)))
             PeerSync()
             return
         end
@@ -2724,14 +2853,14 @@ local function DrainPeerQueue()
         return
     end
 
-    local ok, result = pcall(send, payload, "CHANNEL", nil, channel)
+    local ok, result, transport = PeerWireSend(db, payload, channel)
     if NspNoteSendRet(db, ok, result, nowT) then
         D(("Peer gate: a block fired with this send, packet may be lost (total %d)")
             :format(db.debug.peerGate or 0))
     end
     if not ok or result == false then
         db.debug.peerSendError = tostring(result):sub(1, 150)
-        D(("Peer send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
+        D(("Peer send error (%s): %s"):format(tostring(transport), PeerEsc(db.debug.peerSendError, 120)))
         PeerSync()
         return
     end
@@ -2751,6 +2880,18 @@ local function DrainPeerQueue()
         table.concat(names, ", "), (#batch > 1) and (" [batch " .. #batch .. "]") or "",
         #peerQueue, peerStats.sent))
     PeerSync()
+end
+
+-- DrainPeerTimer() — слив по таймеру (26.11.2026). Отдельная запись нужна
+-- ровно затем, чтобы обойти СВОЙ интервал старого транспорта: внутри
+-- DrainPeerQueue стоит `nowT - peerStats.lastSend < PEER_GAP → return`, и без
+-- сброса таймер попадал бы под чужой шаг (10 с) вместо своего (1.2 с).
+-- Сам шаг таймера уже проверен вызывающим, поэтому сбрасывать lastSend здесь
+-- безопасно: две отправки в одну секунду всё равно не сложатся, таймер идёт
+-- раз в PEER_TIMER_STEP.
+function DrainPeerTimer()
+    peerStats.lastSend = 0
+    return DrainPeerQueue()
 end
 
 -- ── Запрос базы у пиров: пакеты Q1 (запрос) и A1 (ответ) — 24.11.2026 ──────
@@ -3956,6 +4097,10 @@ function NspPruneDebug(db)
     local keep = {
         -- transport: peer channel + chat send
         peer = true, peerJoin = true, peerDrain = true, peerGate = true,
+        -- транспорт обмена (26.11.2026): каким путём ушёл пакет и
+        -- зарегистрировался ли префикс аддон-сообщений. Без них «отправок нет»
+        -- не отличить от «префикс не встал».
+        peerTransport = true, prefix = true,
         peerSenders = true, peerSendError = true, peerCommaStripped = true,
         lastDrainWhy = true, sendRet = true, sendRetAt = true,
         -- client gate (ADDON_ACTION_BLOCKED) and throttling
@@ -8951,6 +9096,14 @@ chatFrame:RegisterEvent("CHAT_MSG_SAY")
 chatFrame:RegisterEvent("CHAT_MSG_YELL")
 chatFrame:RegisterEvent("CHAT_MSG_CHANNEL")
 chatFrame:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
+-- Приём по префиксу аддона (26.11.2026). Наш основной транспорт — аддон-сообщение
+-- (см. PeerWireSend), но СТАРЫЙ путь в канал остаётся зарегистрированным: клиенты
+-- до этой правки префикс не знают и продолжают слать обычным сообщением, и мы
+-- обязаны их слышать. Обратное — не так: они нас больше не слышат, это решение
+-- владельца.
+if C_ChatInfo and type(C_ChatInfo.RegisterAddonMessagePrefix) == "function" then
+    chatFrame:RegisterEvent("CHAT_MSG_ADDON")
+end
 chatFrame:SetScript("OnEvent", function(self, event, ...)
     -- all parsing under pcall: if the beta returns the name as a secret string
     -- (such were caught in combat via canaccessvalue), string operations would
@@ -8984,6 +9137,31 @@ chatFrame:SetScript("OnEvent", function(self, event, ...)
                 end
             end, ...)
             if not okN then DbgErr("channelNotice", errN) end
+            return
+        end
+        -- ── Приём по префиксу аддона (26.11.2026) ────────────────────────────
+        -- Раскладка события: prefix, text, chatType, sender, ...
+        -- Фильтр ТОЛЬКО по префиксу: имя канала в событии не приходит (там тип
+        -- рассылки — "CHANNEL"), поэтому IsPeerChannel применить нечем. Что
+        -- пакет наш, решает содержимое: ReceivePeerMessage проверяет протокол,
+        -- игру и мир, а на чужой префикс мы вообще не подписаны.
+        if ev == "CHAT_MSG_ADDON" then
+            local okA, errA = pcall(function(...)
+                local prefix, text, chatType, sender = ...
+                if type(prefix) ~= "string" or prefix:lower() ~= NSP_CONST.PEER_PREFIX:lower() then
+                    return
+                end
+                if canaccessvalue and not canaccessvalue(text) then return end
+                if type(text) ~= "string" or text == "" then return end
+                if type(sender) ~= "string" or sender == "" then return end
+                -- Только канальная рассылка: PARTY/GUILD/WHISPER тем же префиксом
+                -- могут нести записи, снятые в другом месте, и принимать их за
+                -- канал — значит мешать провенанс.
+                if type(chatType) == "string" and chatType ~= "CHANNEL" then return end
+                peerStats.addonIn = (peerStats.addonIn or 0) + 1
+                ReceivePeerMessage(text, sender)
+            end, ...)
+            if not okA then DbgErr("peerAddon", errA) end
             return
         end
         if ev == "CHAT_MSG_CHANNEL" and
@@ -9183,6 +9361,15 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         if db.peerEnabled then
             local ok, err = pcall(JoinPeerChannel)
             if not ok then DbgErr("peerJoin", err) end
+            -- Префикс аддон-сообщений: без регистрации приём CHAT_MSG_ADDON по
+            -- нему не придёт ВООБЩЕ. Результат в SV (db.debug.prefix), иначе
+            -- «тишина» не отличить от «префикс не зарегистрировался».
+            local okP, errP = pcall(PeerRegisterPrefix, db)
+            if not okP then DbgErr("peerPrefix", errP) end
+            -- Слив очереди по таймеру (26.11.2026): аддон-сообщение не требует
+            -- hardware-события, поэтому очередь больше не ждёт клика по миру.
+            local okT, errT = pcall(PeerStartTimer)
+            if not okT then DbgErr("peerTimer", errT) end
             pcall(PeerLogChannel, "join")
             -- channels may not be ready at PLAYER_LOGIN (GetChannelName = nil):
             -- one retry after 30s if the channel is still not up
