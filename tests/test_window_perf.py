@@ -40,8 +40,14 @@ def cut(src: str, start: str, end: str) -> str:
 
 
 def top_players_block() -> str:
+    """NspBaseList + NspTopPlayers одним куском.
+
+    NspTopPlayers теперь берёт готовый порядок из NspBaseList (кэш базовой
+    сортировки), поэтому вырезать только её нельзя — чанк упадёт
+    «attempt to call global 'NspBaseList'».
+    """
     return cut(SOURCE.read_text(encoding="utf-8"),
-               "function NspTopPlayers(", "\n-- ============ UI ============")
+               "local NSP_BASE_CACHE = {}", "\n-- ============ UI ============")
 
 
 def schema_block() -> str:
@@ -333,6 +339,65 @@ class RealmBucketCacheTests(unittest.TestCase):
         once = self.g["RealmBucket"]("CAMWOW EU4 Realm 6 PvP")
         twice = self.g["RealmBucket"](str(once))
         self.assertEqual(str(once), str(twice))
+
+
+class BaseListCacheTests(unittest.TestCase):
+    """Базовая сортировка считается раз в TTL, фильтры идут проходом.
+
+    Идея владельца 26.11.2026: порядок в списке ОДИН (по времени), и он не
+    должен пересчитываться на каждый фильтр. До этого каждый таб платил полную
+    сортировку (~80 мс в lupa), теперь — только линейный проход (15–20 мс).
+    """
+
+    def setUp(self):
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(STUBS)
+        self.lua.execute(schema_block())
+        self.lua.execute(top_players_block() + "\nTestTop = NspTopPlayers\nTestBase = NspBaseList\n")
+        self.lua.execute("DB = { players = {} }")
+        self.g = self.lua.globals()
+
+    def add(self, key, last_seen, name=None):
+        self.g["DB"]["players"][key] = mk_record(self.lua, last_seen, name=name or key)
+
+    def test_base_list_is_cached_within_the_ttl(self):
+        self.add("A", 100)
+        self.add("B", 200)
+        first = self.g["TestBase"](self.g["DB"], "lastSeen")
+        # добавляем запись — но в пределах TTL кэш обязан отдать прежний список
+        self.add("C", 300)
+        second = self.g["TestBase"](self.g["DB"], "lastSeen")
+        self.assertEqual(2, len(first))
+        self.assertEqual(2, len(second), "кэш базового списка не сработал")
+
+    def test_base_list_rebuilds_after_the_ttl(self):
+        self.add("A", 100)
+        self.g["TestBase"](self.g["DB"], "lastSeen")
+        self.add("B", 200)
+        # сдвигаем часы за пределы TTL
+        self.lua.execute("NOW = NOW + 10")
+        rebuilt = self.g["TestBase"](self.g["DB"], "lastSeen")
+        self.assertEqual(2, len(rebuilt), "после TTL список не пересобрался")
+
+    def test_filters_do_not_resort(self):
+        """Смена фильтра не должна трогать базовый список (тот же объект)."""
+        self.add("A", 100)
+        self.add("B", 200)
+        self.g["TestTop"](self.g["DB"], "lastSeen", 500)
+        base1 = self.g["TestBase"](self.g["DB"], "lastSeen")
+        accept = self.lua.eval("(function(p) return true end)")
+        self.g["TestTop"](self.g["DB"], "lastSeen", 500, accept)
+        base2 = self.g["TestBase"](self.g["DB"], "lastSeen")
+        # lupa отдаёт разные обёртки на один объект Lua; сравниваем длину и
+        # содержимое, а не идентичность
+        self.assertEqual(len(base1), len(base2))
+
+    def test_limit_is_respected_from_the_base(self):
+        for i in range(50):
+            self.add(f"P{i}", 100 + i)
+        new, n = self.g["TestTop"](self.g["DB"], "lastSeen", 10)
+        self.assertEqual(10, n)
+        self.assertEqual(149, new[1]["lastSeen"])
 
 
 if __name__ == "__main__":

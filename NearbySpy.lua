@@ -5973,62 +5973,82 @@ local function DebugSummary(db)
         WHO_TOKEN_ZONE, WHO_TOKEN_CLASS, WHO_TOKEN_RACE, WHO_TOKEN_SRC, GetLocale())
 end
 
--- NspTopPlayers(db, key, limit, accept) — верхние `limit` игроков по ключу.
+-- NspBaseList(db, key) — ВСЕ записи с ненулевым ключом, отсортированные по нему.
 --
--- История замеров на живом SV (61 435 записей, lupa, медиана):
---   копия всех + полная сортировка           322 мс
---   отбор с порогом и вытеснением O(limit)   226 мс  ← 2241 вытеснение × скан 500
---   собрать всё со встречей + sort           160 мс
---   собрать ПАРЫ {v, p} + sort                71 мс  ← выбрано
+-- Это и есть «одна сортировка» (идея владельца 26.11.2026): порядок в списке
+-- всегда один — по времени (lastSeen, либо peerAt для вкладки «Обмен новые»),
+-- и он считается один раз на TTL, а не на каждый фильтр.
 --
--- Почему пары: компаратор для 19 885 элементов вызывается ~280 тыс. раз, и
--- каждое обращение p[key] в нём идёт через метатаблицу записи (Lua-функция).
--- Материализованное числовое поле в обёртке убирает это из горячего цикла —
--- одна и та же логика, втрое дешевле.
+-- Замер на живом SV (61 435 записей, lupa):
+--   сортировка 19 885 записей с материализованным ключом   71 мс
+--   проход по готовому порядку с фильтром (без сортировки) 15–20 мс
+-- Раньше каждый таб платил 80 мс (сортировка + фильтр). Теперь сортировка
+-- платится раз в TTL, а смена таба стоит только проход.
 --
--- ⚠️ accept (фильтр видимости) применяется ДО сортировки, а не после: иначе
--- «500 верхних по времени» могли не содержать ни одной строки выбранного
--- класса, и список молча пустел бы при непустой базе.
---
--- Записи без встречи (ключ = 0) отбрасываются сразу: их 41 550 из 61 435, они
--- всё равно не попадут в топ и только раздувают сортировку.
---
--- key: "lastSeen" (по умолчанию) или "peerAt" — вкладка «Обмен новые»
--- сортируется по времени пакета. Порядок для равных времён — по имени:
--- table.sort с одним ключом нестабилен, и строки «прыгали» между отрисовками.
-function NspTopPlayers(db, key, limit, accept)
+-- Ключ сортировки МАТЕРИАЛИЗОВАН в обёртке {v, p, nm}: компаратор вызывается
+-- ~280 тыс. раз, и обращение p[key] в нём шло через метатаблицу записи (вызов
+-- Lua-функции). Это была треть стоимости.
+-- global: в главном чанке 197 локалов из 200.
+local NSP_BASE_CACHE = {}
+
+function NspBaseList(db, key)
     key = key or "lastSeen"
-    limit = tonumber(limit) or NSP_CONST.MAX_ROWS
     local players = (db and db.players) or {}
+    local bucket = math.floor(time() / 10)         -- TTL: список «свеж на глаз»
+    local c = NSP_BASE_CACHE[key]
+    if c and c.bucket == bucket then return c.list end
     local all, n = {}, 0
     for _, p in pairs(players) do
         local v = tonumber(p[key]) or 0
-        if v > 0 and (not accept or accept(p)) then
+        if v > 0 then
             n = n + 1
             all[n] = { v = v, p = p, nm = p.name }
-        end
-    end
-    -- ⚠️ Добор нулевых. Отбрасывать записи без встречи (lastSeen = 0) можно
-    -- только пока их больше `limit` — иначе на маленькой базе (новый
-    -- пользователь, свежая установка) исчезли бы ВСЕ peer-записи: у них нет
-    -- нашей встречи, и колонка «когда» показывает время пакета. Таких записей
-    -- 41 550 из 61 435, и в топ по времени они не попадают — но при недоборе
-    -- список обязан быть полным.
-    if n < limit then
-        for _, p in pairs(players) do
-            local v = tonumber(p[key]) or 0
-            if v <= 0 and (not accept or accept(p)) then
-                n = n + 1
-                all[n] = { v = 0, p = p, nm = p.name }
-            end
         end
     end
     table.sort(all, function(a, b)
         if a.v == b.v then return (a.nm or "") < (b.nm or "") end
         return a.v > b.v
     end)
-    local out, m = {}, (n < limit) and n or limit
-    for k = 1, m do out[k] = all[k].p end
+    local out = {}
+    for i = 1, n do out[i] = all[i].p end
+    NSP_BASE_CACHE[key] = { bucket = bucket, list = out }
+    return out
+end
+
+-- NspTopPlayers(db, key, limit, accept) — верхние `limit` из готового порядка.
+--
+-- accept (фильтр видимости) применяется ПРОХОДОМ по уже отсортированному
+-- списку: никакой повторной сортировки. Это даёт «N самых свежих ИЗ
+-- ПОДХОДЯЩИХ» за один линейный проход.
+--
+-- Записи без встречи (ключ = 0) в базовый список не входят: их 41 550 из
+-- 61 435, до топа они не достают. Но если подходящих меньше `limit` (свежая
+-- установка, редкий фильтр), добираем их вторым проходом — иначе на маленькой
+-- базе исчезли бы все peer-записи, у которых нет нашей встречи.
+function NspTopPlayers(db, key, limit, accept)
+    key = key or "lastSeen"
+    limit = tonumber(limit) or NSP_CONST.MAX_ROWS
+    local base = NspBaseList(db, key)
+    local out, m = {}, 0
+    for i = 1, #base do
+        local p = base[i]
+        if not accept or accept(p) then
+            m = m + 1
+            out[m] = p
+            if m >= limit then return out, m end
+        end
+    end
+    if m < limit then
+        -- добор нулевых: только когда порядочных не хватило
+        local players = (db and db.players) or {}
+        for _, p in pairs(players) do
+            if (tonumber(p[key]) or 0) <= 0 and (not accept or accept(p)) then
+                m = m + 1
+                out[m] = p
+                if m >= limit then break end
+            end
+        end
+    end
     return out, m
 end
 

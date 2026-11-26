@@ -88,7 +88,7 @@ class RowLimitTests(unittest.TestCase):
         # NspTopPlayers объявлена ВЫШЕ среза, а TacticalRows её зовёт — без неё
         # чанк падает «attempt to call global 'NspTopPlayers' (a nil value)» и
         # тест проверяет не код, а отсутствие функции. Берём настоящую, из файла.
-        top_start = source.index("function NspTopPlayers(")
+        top_start = source.index("local NSP_BASE_CACHE = {}")
         top_end = source.index("-- ============ UI ============", top_start)
         # NspSetText/NspSetColor объявлены перед TacticalRows и им нужны —
         # без них чанк падает «attempt to call global 'NspSetText'».
