@@ -83,7 +83,20 @@ class TabCountTests(unittest.TestCase):
 
     def tab_counts(self):
         c = self.g["NspTabCounts"](NOW)
-        return {m: c[m] for m in MODES}
+        out = {m: c[m] for m in MODES}
+        out["newAll"] = c["newAll"]
+        return out
+
+    def db_match(self, mode):
+        """Сколько всего записей базы проходит фильтр — эталон для «Новых»."""
+        return self.lua.execute("""
+        local mode = ...
+        local n = 0
+        for _, p in pairs(DB.players) do
+            if TestVisible(p, NOW, mode) then n = n + 1 end
+        end
+        return n
+        """, mode)
 
     def buffer_match(self, mode):
         """Сколько строк буфера проходит фильтр режима — эталон для таба."""
@@ -103,12 +116,15 @@ class TabCountTests(unittest.TestCase):
         for i in range(700):
             self.peer("Peer%d" % i, NOW - 200 - i)
         counts = self.tab_counts()
-        for mode in MODES:
+        # «Свежие» и «Обмен» показывают длину списка; «Новые» — сколько всего
+        # новых (может быть больше 500); у «Все» числа нет.
+        for mode in ("fresh", "peern"):
             with self.subTest(mode=mode):
                 self.assertEqual(
                     self.buffer_match(mode), counts[mode],
                     "таб %s: число %s не равно длине списка %s"
                     % (mode, counts[mode], self.buffer_match(mode)))
+        self.assertEqual(self.db_match("new"), counts["newAll"])
 
     def test_peer_tab_does_not_count_the_whole_database(self):
         """Регрессия: в базе 700 записей канала, в буфере — ни одной.
@@ -140,9 +156,9 @@ class TabCountTests(unittest.TestCase):
         counts = self.tab_counts()
         self.assertEqual(5, counts["all"])
         self.assertEqual(5, counts["fresh"])   # все в пределах 5 минут
-        self.assertEqual(3, counts["new"])
+        self.assertEqual(3, counts["newAll"])
         self.assertEqual(2, counts["peern"])
-        for mode in MODES:
+        for mode in ("fresh", "peern"):
             self.assertEqual(self.buffer_match(mode), counts[mode])
 
     def test_all_tab_matches_a_full_buffer(self):
@@ -151,7 +167,7 @@ class TabCountTests(unittest.TestCase):
             self.seen("S%d" % i, NOW - 10 - i)
         counts = self.tab_counts()
         self.assertEqual(500, counts["all"],
-                         "таб «Все» показывает размер базы вместо длины списка")
+                         "таб «Все» должен показывать длину списка, не размер базы")
 
     def test_foreign_records_are_not_counted_when_the_flag_is_off(self):
         self.lua.execute("DB.peerAllRealms = false")
@@ -164,6 +180,36 @@ class TabCountTests(unittest.TestCase):
         self.assertEqual(1, counts["peern"],
                          "чужая запись посчитана, хотя список её не показывает")
         self.assertEqual(self.buffer_match("peern"), counts["peern"])
+
+    def test_new_tab_counts_above_the_row_limit(self):
+        """«Новые» показывает сколько новых ВСЕГО, хотя строк — 500.
+
+        Просьба владельца 26.11.2026: «для новых надо показывать счётчик больше
+        500, показывать всего сколько новых, но отображаем только 500».
+        """
+        for i in range(700):
+            self.seen("N%d" % i, NOW - 10 - i, first_seen=NOW - 5)
+        counts = self.tab_counts()
+        self.assertEqual(500, counts["all"], "список не упёрся в предел")
+        self.assertEqual(700, counts["newAll"],
+                         "таб «Новые» не показывает общее число новых")
+        # список по вкладке «Новые» по-прежнему ограничен пределом строк
+        self.assertEqual(500, self.lua.execute("""
+        local _, shown = NspTopPlayers(DB, "lastSeen", NSP_CONST.MAX_ROWS, function(p)
+            return TestVisible(p, NOW, "new")
+        end)
+        return shown
+        """))
+
+    def test_all_tab_has_no_number(self):
+        """У «Все» числа нет: это размер базы, а не список."""
+        # Проверяем по источнику: подпись таба «Все» — только ключ локали, без
+        # числа. Через рендер это не поймать, не поднимая весь UI-стек.
+        src = SOURCE.read_text(encoding="utf-8")
+        line = [l for l in src.splitlines() if 'tactical.filters.all.label:SetText' in l]
+        self.assertEqual(1, len(line), "подпись таба «Все» задаётся не один раз")
+        self.assertNotIn("tabN", line[0],
+                         "у таба «Все» осталось число: %s" % line[0].strip())
 
     def test_counts_use_the_filter_argument_not_the_global_mode(self):
         """Счётчики считают все четыре режима за один проход."""

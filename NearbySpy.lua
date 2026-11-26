@@ -6571,30 +6571,48 @@ local function TacticalVisible(p, now, filt)
     return true
 end
 
--- NspTabCounts(now) — сколько строк покажет КАЖДЫЙ таб.
+-- NspTabCounts(now) — числа на табах.
 --
--- Число на табе обязано совпадать с длиной списка: раньше оно считалось по всей
--- базе (63 391 запись), а список берётся из буфера последних 500 — на вкладке
--- «Обмен новые» стояло 1520 при 462 строках в списке (жалоба владельца
--- 26.11.2026: «в табе число отличается от списка в обмене»).
+-- Два разных смысла, так решил владелец 26.11.2026:
+--   • «Свежие» и «Обмен новые» — сколько строк ОТКРОЕТСЯ по клику. Раньше здесь
+--     считалась вся база (63 391 запись), а список берётся из буфера последних
+--     500 — на вкладке «Обмен новые» стояло 953 при 462 строках (жалоба:
+--     «в табе число отличается от списка в обмене»). Поэтому считается ровно тем
+--     же NspTopPlayers с тем же фильтром и пределом, что и список.
+--   • «Новые» — сколько новых ВСЕГО за сессию, даже если в списке помещается
+--     только MAX_ROWS (просьба: «для новых надо показывать счётчик больше 500,
+--     показывать всего сколько новых, но отображаем только 500»).
+--   • «Все» — числа нет вовсе: это размер базы, а не список.
 --
--- Поэтому считаем не «сколько подходящего в базе», а «сколько строк отберёт
--- список» — тем же NspTopPlayers с тем же фильтром и тем же пределом. Тогда
--- расхождение невозможно по построению, в том числе на маленькой базе, где
--- список добирается записями без времени.
+-- out.newAll — общее число новых, out[filt] — длина списка режима.
+-- Кэш на 3 с, как у списка и агрегатов: полный проход по базе стоит десятки мс.
 -- global: новых локалов в главном чанке нет (195 из 200).
 function NspTabCounts(now)
-    local db, out = GetDB(), {}
+    local db = GetDB()
+    -- Новые зависят ещё и от начала сессии, а не только от данных и флага.
+    local key = table.concat({
+        tostring(db.peerAllRealms), tostring(tactical.started),
+        tostring(math.floor(now / 3)),
+    }, "|")
+    local cached = tactical.tabCache
+    if cached and cached.key == key then return cached.n end
+    local out = {}
     local modes = { "all", "fresh", "new", "peern" }
     for i = 1, #modes do
         local filt = modes[i]
         -- Порядок вкладки peer — по времени пакета, остальных — по нашей встрече.
-        local key = (filt == "peern") and "peerAt" or "lastSeen"
-        local _, shown = NspTopPlayers(db, key, NSP_CONST.MAX_ROWS, function(p)
+        local sortKey = (filt == "peern") and "peerAt" or "lastSeen"
+        local _, shown = NspTopPlayers(db, sortKey, NSP_CONST.MAX_ROWS, function(p)
             return TacticalVisible(p, now, filt)
         end)
         out[filt] = shown or 0
     end
+    local newAll = 0
+    for _, p in pairs(db.players or {}) do
+        if TacticalVisible(p, now, "new") then newAll = newAll + 1 end
+    end
+    out.newAll = newAll
+    tactical.tabCache = { key = key, n = out }
     return out
 end
 
@@ -7044,7 +7062,7 @@ TacticalUpdate = function()
         -- остаются по всей базе: они про базу, а не про список.
         local tabN = NspTabCounts(time())
         tactical.total.value:SetText(tostring(st.total))
-        tactical.total.detail:SetText("+" .. tostring(tabN.new) .. " " .. L("UI_NEW_SHORT"))
+        tactical.total.detail:SetText("+" .. tostring(tabN.newAll) .. " " .. L("UI_NEW_SHORT"))
         tactical.fresh.value:SetText(tostring(tabN.fresh))
         tactical.fresh.detail:SetText(("15m %d; 1h %d"):format(st.f15, st.f60))
         tactical.factions.value:SetText(("|cffff6666%s %d|r ; |cff6699ff%s %d|r"):format(L("HORDE"), st.horde, L("ALLIANCE"), st.alliance))
@@ -7087,11 +7105,13 @@ TacticalUpdate = function()
             else row:Hide() end
         end
 
-        -- Числа на табах — из того же отбора, что строит список (NspTabCounts),
-        -- поэтому «на табе 462» и «в списке 462 строки» — одно и то же число.
-        tactical.filters.all.label:SetText(L("UI_ALL") .. " " .. tabN.all)
+        -- Числа на табах — из NspTabCounts: у «Свежих» и «Обмена» это длина
+        -- списка (не спорят с ним), у «Новых» — сколько новых ВСЕГО за сессию,
+        -- даже если в список помещается только 500. У «Все» числа нет: это
+        -- размер базы, а не список (решение владельца 26.11.2026).
+        tactical.filters.all.label:SetText(L("UI_ALL"))
         tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. tabN.fresh)
-        tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. tabN.new)
+        tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. tabN.newAll)
         tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. tabN.peern)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
