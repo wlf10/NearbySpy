@@ -1323,11 +1323,6 @@ local function UpsertPlayer(db, data)
     local key = data.key
     if not key then return false end
     local nowT = time()
-    -- Счётчик изменений данных (26.11.2026). Единственная точка записи игрока,
-    -- поэтому именно здесь дешевле всего отметить «база изменилась»: кэш окна
-    -- статистики сверяет свою версию с этим числом. Только в памяти — в SV не
-    -- пишется, между сессиями не переносится (после /reload кэш пуст и так).
-    nspDataVer = (nspDataVer or 0) + 1
     local observed = data.observe ~= false
     local entry = db.players[key]
     if not entry then
@@ -6492,6 +6487,11 @@ end
 local function TacticalRow(parent, index)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(NSP_CONST.LIST_W, TACTICAL_ROW_H)
+    -- Позиция задаётся ЗДЕСЬ и только здесь: индекс строки неизменен, поэтому
+    -- ставить точку при каждой перерисовке (было ClearAllPoints + SetPoint на
+    -- 500 строк = 1000 вызовов клиента впустую) незачем.
+    row:SetPoint("TOPLEFT", 0, -(index - 1) * TACTICAL_ROW_H)
+    row._nspShown = false
     row:EnableMouse(true)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
@@ -6571,8 +6571,34 @@ local function TacticalRow(parent, index)
     return row
 end
 
+-- NspSetText(row, field, fs, text) — SetText только при изменении.
+--
+-- Замер перерисовки списка на живом SV: 500 строк = 8001 вызов клиентского API
+-- (16 на строку), то есть 40–160 мс в клиенте НА КАЖДУЮ отрисовку. Больше
+-- половины этих вызовов — SetText/SetTextColor одними и теми же значениями:
+-- список перерисовывается при OnShow, при повторном клике по тому же фильтру,
+-- при смене реалма (содержимое строк при этом не меняется).
+-- Сравнение строк в Lua бесплатно против C-вызова в клиент.
+-- global: в главном чанке 197 локалов из 200.
+function NspSetText(row, field, fs, text)
+    local cache = row._nspText
+    if not cache then cache = {}; row._nspText = cache end
+    if cache[field] == text then return end
+    cache[field] = text
+    fs:SetText(text)
+end
+
+-- NspSetColor(row, field, fs, r, g, b) — SetTextColor только при изменении.
+function NspSetColor(row, field, fs, r, g, b)
+    local cache = row._nspColor
+    if not cache then cache = {}; row._nspColor = cache end
+    local key = r .. "," .. g .. "," .. b
+    if cache[field] == key then return end
+    cache[field] = key
+    fs:SetTextColor(r, g, b)
+end
+
 local function TacticalRows()
-    for _, row in ipairs(tactical.rows) do row:Hide() end
     local now, shown = time(), 0
     -- Свежесть — по времени пакета для вкладки «Обмен новые», иначе по нашей
     -- встрече. Фильтр (TacticalVisible) применяется ВНУТРИ отбора: так список
@@ -6580,16 +6606,18 @@ local function TacticalRows()
     -- подходящих может не оказаться».
     local key = (tactical.filter == "peern") and "peerAt" or "lastSeen"
     -- ── Кэш списка (26.11.2026) ─────────────────────────────────────────────
-    -- Пересборка стоит ~214 мс в клиенте (замер на живом SV), а TacticalUpdate
-    -- зовут из семи мест — половина вызовов приходит от клика по фильтру, когда
-    -- данные не менялись. Ключ = версия данных + всё состояние фильтров + окно
-    -- времени (фильтр «5 минут» зависит от now, поэтому TTL 5 с).
+    -- ⚠️ Ключ НЕ содержит версию данных. Первая версия кэша была привязана к
+    -- nspDataVer, а тот растёт на КАЖДУЮ запись игрока (UpsertPlayer) — в городе
+    -- записи идут непрерывно, поэтому кэш промахивался ВСЕГДА и фризы остались
+    -- (живая жалоба владельца: «чувствуется фризы на секунду при фильтрах»).
+    -- Окну статистики точность до последней записи не нужна: TTL в 3 с даёт
+    -- ответ «свежий на глаз» и делает повторные клики бесплатными.
+    local bucket = math.floor(now / 3)
     local cacheKey = table.concat({
-        tostring(nspDataVer or 0),
         tostring(tactical.filter), tostring(tactical.classFilter),
         tactical.levelFilter and (tactical.levelFilter[1] .. "-" .. tactical.levelFilter[2]) or "",
         tostring(tactical.levelExact), tostring(tactical.realmFilter),
-        tostring(GetDB().peerAllRealms), tostring(math.floor(now / 5)),
+        tostring(GetDB().peerAllRealms), tostring(bucket),
     }, "|")
     local cache = tactical.listCache
     local list
@@ -6607,29 +6635,41 @@ local function TacticalRows()
         local p = list[i]
         shown = i
         local row = tactical.rows[shown] or TacticalRow(winList, shown)
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
+        -- Позиция зависит ТОЛЬКО от индекса строки, а строка переиспользуется
+        -- на том же индексе — значит ClearAllPoints/SetPoint достаточно сделать
+        -- один раз, при создании (их делает TacticalRow). Раньше на каждой
+        -- отрисовке уходило 1000 вызовов клиента впустую.
         row.player = p
-        TacticalClassIcon(row.icon, p.class)
+        if row._nspClass ~= p.class then
+            row._nspClass = p.class
+            TacticalClassIcon(row.icon, p.class)
+        end
         -- The realm goes UNDER the name in a smaller font — for our own
         -- records too, so one list never mixes labelled and unlabelled rows.
         -- Never into the ZONE column: that column is for locations.
         local realmTag = RealmBadge(p.realm)
-        row.name:SetText(p.name or "?")
-        row.name:SetTextColor(ClassColorRGB(p.class))
+        NspSetText(row, "name", row.name, p.name or "?")
+        local cr, cg, cb = ClassColorRGB(p.class)
+        NspSetColor(row, "name", row.name, cr, cg, cb)
         if realmTag then
-            row.realm:SetText(realmTag)
-            row.realm:Show()
+            NspSetText(row, "realm", row.realm, realmTag)
+            if not row._nspRealmShown then
+                row._nspRealmShown = true
+                row.realm:Show()
+            end
         else
-            row.realm:SetText("")
-            row.realm:Hide()
+            NspSetText(row, "realm", row.realm, "")
+            if row._nspRealmShown ~= false then
+                row._nspRealmShown = false
+                row.realm:Hide()
+            end
         end
-        row.profile:SetText(("%s; %s%s"):format(
+        NspSetText(row, "profile", row.profile, ("%s; %s%s"):format(
             ClassDisplayName(p.class, p.classLoc),
             L("LVL_PREFIX"), tostring(p.level or "?")))
         -- Peer records carry no position or zone at all (the packet has
         -- neither), so a peer row honestly has no zone.
-        row.zone:SetText(ZoneDisplay(p.zoneId, p.zone))
+        NspSetText(row, "zone", row.zone, ZoneDisplay(p.zoneId, p.zone))
         -- In the peer list the CONTACT column answers "when did this arrive
         -- over the channel", which is the only timestamp a peer row has.
         -- Everywhere else our own sighting wins; a peer row has none
@@ -6638,12 +6678,29 @@ local function TacticalRows()
         local stamp = (p.lastSeen or 0) > 0 and p.lastSeen or p.peerAt
         if tactical.filter == "peern" and (p.peerAt or 0) > 0 then stamp = p.peerAt end
         local age = now - (stamp or 0)
-        row.seen:SetText(TimeAgo(stamp))
-        if age <= 300 then row.seen:SetTextColor(0.3, 0.9, 0.62)
-        elseif age <= 3600 then row.seen:SetTextColor(0.88, 0.72, 0.32)
-        else row.seen:SetTextColor(0.45, 0.5, 0.5) end
-        row:Show()
+        NspSetText(row, "seen", row.seen, TimeAgo(stamp))
+        if age <= 300 then NspSetColor(row, "seen", row.seen, 0.3, 0.9, 0.62)
+        elseif age <= 3600 then NspSetColor(row, "seen", row.seen, 0.88, 0.72, 0.32)
+        else NspSetColor(row, "seen", row.seen, 0.45, 0.5, 0.5) end
+        if not row._nspShown then
+            row._nspShown = true
+            row:Show()
+        end
     end
+    -- Скрываем только ХВОСТ прошлого показа, а не все строки в начале: при
+    -- 500 строках «скрыть всё, потом показать всё» — это 1000 лишних вызовов
+    -- клиента на каждую отрисовку.
+    local prev = tactical.shownCount or 0
+    if prev > shown then
+        for i = shown + 1, prev do
+            local row = tactical.rows[i]
+            if row and row._nspShown then
+                row._nspShown = false
+                row:Hide()
+            end
+        end
+    end
+    tactical.shownCount = shown
     winList:SetHeight(math.max(1, shown * TACTICAL_ROW_H))
     return shown
 end
@@ -6652,12 +6709,16 @@ local function TacticalStats()
     -- Кэш агрегатов (26.11.2026). Проход по 61 435 записям стоит ~21 мс в lupa
     -- (~50–100 мс в клиенте) и повторяется на каждую отрисовку, хотя зависит
     -- только от данных, выбранного реалма и текущего времени (счётчики «5 мин /
-    -- 15 мин / 1 час»). Ключ: версия данных + реалм + окно 5 с.
+    -- 15 мин / 1 час»). Ключ: реалм + окно 3 с.
     local now = time()
     local realmSel = tactical.realmFilter
+    -- ⚠️ Та же ловушка, что и у списка: ключ БЕЗ версии данных. С nspDataVer кэш
+    -- агрегатов не срабатывал ни разу (версия растёт на каждую запись), и каждый
+    -- клик по фильтру платил полный проход. TTL 3 с — компромисс между
+    -- «свежо на глаз» и «повторный клик бесплатен».
+    local statsBucket = math.floor(now / 3)
     local cacheKey = table.concat({
-        tostring(nspDataVer or 0), tostring(realmSel),
-        tostring(GetDB().peerAllRealms), tostring(math.floor(now / 5)),
+        tostring(realmSel), tostring(GetDB().peerAllRealms), tostring(statsBucket),
     }, "|")
     local cached = tactical.statsCache
     if cached and cached.key == cacheKey then

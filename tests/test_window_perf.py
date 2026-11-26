@@ -187,7 +187,13 @@ class TopPlayersTests(unittest.TestCase):
 
 
 class CacheTests(unittest.TestCase):
-    """Кэш окна: ключ = версия данных + состояние фильтров + окно времени."""
+    """Кэш окна: ключ = состояние фильтров + ОКНО ВРЕМЕНИ, без версии данных.
+
+    Первая версия кэша была привязана к счётчику записей, который растёт на
+    каждую встречу — в городе записи идут непрерывно, кэш промахивался ВСЕГДА,
+    и владелец видел «фризы на секунду при фильтрах» уже после «оптимизации».
+    Требование: в ключе НЕТ счётчика записей, но ЕСТЬ TTL.
+    """
 
     def setUp(self):
         self.src = SOURCE.read_text(encoding="utf-8")
@@ -195,33 +201,65 @@ class CacheTests(unittest.TestCase):
     def block(self, start, end):
         a = self.src.index(start)
         b = self.src.index(end, a)
-        return self.src[a:b]
+        # Комментарии убираем: в них объяснено, ПОЧЕМУ счётчика записей в ключе
+        # больше нет, и слово ловится как его использование.
+        return "\n".join(line for line in self.src[a:b].splitlines()
+                         if not line.strip().startswith("--"))
 
-    def test_data_version_bumped_on_every_write(self):
-        # Единственная точка записи игрока обязана отмечать изменение данных,
-        # иначе кэш будет отдавать список, которого уже нет.
-        body = self.block("local function UpsertPlayer(db, data)", "local observed = data.observe")
-        self.assertIn("nspDataVer = (nspDataVer or 0) + 1", body)
-
-    def test_rows_cache_key_includes_state_and_time(self):
+    def test_rows_cache_key_is_time_based_not_write_based(self):
         body = self.block("local function TacticalRows()", "for i = 1, #list do")
-        self.assertIn("nspDataVer", body)
         self.assertIn("tactical.classFilter", body)
         self.assertIn("tactical.realmFilter", body)
-        self.assertIn("math.floor(now / 5)", body, "фильтр «5 минут» зависит от времени — нужен TTL")
+        self.assertIn("math.floor(now / 3)", body, "нужен TTL: фильтр «5 минут» зависит от времени")
+        self.assertNotIn("nspDataVer", body,
+                         "ключ не должен зависеть от счётчика записей — он растёт постоянно")
         self.assertIn("tactical.listCache", body)
 
-    def test_stats_cache_key_includes_realm_and_time(self):
+    def test_stats_cache_key_is_time_based_not_write_based(self):
         body = self.block("local function TacticalStats()", "local st = {total")
-        self.assertIn("nspDataVer", body)
         self.assertIn("tactical.realmFilter", body)
-        self.assertIn("math.floor(now / 5)", body)
+        self.assertIn("math.floor(now / 3)", body)
+        self.assertNotIn("nspDataVer", body)
 
     def test_cache_reuses_the_list_when_nothing_changed(self):
-        """Один и тот же ключ — тот же объект списка (без повторного прохода)."""
         body = self.block("local function TacticalRows()", "for i = 1, #list do")
         self.assertIn("if cache and cache.key == cacheKey then", body)
         self.assertIn("list = cache.list", body)
+
+
+class RepaintCostTests(unittest.TestCase):
+    """Перерисовка не должна дёргать клиентский API без нужды.
+
+    Замер до правки: 500 строк = 8001 вызов клиента (16 на строку), из них
+    больше половины — SetText/SetTextColor теми же значениями, плюс
+    ClearAllPoints/SetPoint на каждую строку и Hide/Show всего списка.
+    """
+
+    def setUp(self):
+        self.src = SOURCE.read_text(encoding="utf-8")
+        body = self.src[self.src.index("local function TacticalRows()"):
+                        self.src.index("local function TacticalStats()")]
+        # Комментарии из проверки убираем: слова ClearAllPoints/SetPoint в них
+        # объясняют, ПОЧЕМУ вызовов больше нет, и ловятся как сам вызов.
+        self.body = "\n".join(
+            line for line in body.splitlines() if not line.strip().startswith("--")
+        )
+
+    def test_row_text_goes_through_the_change_cache(self):
+        for field in ("name", "profile", "zone", "seen"):
+            self.assertIn(f'NspSetText(row, "{field}"', self.body,
+                          "SetText без сравнения с предыдущим значением")
+
+    def test_position_is_not_reapplied_on_every_repaint(self):
+        self.assertNotIn("ClearAllPoints", self.body)
+        self.assertNotIn('row:SetPoint("TOPLEFT"', self.body)
+
+    def test_previous_rows_are_not_hidden_en_masse(self):
+        # Скрытие переехало в ХВОСТ (только строки сверх нового числа), иначе
+        # 500 Hide + 500 Show на каждую отрисовку.
+        self.assertNotIn("row:Hide() end", self.body.split("for i = 1, #list do")[0],
+                         "скрытие всего списка осталось в начале функции")
+        self.assertIn("tactical.shownCount", self.body)
 
 
 if __name__ == "__main__":

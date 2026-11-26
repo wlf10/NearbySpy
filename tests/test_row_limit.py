@@ -90,10 +90,15 @@ class RowLimitTests(unittest.TestCase):
         # тест проверяет не код, а отсутствие функции. Берём настоящую, из файла.
         top_start = source.index("function NspTopPlayers(")
         top_end = source.index("-- ============ UI ============", top_start)
+        # NspSetText/NspSetColor объявлены перед TacticalRows и им нужны —
+        # без них чанк падает «attempt to call global 'NspSetText'».
+        set_start = source.index("function NspSetText(")
+        set_end = source.index("local function TacticalRows()", set_start)
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
             CONST_PRELUDE + "\n" + STUBS
             + source[top_start:top_end]
+            + source[set_start:set_end]
             + source[start:end] + "\nTestRows = TacticalRows\n"
         )
         self.g = self.lua.globals()
