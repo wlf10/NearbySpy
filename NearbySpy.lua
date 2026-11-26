@@ -1755,6 +1755,12 @@ PeerSync = function()
         addonIn = peerStats.addonIn or 0,
         timerSent = peerStats.timerSent or 0,
         timerFail = peerStats.timerFail or 0,
+        -- Работает ли таймер ВООБЩЕ (26.11.2026): в живом SV timerSent был 0 при
+        -- живых отправках, и вопрос «таймер молчит или просто ничего не смог
+        -- отправить» не имел ответа. timerTicks отвечает прямо: тики идут —
+        -- таймер жив; тиков 0 — не запустился.
+        timerTicks = peerStats.timerTicks or 0,
+        timerOn = peerStats.timerOn and 1 or 0,
         -- Адресные запросы (24.11.2026): сколько запросов отправлено и сколько
         -- сейчас открыто. При обходе пиров по очереди это главные числа —
         -- по ним видно, чей ответ ещё не пришёл.
@@ -2554,6 +2560,7 @@ function PeerStartTimer()
     if peerStats.timerOn then return true end
     peerStats.timerOn = true
     local function Step()
+        peerStats.timerTicks = (peerStats.timerTicks or 0) + 1
         local okDb, db = pcall(GetDB)
         if okDb and type(db) == "table" and db.peerEnabled then
             -- Только когда есть что отправлять: пустой тик не тратит канал.
