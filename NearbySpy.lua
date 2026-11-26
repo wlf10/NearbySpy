@@ -6433,8 +6433,7 @@ end
 -- Scout / Tactical window. It intentionally uses only basic textures and
 -- frames: this keeps the UI compatible with the custom Forever client while
 -- still looking distinct from the old flat list.
-local tactical = {rows = {}, bars = {}, classes = {}, filters = {}, filter = "all", started = time(),
-    realmFilter = nil}   -- nil = все миры; иначе точное имя реалма
+local tactical = {rows = {}, bars = {}, classes = {}, filters = {}, filter = "all", started = time()}
 local TACTICAL_ROW_H = 30
 local TACTICAL_FRESH = 300
 local TacticalUpdate
@@ -6514,36 +6513,12 @@ local function TacticalVisible(p, now)
     -- would contradict the setting the user just changed. Nothing is deleted —
     -- turning the flag back on brings them back.
     if p.peerForeign and GetDB().peerAllRealms == false then return false end
-    -- Realm filter: the database holds players from other realms of the cluster
-    -- (they arrive over the peer channel). The selector works in BUCKETS since
-    -- 15.11.2026 — "EU PvP" / "EU PvE" — so a dozen shard-plus-number labels do
-    -- not pile up (user decision). An empty selection means all realms.
-    -- Both sides go through RealmBucket: the selection is normally a bucket
-    -- already, but a value left in memory by the previous build is a full realm
-    -- name, and comparing raw would blank the list until the next click.
-    -- RealmBucket is idempotent ("EU PvP" -> "EU PvP"), so this is safe.
-    if tactical.realmFilter
-        and (RealmBucket(p.realm) or p.realm or "") ~= (RealmBucket(tactical.realmFilter) or tactical.realmFilter) then
-        return false
-    end
-    -- Класс: nil = все. Псевдокласс "?" — записи без класса (их видно в
-    -- панели «КЛАССЫ» как отдельная строка, молча прятать их нельзя).
-    if tactical.classFilter then
-        local file = p.class
-        if type(file) == "string" and file ~= "" then file = string.upper(file) else file = "?" end
-        if file ~= tactical.classFilter then return false end
-    end
-    -- Уровень: диапазон (levelFilter) и точное значение (levelExact) —
-    -- взаимоисключающие, точный сбрасывает диапазон.
-    if tactical.levelFilter then
-        local lvl = tonumber(p.level)
-        if not lvl or lvl < tactical.levelFilter[1] or lvl > tactical.levelFilter[2] then
-            return false
-        end
-    elseif tactical.levelExact then
-        local lvl = tonumber(p.level)
-        if not lvl or lvl ~= tactical.levelExact then return false end
-    end
+    -- ⚠️ Фильтров по миру, классу и уровню здесь БОЛЬШЕ НЕТ (26.11.2026,
+    -- решение владельца): «фильтр убираем полностью, будет такое только на
+    -- сайте». Окно показывает список последних встреч, а разрезы по мирам,
+    -- классам и уровням делает сайт, где для этого есть вся база.
+    -- Остались только режимы списка (все / свежие / новые / из канала) — это не
+    -- фильтры, а разные выборки одного и того же порядка.
     if tactical.filter == "fresh" then
         return now - (p.lastSeen or 0) <= TACTICAL_FRESH
     elseif tactical.filter == "new" then
@@ -6705,10 +6680,7 @@ local function TacticalRows()
     -- ответ «свежий на глаз» и делает повторные клики бесплатными.
     local bucket = math.floor(now / 3)
     local cacheKey = table.concat({
-        tostring(tactical.filter), tostring(tactical.classFilter),
-        tactical.levelFilter and (tactical.levelFilter[1] .. "-" .. tactical.levelFilter[2]) or "",
-        tostring(tactical.levelExact), tostring(tactical.realmFilter),
-        tostring(GetDB().peerAllRealms), tostring(bucket),
+        tostring(tactical.filter), tostring(GetDB().peerAllRealms), tostring(bucket),
     }, "|")
     local cache = tactical.listCache
     local list
@@ -6802,14 +6774,11 @@ local function TacticalStats()
     -- только от данных, выбранного реалма и текущего времени (счётчики «5 мин /
     -- 15 мин / 1 час»). Ключ: реалм + окно 3 с.
     local now = time()
-    local realmSel = tactical.realmFilter
-    -- ⚠️ Та же ловушка, что и у списка: ключ БЕЗ счётчика записей. С ним кэш
-    -- агрегатов не срабатывал ни разу (версия растёт на каждую запись), и каждый
-    -- клик по фильтру платил полный проход. TTL 3 с — компромисс между
-    -- «свежо на глаз» и «повторный клик бесплатен».
+    -- Ключ кэша: только настройка «все миры канала» и окно времени. Фильтров
+    -- мира/класса/уровня больше нет (26.11.2026), поэтому и в ключе их нет.
     local statsBucket = math.floor(now / 3)
     local cacheKey = table.concat({
-        tostring(realmSel), tostring(GetDB().peerAllRealms), tostring(statsBucket),
+        tostring(GetDB().peerAllRealms), tostring(statsBucket),
     }, "|")
     local cached = tactical.statsCache
     if cached and cached.key == cacheKey then
@@ -6818,11 +6787,6 @@ local function TacticalStats()
     end
     local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
     for _, p in pairs(GetDB().players) do
-        -- counters follow the same realm selection as the list: a "Peer 12" badge
-        -- over a list of 3 realm rows would be a lie
-        if realmSel and (RealmBucket(p.realm) or p.realm or "") ~= (RealmBucket(realmSel) or realmSel) then
-            -- skip: counted nowhere
-        else
         st.total = st.total + 1
         local age = now - (p.lastSeen or 0)
         if age <= 300 then st.f5 = st.f5 + 1 end
@@ -6853,7 +6817,6 @@ local function TacticalStats()
                 label = ClassDisplayName(p.class, p.classLoc), count = 0}
         end
         st.classes[file].count = st.classes[file].count + 1
-        end
     end
     st.top = {}
     for _, item in pairs(st.classes) do st.top[#st.top + 1] = item end
@@ -6975,269 +6938,12 @@ function RealmShortName(realm)
     return table.concat(t, " ", from)
 end
 
--- Realms actually present in the database, our own first. The list is rebuilt on
--- every click so a newly arrived realm shows up without /reload.
--- Since 15.11.2026 the list holds BUCKETS ("EU PvP", "EU PvE"), not full realm
--- names: the cluster has a dozen realms that differ only by shard and number, and
--- the selector was multiplying that difference instead of answering the question
--- a player actually has — which ruleset did this person come from.
-function TacticalRealmList()
-    local mine = RealmBucket(PlayerRealm())
-    local seen, list = {}, {}
-    for _, p in pairs(GetDB().players) do
-        local r = RealmBucket(p.realm) or (type(p.realm) == "string" and p.realm ~= "" and p.realm or nil)
-        if r and not seen[r] then
-            seen[r] = true
-            list[#list + 1] = r
-        end
-    end
-    table.sort(list, function(a, b)
-        if a == mine then return true end
-        if b == mine then return false end
-        return a < b
-    end)
-    return list
-end
-
-local function TacticalFilter(parent, key, x)
-    local button = CreateFrame("Button", nil, parent)
-    button:SetSize(NSP_CONST.FILTER_W, 25)
-    button:SetPoint("LEFT", x, 0)
-    button.bg = button:CreateTexture(nil, "BACKGROUND")
-    button.bg:SetAllPoints()
-    button.label = NewText(button, 10)
-    button.label:SetPoint("CENTER")
-    -- Ширина подписи = ширина кнопки минус поля. Подпись рисуется
-    -- GameFontNormal (12pt): в 106px "Partage nouveaux 1451" переносилась на
-    -- вторую строку и вылезала за кнопку высотой 25px.
-    button.label:SetWidth(NSP_CONST.FILTER_W - 6)
-    button.key = key
-    button:SetScript("OnClick", function(self) tactical.filter = self.key; TacticalUpdate() end)
-    button:SetScript("OnEnter", function(self) if tactical.filter ~= self.key then self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end end)
-    button:SetScript("OnLeave", function(self) TacticalFilterState(self, tactical.filter == self.key) end)
-    tactical.filters[key] = button
-end
-
--- Realm cycler: one button that walks "all realms -> realm A -> realm B -> ... ->
--- all". A dropdown would be the conventional control, but the list is 6 entries
--- and the toolbar has no room for one; cycling needs no menu code on a client
--- where dropdown templates are already cut down (see the settings selectors).
--- Global, not local: the main chunk is at the Lua 5.1 ceiling of 200 locals.
-function TacticalRealmCycler(parent, x, y, width)
-    local button = CreateFrame("Button", nil, parent)
-    button:SetSize(width, 25)
-    -- TOPLEFT with an explicit y: the toolbar positions itself with "LEFT" inside a
-    -- 31px strip, but this button hangs off the window itself, where "LEFT" means
-    -- the vertical centre of the whole (800px) window.
-    button:SetPoint("TOPLEFT", x, y)
-    button.bg = button:CreateTexture(nil, "BACKGROUND")
-    button.bg:SetAllPoints()
-    button.label = NewText(button, 10)
-    button.label:SetPoint("CENTER")
-    button.label:SetWidth(width - 8)
-    button:SetScript("OnClick", function()
-        local list = TacticalRealmList()
-        if #list == 0 then
-            tactical.realmFilter = nil
-        else
-            -- position of the current selection in the fresh list; 0 means "not
-            -- found" (nothing selected = all realms), so the next step lands on
-            -- the first realm. Starting at -1 made nxt = 0 and the click did
-            -- nothing — caught by test_click_walks_realms_and_wraps_back.
-            local cur = 0
-            for i = 1, #list do
-                if list[i] == tactical.realmFilter then cur = i break end
-            end
-            local nxt = cur + 1
-            tactical.realmFilter = (nxt > #list) and nil or list[nxt]
-        end
-        TacticalUpdate()
-    end)
-    button:SetScript("OnEnter", function(self) self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end)
-    button:SetScript("OnLeave", function(self) TacticalRealmCyclerState(self) end)
-    tactical.realmButton = button
-    TacticalRealmCyclerState(button)
-    return button
-end
-
-function TacticalRealmCyclerState(button)
-    button = button or tactical.realmButton
-    if not button or not button.label then return end
-    local active = tactical.realmFilter ~= nil
-    button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
-    button.label:SetTextColor(active and 1 or 0.62, active and 0.85 or 0.55, active and 0.45 or 0.42)
-    -- The selection IS a bucket now ("EU PvP"), so it is displayed as is; the
-    -- RealmShortName fallback stays for a realm whose bucket could not be derived.
-    local name = active and (RealmBucket(tactical.realmFilter) or RealmShortName(tactical.realmFilter)) or L("UI_ALL")
-    button.label:SetText(L("UI_REALM") .. ": " .. name)
-end
-
---- ============ Выборка по классу и уровню ============
--- Три селектора в одну строку под тулбаром: мир (TacticalRealmCycler, выше),
--- класс и уровень. Все три — циклеры по списку: список короткий, а меню на
--- этом клиенте пришлось бы поднимать руками (см. комментарий к циклеру миров).
---
--- Состояние лежит в tactical (classFilter / levelFilter), а не в отдельных
--- local-переменных: главный чанк стоит у потолка Lua 5.1 в 200 top-level
--- locals, и каждый новый local — это шаг к «main function has more than 200
--- local variables».
-
--- Список классов, реально встречающихся в базе: строки файлов классов в
--- верхнем регистре плюс псевдокласс "?" для записей без класса (238 в живом
--- файле). Список строится из данных, а не зашит: класс, которого в базе ещё
--- не было, не должен занимать место в циклере.
-function TacticalClassList()
-    local seen, list = {}, {}
-    for _, p in pairs(GetDB().players) do
-        local file = p.class
-        if type(file) == "string" and file ~= "" then
-            file = string.upper(file)
-            if not seen[file] then
-                seen[file] = true
-                list[#list + 1] = file
-            end
-        end
-    end
-    if not seen["?"] then
-        -- записи без класса — честная отдельная группа, а не «невидимые»
-        list[#list + 1] = "?"
-    end
-    -- Порядок: частые сверху (как в панели «КЛАССЫ»), редкие вниз.
-    local counts = {}
-    for _, p in pairs(GetDB().players) do
-        local file = p.class
-        if type(file) == "string" and file ~= "" then
-            file = string.upper(file)
-            counts[file] = (counts[file] or 0) + 1
-        end
-    end
-    table.sort(list, function(a, b)
-        local ca, cb = counts[a] or 0, counts[b] or 0
-        if ca ~= cb then return ca > cb end
-        return a < b
-    end)
-    return list
-end
-
--- Диапазоны уровня: широкие шаги для быстрого ответа «кто на капе» плюс
--- «ровно N» для точного уровня (его ставит клик по столбцу гистограммы).
-TacticalLevelRanges = {
-    {1, 10}, {11, 20}, {21, 30}, {31, 40}, {41, 50}, {51, 60},
-}
-
--- Подпись диапазона уровня: "1-10" или "56".
-function TacticalLevelLabel(range)
-    if type(range) == "number" then return tostring(range) end
-    if range[1] == range[2] then return tostring(range[1]) end
-    return tostring(range[1]) .. "-" .. tostring(range[2])
-end
-
--- Циклер уровня: nil → 1-10 → 11-20 → ... → 51-60 → nil. Точное значение
--- («ровно N») в этот цикл не входит: его ставит клик по столбцу гистограммы
--- (TacticalLevelExact), который виден на глаз, а не выбирается из списка.
-function TacticalLevelCycler(parent, x, y, width)
-    local button = CreateFrame("Button", nil, parent)
-    button:SetSize(width, 25)
-    button:SetPoint("TOPLEFT", x, y)
-    button.bg = button:CreateTexture(nil, "BACKGROUND")
-    button.bg:SetAllPoints()
-    button.label = NewText(button, 10)
-    button.label:SetPoint("CENTER")
-    button.label:SetWidth(width - 8)
-    button:SetScript("OnClick", function()
-        local ranges = TacticalLevelRanges
-        local cur = 0
-        for i = 1, #ranges do
-            local r = ranges[i]
-            if tactical.levelFilter and tactical.levelFilter[1] == r[1]
-                and tactical.levelFilter[2] == r[2] then cur = i break end
-        end
-        local nxt = cur + 1
-        if nxt > #ranges then
-            tactical.levelFilter = nil
-        else
-            local r = ranges[nxt]
-            tactical.levelFilter = { r[1], r[2] }
-        end
-        TacticalUpdate()
-    end)
-    button:SetScript("OnEnter", function(self) self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end)
-    button:SetScript("OnLeave", function(self) TacticalLevelCyclerState(self) end)
-    tactical.levelButton = button
-    TacticalLevelCyclerState(button)
-    return button
-end
-
-function TacticalLevelCyclerState(button)
-    button = button or tactical.levelButton
-    if not button or not button.label then return end
-    local active = tactical.levelFilter ~= nil
-    button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
-    button.label:SetTextColor(active and 1 or 0.62, active and 0.85 or 0.55, active and 0.45 or 0.42)
-    local name = active and TacticalLevelLabel(tactical.levelFilter) or L("UI_ALL")
-    button.label:SetText(L("UI_LEVEL") .. ": " .. name)
-end
-
--- Циклер класса: nil → самый частый класс → ... → nil.
-function TacticalClassCycler(parent, x, y, width)
-    local button = CreateFrame("Button", nil, parent)
-    button:SetSize(width, 25)
-    button:SetPoint("TOPLEFT", x, y)
-    button.bg = button:CreateTexture(nil, "BACKGROUND")
-    button.bg:SetAllPoints()
-    button.label = NewText(button, 10)
-    button.label:SetPoint("CENTER")
-    button.label:SetWidth(width - 8)
-    button:SetScript("OnClick", function()
-        local list = TacticalClassList()
-        if #list == 0 then
-            tactical.classFilter = nil
-        else
-            local cur = 0
-            for i = 1, #list do
-                if list[i] == tactical.classFilter then cur = i break end
-            end
-            local nxt = cur + 1
-            tactical.classFilter = (nxt > #list) and nil or list[nxt]
-        end
-        TacticalUpdate()
-    end)
-    button:SetScript("OnEnter", function(self) self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end)
-    button:SetScript("OnLeave", function(self) TacticalClassCyclerState(self) end)
-    tactical.classButton = button
-    TacticalClassCyclerState(button)
-    return button
-end
-
-function TacticalClassCyclerState(button)
-    button = button or tactical.classButton
-    if not button or not button.label then return end
-    local active = tactical.classFilter ~= nil
-    button.bg:SetColorTexture(active and 0.3 or 0.1, active and 0.22 or 0.08, active and 0.08 or 0.05, 1)
-    button.label:SetTextColor(active and 1 or 0.62, active and 0.85 or 0.55, active and 0.45 or 0.42)
-    local name = L("UI_ALL")
-    if active then
-        if tactical.classFilter == "?" then
-            name = L("UI_NO_CLASS")
-        else
-            name = ClassDisplayName(tactical.classFilter)
-        end
-    end
-    button.label:SetText(L("UI_CLASS") .. ": " .. name)
-end
-
--- Точный уровень: клик по столбцу гистограммы. Повторный клик по тому же
--- столбцу снимает фильтр («ровно N» → «все»).
-function TacticalLevelExact(level)
-    if tactical.levelExact == level then
-        tactical.levelExact = nil
-    else
-        tactical.levelExact = level
-    end
-    -- точный уровень и диапазон взаимоисключающи: показан ровно один
-    if tactical.levelExact then tactical.levelFilter = nil end
-    TacticalUpdate()
-end
+-- ⚠️ Фильтры мира, класса и уровня УДАЛЕНЫ 26.11.2026 по решению владельца:
+-- «фильтр убираем полностью, будет такое только на сайте». Вместе с ними ушли
+-- селекторы (TacticalRealmCycler/TacticalClassCycler/TacticalLevelCycler и их
+-- State-функции), списки значений для них и клик-фильтр по столбцу гистограммы.
+-- Разрезы по мирам, классам и уровням делает сайт, где есть вся база; окно
+-- показывает только список последних встреч.
 
 local function TacticalMetric(parent, x, width, label)
     local card = TacticalPanel(parent)
@@ -7289,16 +6995,7 @@ TacticalUpdate = function()
                 row:Show()
                 TacticalClassIcon(row.icon, item.file)
                 row.label:SetText(item.label)
-                -- файл класса для обработчика клика (он читает row.classFile)
-                row.classFile = item.file
-                -- выбранный класс подсвечен: иначе фильтр не виден — в списке
-                -- просто меньше строк, а почему — непонятно
-                local selected = tactical.classFilter == item.file
-                if selected then
-                    row.label:SetTextColor(1, 0.85, 0.45)
-                else
-                    row.label:SetTextColor(0.85, 0.82, 0.75)
-                end
+                row.label:SetTextColor(0.85, 0.82, 0.75)
                 -- count + share of all players: the top classes are nearly
                 -- equal (3026/2992/2894), a pure max-relative bar looks flat
                 row.value:SetText(("%d (%.0f%%)"):format(item.count, 100 * item.count / math.max(1, st.total)))
@@ -7320,9 +7017,6 @@ TacticalUpdate = function()
         tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. st.peerNewN)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
-        TacticalRealmCyclerState()
-        TacticalClassCyclerState()
-        TacticalLevelCyclerState()
         tactical.status:SetText("|cff45dc9b+|r " .. L("UI_LIVE") .. " ; " .. TacticalSources())
     end)
     if not ok then P(L("ERR_LIST") .. tostring(err)) end
@@ -7401,14 +7095,9 @@ local function BuildWindow()
         bar:SetPoint("BOTTOMLEFT", 9 + (level - 1) * NSP_CONST.CHART_STEP, 10)
         bar:SetWidth(NSP_CONST.CHART_STEP - 2.5); bar:SetHeight(1)
         tactical.bars[level] = bar
-        -- Прозрачная кнопка поверх столбца: сам столбец узкий — мелкая цель
-        -- для мыши, а зона клика по всей ширине шага ловит уровень надёжно.
-        -- Высота — вся высота гистограммы: промахнуться по уровню невозможно.
-        local hit = CreateFrame("Button", nil, chart)
-        hit:SetPoint("BOTTOMLEFT", 9 + (level - 1) * NSP_CONST.CHART_STEP - 3, 8)
-        hit:SetSize(NSP_CONST.CHART_STEP, NSP_CONST.LEVEL_CHART_H)
-        hit.level = level
-        hit:SetScript("OnClick", function(self) TacticalLevelExact(self.level) end)
+        -- ⚠️ Прозрачная кнопка-цель поверх столбца УБРАНА 26.11.2026: клик по
+        -- уровню больше не фильтрует (фильтры только на сайте), а кнопка без
+        -- обработчика — это 60 лишних фреймов и ложное «сюда можно нажать».
     end
     local axis = chart:CreateTexture(nil, "ARTWORK")
     axis:SetPoint("BOTTOMLEFT", 8, 9)
@@ -7449,24 +7138,14 @@ local function BuildWindow()
             row.value = NewText(row, 9); row.value:SetPoint("RIGHT", -1, 0)
         end
         tactical.classes[i] = row
-        -- Клик по строке класса — выборка по нему. Файл класса известен после
-        -- отрисовки (TacticalUpdate заполняет row.classFile), поэтому обработчик
-        -- читает его оттуда, а не из замыкания по i.
-        row:SetScript("OnClick", function(self)
-            local file = self.classFile
-            if not file then return end
-            tactical.classFilter = (tactical.classFilter == file) and nil or file
-            TacticalUpdate()
-        end)
+        -- ⚠️ Клик и подсветка «выбранного класса» УБРАНЫ 26.11.2026: панель
+        -- классов стала чисто информационной (фильтры переехали на сайт).
+        -- OnEnter/OnLeave оставлены только как подсветка наведения.
         row:SetScript("OnEnter", function(self)
-            if self.classFile and tactical.classFilter ~= self.classFile then
-                self.label:SetTextColor(1, 0.9, 0.6)
-            end
+            self.label:SetTextColor(1, 0.9, 0.6)
         end)
         row:SetScript("OnLeave", function(self)
-            if self.classFile and tactical.classFilter ~= self.classFile then
-                self.label:SetTextColor(0.85, 0.82, 0.75)
-            end
+            self.label:SetTextColor(0.85, 0.82, 0.75)
         end)
     end
 
@@ -7489,17 +7168,12 @@ local function BuildWindow()
     tactical.count = NewText(toolbar, 7, 0.6, 0.53, 0.4)
     tactical.count:SetPoint("RIGHT", -NSP_CONST.COUNT_X, 0)
 
-    -- Selector row: the database can hold players from other realms of the
-    -- cluster (peer channel), so the list needs a realm selector of its own.
-    -- A second row rather than another toolbar tile: the five filters plus the
-    -- counter already fill the strip. The class and level selectors live in the
-    -- same row — three selectors, one strip, each 260px in an 880px window.
-    TacticalRealmCycler(win, 22, -256, 260)
-    TacticalClassCycler(win, 298, -256, 260)
-    TacticalLevelCycler(win, 574, -256, 260)
-
+    -- ⚠️ Ряд селекторов (мир / класс / уровень) УДАЛЁН 26.11.2026 по решению
+    -- владельца: фильтры живут только на сайте. Вместе с ним освободилось 32 px
+    -- по вертикали — таблица, заголовок и скролл подняты на столько же, иначе
+    -- осталась бы пустая полоса.
     local tableHeader = CreateFrame("Frame", nil, win)
-    tableHeader:SetPoint("TOPLEFT", 16, -288); tableHeader:SetSize(NSP_CONST.TOOLBAR_W, 24)
+    tableHeader:SetPoint("TOPLEFT", 16, -256); tableHeader:SetSize(NSP_CONST.TOOLBAR_W, 24)
     local thBg = tableHeader:CreateTexture(nil, "BACKGROUND"); thBg:SetAllPoints(); thBg:SetColorTexture(0.07, 0.055, 0.035, 1)
     -- Заголовки берут X из тех же констант, что и строки: при смене ширины
     -- окна они не могут разъехаться с данными.
@@ -7510,7 +7184,7 @@ local function BuildWindow()
 
     local okSf, sf = pcall(CreateFrame, "ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
     if not okSf or not sf then sf = CreateFrame("ScrollFrame", nil, win) end
-    sf:SetPoint("TOPLEFT", 16, -312); sf:SetPoint("BOTTOMRIGHT", -32, 43)
+    sf:SetPoint("TOPLEFT", 16, -280); sf:SetPoint("BOTTOMRIGHT", -32, 43)
     local content = CreateFrame("Frame", nil, sf); content:SetSize(NSP_CONST.LIST_W, 1); sf:SetScrollChild(content); winList = content
 
     tactical.status = NewText(win, 9, 0.55, 0.5, 0.4); tactical.status:SetPoint("BOTTOMLEFT", 17, 20)

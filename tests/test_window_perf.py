@@ -251,19 +251,27 @@ class CacheTests(unittest.TestCase):
                          if not line.strip().startswith("--"))
 
     def test_rows_cache_key_is_time_based_not_write_based(self):
+        """Ключ кэша: режим списка + настройка миров канала + окно времени.
+
+        Фильтров мира/класса/уровня больше нет (26.11.2026), поэтому их нет и в
+        ключе — но счётчика записей в ключе быть не должно: он растёт постоянно.
+        """
         body = self.block("local function TacticalRows()", "for i = 1, #list do")
-        self.assertIn("tactical.classFilter", body)
-        self.assertIn("tactical.realmFilter", body)
-        self.assertIn("math.floor(now / 3)", body, "нужен TTL: фильтр «5 минут» зависит от времени")
+        self.assertIn("tactical.filter", body)
+        self.assertIn("peerAllRealms", body)
+        self.assertIn("math.floor(now / 3)", body, "нужен TTL: режим «свежие» зависит от времени")
         self.assertNotIn("nspDataVer", body,
                          "ключ не должен зависеть от счётчика записей — он растёт постоянно")
+        for gone in ("classFilter", "realmFilter", "levelFilter", "levelExact"):
+            self.assertNotIn(gone, body, "фильтр вернулся в ключ кэша")
         self.assertIn("tactical.listCache", body)
 
     def test_stats_cache_key_is_time_based_not_write_based(self):
         body = self.block("local function TacticalStats()", "local st = {total")
-        self.assertIn("tactical.realmFilter", body)
+        self.assertIn("peerAllRealms", body)
         self.assertIn("math.floor(now / 3)", body)
         self.assertNotIn("nspDataVer", body)
+        self.assertNotIn("realmFilter", body)
 
     def test_cache_reuses_the_list_when_nothing_changed(self):
         body = self.block("local function TacticalRows()", "for i = 1, #list do")
