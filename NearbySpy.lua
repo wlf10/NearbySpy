@@ -6938,6 +6938,25 @@ function RealmShortName(realm)
     return table.concat(t, " ", from)
 end
 
+local function TacticalFilter(parent, key, x)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(NSP_CONST.FILTER_W, 25)
+    button:SetPoint("LEFT", x, 0)
+    button.bg = button:CreateTexture(nil, "BACKGROUND")
+    button.bg:SetAllPoints()
+    button.label = NewText(button, 10)
+    button.label:SetPoint("CENTER")
+    -- Ширина подписи = ширина кнопки минус поля. Подпись рисуется
+    -- GameFontNormal (12pt): в 106px "Partage nouveaux 1451" переносилась на
+    -- вторую строку и вылезала за кнопку высотой 25px.
+    button.label:SetWidth(NSP_CONST.FILTER_W - 6)
+    button.key = key
+    button:SetScript("OnClick", function(self) tactical.filter = self.key; TacticalUpdate() end)
+    button:SetScript("OnEnter", function(self) if tactical.filter ~= self.key then self.bg:SetColorTexture(0.18, 0.13, 0.06, 1) end end)
+    button:SetScript("OnLeave", function(self) TacticalFilterState(self, tactical.filter == self.key) end)
+    tactical.filters[key] = button
+end
+
 -- ⚠️ Фильтры мира, класса и уровня УДАЛЕНЫ 26.11.2026 по решению владельца:
 -- «фильтр убираем полностью, будет такое только на сайте». Вместе с ними ушли
 -- селекторы (TacticalRealmCycler/TacticalClassCycler/TacticalLevelCycler и их
