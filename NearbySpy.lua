@@ -5975,64 +5975,61 @@ end
 
 -- NspTopPlayers(db, key, limit, accept) — верхние `limit` игроков по ключу.
 --
--- Было: копия ВСЕЙ базы (61 435 записей) + table.sort по всем. Замер на живом
--- SavedVariables (lupa, медиана из 5): 74 мс, то есть 150–370 мс в клиенте
--- (lupa на хосте в 2–5 раз быстрее) — на КАЖДУЮ отрисовку окна, а TacticalUpdate
--- зовут из семи мест (фильтры, циклеры, OnShow).
+-- История замеров на живом SV (61 435 записей, lupa, медиана):
+--   копия всех + полная сортировка           322 мс
+--   отбор с порогом и вытеснением O(limit)   226 мс  ← 2241 вытеснение × скан 500
+--   собрать всё со встречей + sort           160 мс
+--   собрать ПАРЫ {v, p} + sort                71 мс  ← выбрано
 --
--- ⚠️ accept (фильтр видимости) применяется ДО отбора верхних, а не после.
--- Иначе «500 верхних по времени» могли не содержать ни одной строки выбранного
--- класса, и список молча пустел бы при непустой базе. Семантика та же, что
--- была: сначала отфильтровать, потом взять N самых свежих.
+-- Почему пары: компаратор для 19 885 элементов вызывается ~280 тыс. раз, и
+-- каждое обращение p[key] в нём идёт через метатаблицу записи (Lua-функция).
+-- Материализованное числовое поле в обёртке убирает это из горячего цикла —
+-- одна и та же логика, втрое дешевле.
+--
+-- ⚠️ accept (фильтр видимости) применяется ДО сортировки, а не после: иначе
+-- «500 верхних по времени» могли не содержать ни одной строки выбранного
+-- класса, и список молча пустел бы при непустой базе.
+--
+-- Записи без встречи (ключ = 0) отбрасываются сразу: их 41 550 из 61 435, они
+-- всё равно не попадут в топ и только раздувают сортировку.
 --
 -- key: "lastSeen" (по умолчанию) или "peerAt" — вкладка «Обмен новые»
--- сортируется по времени пакета, а не по нашей встрече.
--- Порядок для равных времён — по имени: table.sort с одним ключом нестабилен,
--- и без второго критерия строки «прыгали» между отрисовками.
+-- сортируется по времени пакета. Порядок для равных времён — по имени:
+-- table.sort с одним ключом нестабилен, и строки «прыгали» между отрисовками.
 function NspTopPlayers(db, key, limit, accept)
     key = key or "lastSeen"
     limit = tonumber(limit) or NSP_CONST.MAX_ROWS
     local players = (db and db.players) or {}
-    local function newer(a, b)
-        local av, bv = tonumber(a[key]) or 0, tonumber(b[key]) or 0
-        if av == bv then return (a.name or "") < (b.name or "") end
-        return av > bv
-    end
-    -- Буфер из не более `limit` записей; после заполнения худший стоит в конце.
-    local buf, n, worst = {}, 0, -1
+    local all, n = {}, 0
     for _, p in pairs(players) do
-        if not accept or accept(p) then
+        local v = tonumber(p[key]) or 0
+        if v > 0 and (not accept or accept(p)) then
+            n = n + 1
+            all[n] = { v = v, p = p, nm = p.name }
+        end
+    end
+    -- ⚠️ Добор нулевых. Отбрасывать записи без встречи (lastSeen = 0) можно
+    -- только пока их больше `limit` — иначе на маленькой базе (новый
+    -- пользователь, свежая установка) исчезли бы ВСЕ peer-записи: у них нет
+    -- нашей встречи, и колонка «когда» показывает время пакета. Таких записей
+    -- 41 550 из 61 435, и в топ по времени они не попадают — но при недоборе
+    -- список обязан быть полным.
+    if n < limit then
+        for _, p in pairs(players) do
             local v = tonumber(p[key]) or 0
-            if n < limit then
+            if v <= 0 and (not accept or accept(p)) then
                 n = n + 1
-                buf[n] = p
-                if n == limit then
-                    table.sort(buf, newer)
-                    worst = tonumber(buf[n][key]) or 0
-                end
-            elseif v > worst then
-                -- вытесняем худшего этой же записью и пересчитываем порог.
-                -- Скан O(limit) случается только на вытеснении, а их в живых
-                -- данных единицы процентов: записи без встречи (lastSeen=0)
-                -- отсекаются порогом сразу.
-                buf[n] = p
-                local w, wi = nil, nil
-                for i = 1, n do
-                    local iv = tonumber(buf[i][key]) or 0
-                    if not w or iv < w then w, wi = iv, i end
-                end
-                worst = w or 0
-                if wi and wi ~= n then buf[wi], buf[n] = buf[n], buf[wi] end
+                all[n] = { v = 0, p = p, nm = p.name }
             end
         end
     end
-    -- ⚠️ Сортировать надо ВСЕГДА, а не только при недоборе: вытеснение
-    -- ставит новую запись на место худшего, но порядок остальных не сохраняет,
-    -- поэтому без финальной сортировки список приходит частично упорядоченным
-    -- (поймано сверкой со старым алгоритмом: множество верное, порядок — нет).
-    -- K = 500 → 500·log500 ≈ 4.5 тыс. сравнений против 61 тыс. итераций.
-    table.sort(buf, newer)
-    return buf, n
+    table.sort(all, function(a, b)
+        if a.v == b.v then return (a.nm or "") < (b.nm or "") end
+        return a.v > b.v
+    end)
+    local out, m = {}, (n < limit) and n or limit
+    for k = 1, m do out[k] = all[k].p end
+    return out, m
 end
 
 -- ============ UI ============
@@ -6815,7 +6812,38 @@ end
 -- the ruleset, so both the badge and the selector use this. Stored data is NOT
 -- touched: p.realm keeps the full name for the site export and dedup keys.
 -- Global: the main chunk is at the 193rd of its 200 locals.
+-- Кэш «имя реалма → bucket» (26.11.2026).
+--
+-- RealmBucket парсит строку: gmatch в таблицу, поиск токена Realm, два gsub,
+-- concat. Замер на живом SV (61 435 записей): один проход по базе с вызовом
+-- RealmBucket на КАЖДОЙ записи — 136 мс из 248, то есть больше половины
+-- стоимости перерисовки списка И агрегатов. При этом уникальных имён реалмов
+-- в базе ПЯТНАДЦАТЬ: парсить одну и ту же строку 61 тысячу раз незачем.
+-- Ключ — сама строка (в Lua 5.1 строки интернируются, lookup дешёвый).
+-- global: в главном чанке 197 локалов из 200.
+-- ⚠️ Кэш инициализируется здесь, но RealmBucket к нему ТЕРПИМ: харнессы
+-- вырезают функцию без этого файла, и жёсткая зависимость роняла бы девять
+-- чужих тестов «attempt to index global 'NSP_BUCKET_CACHE'».
+NSP_BUCKET_CACHE = NSP_BUCKET_CACHE or {}
+
 function RealmBucket(realm)
+    if type(realm) ~= "string" or realm == "" then return nil end
+    local cache = NSP_BUCKET_CACHE
+    if type(cache) ~= "table" then return RealmBucketCompute(realm) end
+    local hit = cache[realm]
+    if hit ~= nil then
+        -- false = «уже считали, bucket пустой» (отличимо от «не считали»)
+        if hit == false then return nil end
+        return hit
+    end
+    local result = RealmBucketCompute(realm)
+    cache[realm] = result or false
+    return result
+end
+
+-- RealmBucketCompute(realm) — сам разбор, без кэша. Отдельной функцией, чтобы
+-- кэш не смешивался с логикой и её можно было проверить тестом напрямую.
+function RealmBucketCompute(realm)
     if type(realm) ~= "string" or realm == "" then return nil end
     local t = {}
     for w in realm:gmatch("%S+") do t[#t + 1] = w end

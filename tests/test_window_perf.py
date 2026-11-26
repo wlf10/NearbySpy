@@ -174,6 +174,32 @@ class TopPlayersTests(unittest.TestCase):
         self.assertEqual(2, n)
         self.assertEqual("Some", new[1]["name"])
 
+    def test_peer_only_records_survive_on_a_small_base(self):
+        """Peer-записи (lastSeen = 0) обязаны попадать в список при недоборе.
+
+        Их 41 550 из 61 435 в живой базе, и в топ по времени они не попадают —
+        но на маленькой базе (свежая установка) без них список был бы пуст, хотя
+        у игрока есть данные канала. Поймано собственным кодом: первый вариант
+        сортировки отбрасывал всё с нулевым ключом безусловно.
+        """
+        self.add("Peer1", last_seen=0, peer_at=5000)
+        self.add("Peer2", last_seen=0, peer_at=4000)
+        self.add("Seen", last_seen=9000)
+        new, n = self.g["TestTop"](self.g["DB"], "lastSeen", 500)
+        self.assertEqual(3, n, "peer-записи потеряны при недоборе")
+        self.assertEqual("Seen", new[1]["name"])
+
+    def test_zero_records_are_dropped_when_the_limit_is_full(self):
+        """Когда записей со встречей хватает, нулевые не тратят сортировку."""
+        for i in range(600):
+            self.add(f"S{i}", last_seen=1000 + i)
+        for i in range(50):
+            self.add(f"P{i}", last_seen=0, peer_at=100 + i)
+        new, n = self.g["TestTop"](self.g["DB"], "lastSeen", 500)
+        self.assertEqual(500, n)
+        for i in range(1, n + 1):
+            self.assertGreater(new[i]["lastSeen"] or 0, 0)
+
     def test_works_on_positional_records(self):
         """Проверка на НАСТОЯЩЕЙ схеме: p.lastSeen читается через метатаблицу."""
         for i in range(300):
@@ -260,6 +286,53 @@ class RepaintCostTests(unittest.TestCase):
         self.assertNotIn("row:Hide() end", self.body.split("for i = 1, #list do")[0],
                          "скрытие всего списка осталось в начале функции")
         self.assertIn("tactical.shownCount", self.body)
+
+
+class RealmBucketCacheTests(unittest.TestCase):
+    """Кэш «имя реалма → bucket»: 136 мс из 248 в проходе по базе.
+
+    RealmBucket парсит строку (gmatch в таблицу, поиск токена, два gsub) и
+    вызывается на КАЖДОЙ записи при перерисовке и при подсчёте агрегатов. В
+    живой базе уникальных имён реалмов пятнадцать — парсить одну и ту же строку
+    61 тысячу раз незачем.
+    """
+
+    def setUp(self):
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        src = SOURCE.read_text(encoding="utf-8")
+        block = src[src.index("NSP_BUCKET_CACHE = NSP_BUCKET_CACHE or {"):
+                    src.index("function RealmShortName(")]
+        self.lua.execute(block)
+        self.g = self.lua.globals()
+
+    def test_cache_returns_the_same_result_as_the_compute(self):
+        for realm in ("CAMWOW EU4 Realm 6 PvP", "EU PvP", "CAMWOW EU5 Realm 2 PvP",
+                      "Some Other Cluster", ""):
+            self.assertEqual(str(self.g["RealmBucketCompute"](realm)),
+                             str(self.g["RealmBucket"](realm)), realm)
+
+    def test_cache_hit_does_not_recompute(self):
+        """Второй вызов обязан обойтись без разбора — проверяем по счётчику."""
+        self.g["RealmBucket"]("CAMWOW EU4 Realm 6 PvP")
+        # Подменяем вычислитель: если кэш не сработал, будет вызван он.
+        self.lua.execute("""
+        REAL_CALLS = 0
+        local orig = RealmBucketCompute
+        RealmBucketCompute = function(r) REAL_CALLS = REAL_CALLS + 1; return orig(r) end
+        """)
+        self.g["RealmBucket"]("CAMWOW EU4 Realm 6 PvP")
+        self.assertEqual(0, self.g["REAL_CALLS"], "кэш не сработал")
+
+    def test_empty_result_is_cached_too(self):
+        """«Не посчитали» и «посчитали, вышло пусто» должны различаться."""
+        self.assertIsNone(self.g["RealmBucket"](""))
+        self.assertIsNone(self.g["RealmBucket"](None))
+
+    def test_bucket_is_idempotent(self):
+        # Idempotency is what makes the filter comparison safe on both sides.
+        once = self.g["RealmBucket"]("CAMWOW EU4 Realm 6 PvP")
+        twice = self.g["RealmBucket"](str(once))
+        self.assertEqual(str(once), str(twice))
 
 
 if __name__ == "__main__":
