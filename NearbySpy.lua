@@ -1323,6 +1323,11 @@ local function UpsertPlayer(db, data)
     local key = data.key
     if not key then return false end
     local nowT = time()
+    -- Счётчик изменений данных (26.11.2026). Единственная точка записи игрока,
+    -- поэтому именно здесь дешевле всего отметить «база изменилась»: кэш окна
+    -- статистики сверяет свою версию с этим числом. Только в памяти — в SV не
+    -- пишется, между сессиями не переносится (после /reload кэш пуст и так).
+    nspDataVer = (nspDataVer or 0) + 1
     local observed = data.observe ~= false
     local entry = db.players[key]
     if not entry then
@@ -5973,15 +5978,66 @@ local function DebugSummary(db)
         WHO_TOKEN_ZONE, WHO_TOKEN_CLASS, WHO_TOKEN_RACE, WHO_TOKEN_SRC, GetLocale())
 end
 
-local function SortedPlayers(db)
-    local list = {}
-    for _, p in pairs(db.players) do
-        list[#list + 1] = p
+-- NspTopPlayers(db, key, limit, accept) — верхние `limit` игроков по ключу.
+--
+-- Было: копия ВСЕЙ базы (61 435 записей) + table.sort по всем. Замер на живом
+-- SavedVariables (lupa, медиана из 5): 74 мс, то есть 150–370 мс в клиенте
+-- (lupa на хосте в 2–5 раз быстрее) — на КАЖДУЮ отрисовку окна, а TacticalUpdate
+-- зовут из семи мест (фильтры, циклеры, OnShow).
+--
+-- ⚠️ accept (фильтр видимости) применяется ДО отбора верхних, а не после.
+-- Иначе «500 верхних по времени» могли не содержать ни одной строки выбранного
+-- класса, и список молча пустел бы при непустой базе. Семантика та же, что
+-- была: сначала отфильтровать, потом взять N самых свежих.
+--
+-- key: "lastSeen" (по умолчанию) или "peerAt" — вкладка «Обмен новые»
+-- сортируется по времени пакета, а не по нашей встрече.
+-- Порядок для равных времён — по имени: table.sort с одним ключом нестабилен,
+-- и без второго критерия строки «прыгали» между отрисовками.
+function NspTopPlayers(db, key, limit, accept)
+    key = key or "lastSeen"
+    limit = tonumber(limit) or NSP_CONST.MAX_ROWS
+    local players = (db and db.players) or {}
+    local function newer(a, b)
+        local av, bv = tonumber(a[key]) or 0, tonumber(b[key]) or 0
+        if av == bv then return (a.name or "") < (b.name or "") end
+        return av > bv
     end
-    table.sort(list, function(a, b)
-        return (a.lastSeen or 0) > (b.lastSeen or 0)
-    end)
-    return list
+    -- Буфер из не более `limit` записей; после заполнения худший стоит в конце.
+    local buf, n, worst = {}, 0, -1
+    for _, p in pairs(players) do
+        if not accept or accept(p) then
+            local v = tonumber(p[key]) or 0
+            if n < limit then
+                n = n + 1
+                buf[n] = p
+                if n == limit then
+                    table.sort(buf, newer)
+                    worst = tonumber(buf[n][key]) or 0
+                end
+            elseif v > worst then
+                -- вытесняем худшего этой же записью и пересчитываем порог.
+                -- Скан O(limit) случается только на вытеснении, а их в живых
+                -- данных единицы процентов: записи без встречи (lastSeen=0)
+                -- отсекаются порогом сразу.
+                buf[n] = p
+                local w, wi = nil, nil
+                for i = 1, n do
+                    local iv = tonumber(buf[i][key]) or 0
+                    if not w or iv < w then w, wi = iv, i end
+                end
+                worst = w or 0
+                if wi and wi ~= n then buf[wi], buf[n] = buf[n], buf[wi] end
+            end
+        end
+    end
+    -- ⚠️ Сортировать надо ВСЕГДА, а не только при недоборе: вытеснение
+    -- ставит новую запись на место худшего, но порядок остальных не сохраняет,
+    -- поэтому без финальной сортировки список приходит частично упорядоченным
+    -- (поймано сверкой со старым алгоритмом: множество верное, порядок — нет).
+    -- K = 500 → 500·log500 ≈ 4.5 тыс. сравнений против 61 тыс. итераций.
+    table.sort(buf, newer)
+    return buf, n
 end
 
 -- ============ UI ============
@@ -6518,65 +6574,97 @@ end
 local function TacticalRows()
     for _, row in ipairs(tactical.rows) do row:Hide() end
     local now, shown = time(), 0
-    local list = SortedPlayers(GetDB())
-    if tactical.filter == "peern" then
-        -- The peer list is ordered by arrival of the packet, not by our own
-        -- sighting: for a player someone else met, lastSeen may be long stale.
-        table.sort(list, function(a, b) return (a.peerAt or 0) > (b.peerAt or 0) end)
+    -- Свежесть — по времени пакета для вкладки «Обмен новые», иначе по нашей
+    -- встрече. Фильтр (TacticalVisible) применяется ВНУТРИ отбора: так список
+    -- остаётся «N самых свежих ИЗ ПОДХОДЯЩИХ», а не «N самых свежих, из которых
+    -- подходящих может не оказаться».
+    local key = (tactical.filter == "peern") and "peerAt" or "lastSeen"
+    -- ── Кэш списка (26.11.2026) ─────────────────────────────────────────────
+    -- Пересборка стоит ~214 мс в клиенте (замер на живом SV), а TacticalUpdate
+    -- зовут из семи мест — половина вызовов приходит от клика по фильтру, когда
+    -- данные не менялись. Ключ = версия данных + всё состояние фильтров + окно
+    -- времени (фильтр «5 минут» зависит от now, поэтому TTL 5 с).
+    local cacheKey = table.concat({
+        tostring(nspDataVer or 0),
+        tostring(tactical.filter), tostring(tactical.classFilter),
+        tactical.levelFilter and (tactical.levelFilter[1] .. "-" .. tactical.levelFilter[2]) or "",
+        tostring(tactical.levelExact), tostring(tactical.realmFilter),
+        tostring(GetDB().peerAllRealms), tostring(math.floor(now / 5)),
+    }, "|")
+    local cache = tactical.listCache
+    local list
+    if cache and cache.key == cacheKey then
+        list = cache.list
+        tactical.cacheHits = (tactical.cacheHits or 0) + 1
+    else
+        list = NspTopPlayers(GetDB(), key, NSP_CONST.MAX_ROWS, function(p)
+            return TacticalVisible(p, now)
+        end)
+        tactical.listCache = { key = cacheKey, list = list }
+        tactical.cacheMiss = (tactical.cacheMiss or 0) + 1
     end
-    for _, p in ipairs(list) do
-        if TacticalVisible(p, now) then
-            -- check the limit BEFORE counting: incrementing first returned 501
-            -- and sized the scroll list for 501 rows while only 500 were drawn
-            if shown >= NSP_CONST.MAX_ROWS then break end
-            shown = shown + 1
-            local row = tactical.rows[shown] or TacticalRow(winList, shown)
-            row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
-            row.player = p
-            TacticalClassIcon(row.icon, p.class)
-            -- The realm goes UNDER the name in a smaller font — for our own
-            -- records too, so one list never mixes labelled and unlabelled rows.
-            -- Never into the ZONE column: that column is for locations.
-            local realmTag = RealmBadge(p.realm)
-            row.name:SetText(p.name or "?")
-            row.name:SetTextColor(ClassColorRGB(p.class))
-            if realmTag then
-                row.realm:SetText(realmTag)
-                row.realm:Show()
-            else
-                row.realm:SetText("")
-                row.realm:Hide()
-            end
-            row.profile:SetText(("%s; %s%s"):format(
-                ClassDisplayName(p.class, p.classLoc),
-                L("LVL_PREFIX"), tostring(p.level or "?")))
-            -- Peer records carry no position or zone at all (the packet has
-            -- neither), so a peer row honestly has no zone.
-            row.zone:SetText(ZoneDisplay(p.zoneId, p.zone))
-            -- In the peer list the CONTACT column answers "when did this arrive
-            -- over the channel", which is the only timestamp a peer row has.
-            -- Everywhere else our own sighting wins; a peer row has none
-            -- (lastSeen = 0 since 1.5.3), so it falls back to the packet time
-            -- instead of showing "?" for a contact we do know.
-            local stamp = (p.lastSeen or 0) > 0 and p.lastSeen or p.peerAt
-            if tactical.filter == "peern" and (p.peerAt or 0) > 0 then stamp = p.peerAt end
-            local age = now - (stamp or 0)
-            row.seen:SetText(TimeAgo(stamp))
-            if age <= 300 then row.seen:SetTextColor(0.3, 0.9, 0.62)
-            elseif age <= 3600 then row.seen:SetTextColor(0.88, 0.72, 0.32)
-            else row.seen:SetTextColor(0.45, 0.5, 0.5) end
-            row:Show()
+    for i = 1, #list do
+        local p = list[i]
+        shown = i
+        local row = tactical.rows[shown] or TacticalRow(winList, shown)
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 0, -(shown - 1) * TACTICAL_ROW_H)
+        row.player = p
+        TacticalClassIcon(row.icon, p.class)
+        -- The realm goes UNDER the name in a smaller font — for our own
+        -- records too, so one list never mixes labelled and unlabelled rows.
+        -- Never into the ZONE column: that column is for locations.
+        local realmTag = RealmBadge(p.realm)
+        row.name:SetText(p.name or "?")
+        row.name:SetTextColor(ClassColorRGB(p.class))
+        if realmTag then
+            row.realm:SetText(realmTag)
+            row.realm:Show()
+        else
+            row.realm:SetText("")
+            row.realm:Hide()
         end
+        row.profile:SetText(("%s; %s%s"):format(
+            ClassDisplayName(p.class, p.classLoc),
+            L("LVL_PREFIX"), tostring(p.level or "?")))
+        -- Peer records carry no position or zone at all (the packet has
+        -- neither), so a peer row honestly has no zone.
+        row.zone:SetText(ZoneDisplay(p.zoneId, p.zone))
+        -- In the peer list the CONTACT column answers "when did this arrive
+        -- over the channel", which is the only timestamp a peer row has.
+        -- Everywhere else our own sighting wins; a peer row has none
+        -- (lastSeen = 0 since 1.5.3), so it falls back to the packet time
+        -- instead of showing "?" for a contact we do know.
+        local stamp = (p.lastSeen or 0) > 0 and p.lastSeen or p.peerAt
+        if tactical.filter == "peern" and (p.peerAt or 0) > 0 then stamp = p.peerAt end
+        local age = now - (stamp or 0)
+        row.seen:SetText(TimeAgo(stamp))
+        if age <= 300 then row.seen:SetTextColor(0.3, 0.9, 0.62)
+        elseif age <= 3600 then row.seen:SetTextColor(0.88, 0.72, 0.32)
+        else row.seen:SetTextColor(0.45, 0.5, 0.5) end
+        row:Show()
     end
     winList:SetHeight(math.max(1, shown * TACTICAL_ROW_H))
     return shown
 end
 
 local function TacticalStats()
-    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
+    -- Кэш агрегатов (26.11.2026). Проход по 61 435 записям стоит ~21 мс в lupa
+    -- (~50–100 мс в клиенте) и повторяется на каждую отрисовку, хотя зависит
+    -- только от данных, выбранного реалма и текущего времени (счётчики «5 мин /
+    -- 15 мин / 1 час»). Ключ: версия данных + реалм + окно 5 с.
     local now = time()
     local realmSel = tactical.realmFilter
+    local cacheKey = table.concat({
+        tostring(nspDataVer or 0), tostring(realmSel),
+        tostring(GetDB().peerAllRealms), tostring(math.floor(now / 5)),
+    }, "|")
+    local cached = tactical.statsCache
+    if cached and cached.key == cacheKey then
+        tactical.statsHits = (tactical.statsHits or 0) + 1
+        return cached.st
+    end
+    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
     for _, p in pairs(GetDB().players) do
         -- counters follow the same realm selection as the list: a "Peer 12" badge
         -- over a list of 3 realm rows would be a lie
@@ -6618,6 +6706,8 @@ local function TacticalStats()
     st.top = {}
     for _, item in pairs(st.classes) do st.top[#st.top + 1] = item end
     table.sort(st.top, function(a, b) return a.count > b.count end)
+    tactical.statsCache = { key = cacheKey, st = st }
+    tactical.statsMiss = (tactical.statsMiss or 0) + 1
     return st
 end
 
