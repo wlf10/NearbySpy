@@ -2608,6 +2608,12 @@ function NspNoteSendRet(db, okSent, result, nowT)
     local at = type(db.debug.blockedAt) == "table" and db.debug.blockedAt["UNKNOWN()"]
     if okSent and result == nil and at and (nowT - at) <= 1 then
         db.debug.peerGate = (db.debug.peerGate or 0) + 1
+        -- Счётчик ЗА СЕССИЮ (26.11.2026). `peerGate` накопительный и в SavedVariables
+        -- не сбрасывается, поэтому по нему нельзя ответить «проблема сейчас или
+        -- это остаток прошлых сессий». Живой случай: в файле стояло 694, из них
+        -- 437 приросли на старом коде, а сессия после починки дала РОВНО 0 — но
+        -- по одному числу это было не видно.
+        db.debug.gateSession = (db.debug.gateSession or 0) + 1
         -- В КАКОМ контексте нас заблокировали: движение/каст/цель — это НЕ
         -- hardware-события, а клик по миру — да. Без этого нельзя решить, какие
         -- триггеры отправки стоит убрать (16.11.2026).
@@ -2630,6 +2636,8 @@ function NspNoteBlock(db, addon, func, nowT, event)
     if ours then
         db.debug.blocked = db.debug.blocked or {}
         db.debug.blocked[func] = (db.debug.blocked[func] or 0) + 1
+        -- За сессию, рядом с накопительным: см. комментарий в NspNoteSendRet.
+        db.debug.blockedSession = (db.debug.blockedSession or 0) + 1
         db.debug.blockedAt = db.debug.blockedAt or {}
         db.debug.blockedAt[func] = nowT
         db.debug.blockedEvent = db.debug.blockedEvent or {}
@@ -4127,6 +4135,10 @@ function NspPruneDebug(db)
         -- зарегистрировался ли префикс аддон-сообщений. Без них «отправок нет»
         -- не отличить от «префикс не встал».
         peerTransport = true, prefix = true,
+        -- блокировки за СЕССИЮ (26.11.2026), рядом с накопительными peerGate и
+        -- blocked: без них вопрос «проблема сейчас или остаток прошлых сессий»
+        -- не имеет ответа
+        gateSession = true, blockedSession = true,
         peerSenders = true, peerSendError = true, peerCommaStripped = true,
         lastDrainWhy = true, sendRet = true, sendRetAt = true,
         -- client gate (ADDON_ACTION_BLOCKED) and throttling
@@ -9353,6 +9365,15 @@ frame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         end
     elseif event == "PLAYER_LOGIN" then
         local db = GetDB()
+        -- Счётчики блокировок ЗА СЕССИЮ (26.11.2026). Накопительные (peerGate,
+        -- blocked) живут в SavedVariables годами и на вопрос «проблема сейчас
+        -- или это остаток» не отвечают: в живом файле стояло peerGate=694, из
+        -- них 437 приросли на старом коде, а сессия после починки дала ровно 0 —
+        -- по одному числу это было не видно. Обнуляем ровно на входе; /reload
+        -- тоже пересоздаёт сессию, поэтому цифра всегда «с этого входа».
+        db.debug = db.debug or {}
+        db.debug.gateSession = 0
+        db.debug.blockedSession = 0
         EnsureNameplates(db)
         ScheduleTick()
         -- Вкладка в меню модификаций (Settings → AddOns → NearbySpy). Регистрация

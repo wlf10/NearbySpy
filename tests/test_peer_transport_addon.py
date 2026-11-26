@@ -326,5 +326,48 @@ class TimerCounterTests(unittest.TestCase):
         self.assertIn("DrainPeerQueue", body)
 
 
+class SessionGateCounterTests(unittest.TestCase):
+    """Счётчики блокировок за сессию отдельно от накопительных.
+
+    Живой случай 26.11.2026: в SV стоял peerGate=694, из них 437 приросли на
+    старом коде (сессия 16:35-16:38), а сессия после починки (18:55-19:05)
+    дала РОВНО 0 прироста. По одному числу это было не видно, и вопрос «это
+    всё ещё ломается?» оставался без ответа — пришлось восстанавливать
+    хронологию по трём файлам.
+    """
+
+    def setUp(self):
+        self.src = SOURCE.read_text(encoding="utf-8")
+
+    def fn_body(self, marker, end_marker):
+        start = self.src.index(marker)
+        end = self.src.index(end_marker, start)
+        return self.src[start:end]
+
+    def test_send_ret_counts_the_session(self):
+        body = self.fn_body("function NspNoteSendRet", "function NspNoteBlock")
+        self.assertIn("db.debug.peerGate = (db.debug.peerGate or 0) + 1", body)
+        self.assertIn("db.debug.gateSession = (db.debug.gateSession or 0) + 1", body)
+
+    def test_note_block_counts_the_session(self):
+        body = self.fn_body("function NspNoteBlock", "local function DrainPeerQueue")
+        self.assertIn("db.debug.blocked[func]", body)
+        self.assertIn("db.debug.blockedSession = (db.debug.blockedSession or 0) + 1", body)
+
+    def test_session_counters_reset_on_login(self):
+        body = self.fn_body('elseif event == "PLAYER_LOGIN" then', "EnsureNameplates(db)")
+        self.assertIn("db.debug.gateSession = 0", body)
+        self.assertIn("db.debug.blockedSession = 0", body)
+
+    def test_session_keys_survive_the_debug_prune(self):
+        # Белый список чистки обязан знать оба ключа, иначе они стираются при
+        # следующем входе — ровно та же ловушка, что была с prefix/peerTransport.
+        start = self.src.index("local keep = {")
+        end = self.src.index("local dropped, names = 0, {}", start)
+        keep = self.src[start:end]
+        self.assertIn("gateSession = true", keep)
+        self.assertIn("blockedSession = true", keep)
+
+
 if __name__ == "__main__":
     unittest.main()
