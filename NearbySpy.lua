@@ -1341,6 +1341,10 @@ local function UpsertPlayer(db, data)
         --     повторно, значит отправитель и есть первооткрыватель.
         db.players[key] = NspNewPlayerRec(key, data, observed, nowT)
         newThisSession = newThisSession + 1
+        -- Буфер окна (26.11.2026): НОВАЯ запись тоже встаёт в список последних.
+        -- Без этого строка появлялась бы в окне только со второго раза
+        -- (catch: тест test_touch_is_called_from_the_single_write_point).
+        if observed and NspRecentTouch then NspRecentTouch(key, db.players[key]) end
         -- Зона пришла ТЕКСТОМ без id (peer с zoneId=0, чат, чужой клиент) —
         -- восстанавливаем id вшитой таблицей билда. Без этого такие записи
         -- нельзя ни показать на языке интерфейса, ни фильтровать по зоне:
@@ -1382,6 +1386,10 @@ local function UpsertPlayer(db, data)
             entry.count = (entry.count or 1) + 1
         end
         entry.lastSeen = nowT
+        -- Буфер окна (26.11.2026): запись встаёт в список последних по времени.
+        -- Единственная точка записи игрока — здесь и поддерживаем порядок, тогда
+        -- окно показывает список без единой сортировки.
+        if NspRecentTouch then NspRecentTouch(key, entry) end
         -- Источник: НАША наблюденная встреча вытесняет "peer". Раньше source
         -- не обновлялся вовсе, и игрок, которого мы встретили лично, оставался
         -- с source="peer" навсегда — а по нему приёмник считал запись чужой.
@@ -5973,45 +5981,111 @@ local function DebugSummary(db)
         WHO_TOKEN_ZONE, WHO_TOKEN_CLASS, WHO_TOKEN_RACE, WHO_TOKEN_SRC, GetLocale())
 end
 
--- NspBaseList(db, key) — ВСЕ записи с ненулевым ключом, отсортированные по нему.
+-- NSP_RECENT — список ПОСЛЕДНИХ записей для окна статистики (26.11.2026).
 --
--- Это и есть «одна сортировка» (идея владельца 26.11.2026): порядок в списке
--- всегда один — по времени (lastSeen, либо peerAt для вкладки «Обмен новые»),
--- и он считается один раз на TTL, а не на каждый фильтр.
+-- Решение владельца: держать не всю базу, а список последних N (500 — ровно
+-- столько, сколько показывается); новая запись встаёт на своё место по
+-- времени, хвост вытесняется. Сортировки в окне нет вообще.
 --
--- Замер на живом SV (61 435 записей, lupa):
---   сортировка 19 885 записей с материализованным ключом   71 мс
---   проход по готовому порядку с фильтром (без сортировки) 15–20 мс
--- Раньше каждый таб платил 80 мс (сортировка + фильтр). Теперь сортировка
--- платится раз в TTL, а смена таба стоит только проход.
+-- Замер на живом SV (61 435 записей): пересборка полного порядка 70 мс, и это
+-- платилось на каждое открытие/смену фильтра. Вставка в буфер из 500 — единицы
+-- микросекунд, потому что сдвиг делает table.insert в C.
 --
--- Ключ сортировки МАТЕРИАЛИЗОВАН в обёртке {v, p, nm}: компаратор вызывается
--- ~280 тыс. раз, и обращение p[key] в нём шло через метатаблицу записи (вызов
--- Lua-функции). Это была треть стоимости.
+-- Что это меняет для пользователя (согласовано): фильтр по классу/реалму ищет
+-- ВНУТРИ последних 500, поэтому при редком фильтре строк меньше, чем могло бы
+-- быть по всей базе. Обычный список (без фильтра) полон — 500 из 500.
+--
+-- База игроков при этом НЕ уменьшается: выгрузка на сайт, парсеры и статистика
+-- работают по db.players как раньше. Буфер — только для показа.
 -- global: в главном чанке 197 локалов из 200.
-local NSP_BASE_CACHE = {}
+NSP_RECENT = { list = {}, max = 500, dirty = true }
 
-function NspBaseList(db, key)
-    key = key or "lastSeen"
-    local players = (db and db.players) or {}
-    local bucket = math.floor(time() / 10)         -- TTL: список «свеж на глаз»
-    local c = NSP_BASE_CACHE[key]
-    if c and c.bucket == bucket then return c.list end
+-- NspRecentBuild() — построить буфер из базы (первый показ, загрузка SV,
+-- массовые изменения). Единственное место, где происходит сортировка.
+function NspRecentBuild(db)
+    local st = NSP_RECENT
+    st.max = NSP_CONST.MAX_ROWS
+    local players = (db or GetDB()).players or {}
     local all, n = {}, 0
-    for _, p in pairs(players) do
-        local v = tonumber(p[key]) or 0
+    for key, p in pairs(players) do
+        local v = tonumber(p.lastSeen) or 0
         if v > 0 then
             n = n + 1
-            all[n] = { v = v, p = p, nm = p.name }
+            all[n] = { v = v, p = p, key = key }
         end
     end
     table.sort(all, function(a, b)
+        if a.v == b.v then return (a.p.name or "") < (b.p.name or "") end
+        return a.v > b.v
+    end)
+    local list = {}
+    for i = 1, math.min(n, st.max) do list[i] = all[i] end
+    st.list = list
+    st.dirty = false
+    return list
+end
+
+-- NspRecentTouch(key, entry) — запись обновилась: вставить/переставить её.
+-- Вызывается из UpsertPlayer при каждом изменении lastSeen (единственная точка
+-- записи игрока), поэтому буфер всегда актуален без пересортировки.
+function NspRecentTouch(key, entry)
+    local st = NSP_RECENT
+    if st.dirty or not key or type(entry) ~= "table" then return end
+    local v = tonumber(entry.lastSeen) or 0
+    if v <= 0 then return end
+    local list = st.list
+    -- Уже в буфере? Тогда сначала убрать со старого места (обновилось время).
+    local at = nil
+    for i = 1, #list do
+        if list[i].key == key then at = i break end
+    end
+    if at and at == 1 and (tonumber(list[1].v) or 0) >= v then return end
+    if at then table.remove(list, at) end
+    -- Позиция вставки: бинарный поиск по убыванию времени.
+    local lo, hi = 1, #list + 1
+    while lo < hi do
+        local mid = math.floor((lo + hi) / 2)
+        if (tonumber(list[mid].v) or 0) >= v then lo = mid + 1 else hi = mid end
+    end
+    -- Хвост вытесняется: в списке не больше st.max записей.
+    if lo > st.max then return end
+    table.insert(list, lo, { v = v, p = entry, key = key })
+    if #list > st.max then table.remove(list, #list) end
+end
+
+-- NspRecentInvalidate() — после массовых изменений (prune, миграции) буфер
+-- мог разойтись с базой; проще перестроить на следующем показе, чем ловить
+-- расхождение в пяти местах.
+function NspRecentInvalidate()
+    NSP_RECENT.dirty = true
+end
+
+-- NspBaseList(db, key) — порядок для окна.
+--
+-- lastSeen: готовый буфер, без сортировки.
+-- peerAt: вкладка «Обмен новые» сортирует ТОЛЬКО буфер (500 элементов) — на
+-- всей базе это было бы 70 мс, здесь доли миллисекунды.
+function NspBaseList(db, key)
+    key = key or "lastSeen"
+    local st = NSP_RECENT
+    if st.dirty or #st.list == 0 then NspRecentBuild(db) end
+    if key == "lastSeen" then
+        local out = {}
+        for i = 1, #st.list do out[i] = st.list[i].p end
+        return out
+    end
+    -- Другой ключ (peerAt): пересортировать копию буфера. Он маленький.
+    local tmp = {}
+    for i = 1, #st.list do
+        local p = st.list[i].p
+        tmp[i] = { v = tonumber(p[key]) or 0, p = p, nm = p.name }
+    end
+    table.sort(tmp, function(a, b)
         if a.v == b.v then return (a.nm or "") < (b.nm or "") end
         return a.v > b.v
     end)
     local out = {}
-    for i = 1, n do out[i] = all[i].p end
-    NSP_BASE_CACHE[key] = { bucket = bucket, list = out }
+    for i = 1, #tmp do out[i] = tmp[i].p end
     return out
 end
 
@@ -9498,6 +9572,9 @@ function NspPrune(db, retainDays, now)
         end
     end
     for _, key in ipairs(dead) do db.players[key] = nil end
+    -- Буфер окна держит ссылки на записи: после массового удаления его надо
+    -- перестроить, иначе окно показывало бы удалённых (26.11.2026).
+    if removed > 0 and NspRecentInvalidate then NspRecentInvalidate() end
     -- кольцо экипировки ссылается на ключи игроков: подчищаем висячие ссылки,
     -- иначе gearRing копит ключи удалённых записей
     if type(db.gearRing) == "table" then

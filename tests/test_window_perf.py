@@ -47,7 +47,7 @@ def top_players_block() -> str:
     «attempt to call global 'NspBaseList'».
     """
     return cut(SOURCE.read_text(encoding="utf-8"),
-               "local NSP_BASE_CACHE = {}", "\n-- ============ UI ============")
+               "NSP_RECENT = { list = {}", "\n-- ============ UI ============")
 
 
 def schema_block() -> str:
@@ -151,19 +151,31 @@ class TopPlayersTests(unittest.TestCase):
         got = self.values(new, n)
         self.assertEqual(sorted(got, reverse=True), got, "список не отсортирован")
 
-    def test_filter_is_applied_before_the_limit(self):
-        """Редкий класс обязан попасть в список, а не быть вытесненным свежими."""
-        # 900 свежих магов (они забьют буфер первыми)
+    def test_filter_works_inside_the_recent_window(self):
+        """Фильтр ищет ВНУТРИ последних N — согласованная семантика (26.11.2026).
+
+        Окну показывается список последних 500 записей; фильтр по классу/реалму
+        сужает именно его. Поэтому старый жрец, не попавший в последние 500,
+        в списке не появится: это принятая цена за отсутствие сортировки на
+        каждый клик. Если фильтр даёт строки — они обязаны быть того класса.
+        """
+        # 900 свежих магов займут весь буфер
         for i in range(900):
             self.add(f"M{i}", last_seen=90_000 + i, cls="MAGE")
-        # 40 старых жрецов
+        # 40 старых жрецов в последние 500 не входят
         for i in range(40):
             self.add(f"P{i}", last_seen=100 + i, cls="PRIEST")
         accept = self.lua.eval("(function(p) return p.class == 'PRIEST' end)")
         new, n = self.g["TestTop"](self.g["DB"], "lastSeen", 500, accept)
-        self.assertEqual(40, n, "фильтр применён ПОСЛЕ отбора — часть строк потеряна")
-        for i in range(1, n + 1):
-            self.assertEqual("PRIEST", new[i]["class"])
+        self.assertEqual(0, n, "жрецы вне окна последних не должны показываться")
+        # А если жрец СВЕЖИЙ — он в окне и проходит фильтр.
+        # add() пишет прямо в базу, минуя UpsertPlayer, поэтому буфер надо
+        # пометить негодным — ровно как это делает prune после массовой правки.
+        self.add("Fresh", last_seen=99_999, cls="PRIEST")
+        self.lua.execute("NspRecentInvalidate()")
+        new, n = self.g["TestTop"](self.g["DB"], "lastSeen", 500, accept)
+        self.assertEqual(1, n)
+        self.assertEqual("PRIEST", new[1]["class"])
 
     def test_peer_key_sorts_by_packet_time(self):
         self.add("Old", last_seen=1000, peer_at=10)
@@ -353,7 +365,7 @@ class BaseListCacheTests(unittest.TestCase):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(STUBS)
         self.lua.execute(schema_block())
-        self.lua.execute(top_players_block() + "\nTestTop = NspTopPlayers\nTestBase = NspBaseList\n")
+        self.lua.execute(top_players_block() + "\nTestTop = NspTopPlayers\nTestBase = NspBaseList\nTestInvalidate = NspRecentInvalidate\n")
         self.lua.execute("DB = { players = {} }")
         self.g = self.lua.globals()
 
@@ -370,14 +382,17 @@ class BaseListCacheTests(unittest.TestCase):
         self.assertEqual(2, len(first))
         self.assertEqual(2, len(second), "кэш базового списка не сработал")
 
-    def test_base_list_rebuilds_after_the_ttl(self):
+    def test_base_list_rebuilds_after_invalidation(self):
+        """Кэша по времени больше нет: буфер поддерживается при записи, а
+        перестраивается только по явному сигналу (prune, массовые изменения)."""
         self.add("A", 100)
         self.g["TestBase"](self.g["DB"], "lastSeen")
         self.add("B", 200)
-        # сдвигаем часы за пределы TTL
-        self.lua.execute("NOW = NOW + 10")
+        # без инвалидации буфер не знает про B (его добавили в обход UpsertPlayer)
+        self.assertEqual(1, len(self.g["TestBase"](self.g["DB"], "lastSeen")))
+        self.lua.execute("NspRecentInvalidate()")
         rebuilt = self.g["TestBase"](self.g["DB"], "lastSeen")
-        self.assertEqual(2, len(rebuilt), "после TTL список не пересобрался")
+        self.assertEqual(2, len(rebuilt), "после инвалидации список не пересобрался")
 
     def test_filters_do_not_resort(self):
         """Смена фильтра не должна трогать базовый список (тот же объект)."""
