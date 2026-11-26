@@ -40,6 +40,18 @@ def recent_block() -> str:
                "NSP_RECENT = { list = {}", "\n-- ============ UI ============")
 
 
+def schema_block() -> str:
+    """Настоящие NSP_REC и метатаблица записи (позиционная схема v4)."""
+    return cut(LOCALE.read_text(encoding="utf-8"), "NSP_REC = {", "\nNSP_LOCALE = {")
+
+
+def top_players_block() -> str:
+    """NSP_RECENT + NspEffectiveTime + NspRecent* + NspTopPlayers одним куском."""
+    return cut(SOURCE.read_text(encoding="utf-8"),
+               "NSP_RECENT = { list = {}", "\n-- ============ UI ============")
+
+
+STUBS_NOW = 1795705537
 STUBS = r"""
 NSP_CONST = { MAX_ROWS = 500 }
 NOW = 1795705537
@@ -201,6 +213,94 @@ class NoSortOnShowTests(unittest.TestCase):
                    src.index("local frame = CreateFrame(\"Frame\")")]
         self.assertIn("NspRecentInvalidate", body,
                       "после массового удаления буфер не помечается негодным")
+
+
+class PeerRecordVisibilityTests(unittest.TestCase):
+    """Записи канала обмена обязаны быть видны в списках.
+
+    Живой случай 26.11.2026 (жалоба владельца): вкладка «Обмен новые» пустая, а
+    записи канала не появляются в «Свежих». Причина двойная:
+      1) буфер последних брал ТОЛЬКО lastSeen, а у peer-записи он 0 — такие
+         записи в буфер не попадали вообще (43 143 из 63 391 в живой базе);
+      2) фильтр «свежие» считал возраст как now - lastSeen, то есть от нуля —
+         «старая на 56 лет», поэтому peer-запись не была свежей никогда.
+    Теперь порядок и возраст считаются по ЭФФЕКТИВНОМУ времени: своя встреча,
+    иначе время пакета.
+    """
+
+    def setUp(self):
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(STUBS)
+        self.lua.execute(schema_block())
+        self.lua.execute(top_players_block()
+                         + "\nTestTop = NspTopPlayers\nTestBase = NspBaseList\n"
+                         + "TestTouch = NspRecentTouch\nTestEff = NspEffectiveTime\n")
+        self.lua.execute("""
+        DB = { players = {}, peerAllRealms = true }
+        TacticalVisible = function(p, now)
+            local t = NspEffectiveTime(p)
+            return t > 0 and (now - t) <= 300
+        end
+        """)
+        self.g = self.lua.globals()
+
+    def peer_row(self, key, peer_at, peer_new=True):
+        """Запись канала: своя встреча отсутствует (lastSeen = 0)."""
+        self.lua.execute("""
+        local k, pa, pn = ...
+        local e = {name = k, lastSeen = 0, peerAt = pa, peerNew = pn}
+        DB.players[k] = e
+        NspRecentTouch(k, e)
+        """, key, peer_at, peer_new)
+
+    def seen_row(self, key, last_seen):
+        self.lua.execute("""
+        local k, ls = ...
+        local e = {name = k, lastSeen = ls, peerAt = 0}
+        DB.players[k] = e
+        NspRecentTouch(k, e)
+        """, key, last_seen)
+
+    def test_effective_time_prefers_sighting_then_packet(self):
+        self.assertEqual(500, self.g["TestEff"](self.lua.table_from(
+            {"lastSeen": 500, "peerAt": 900})))
+        self.assertEqual(900, self.g["TestEff"](self.lua.table_from(
+            {"lastSeen": 0, "peerAt": 900})))
+        self.assertEqual(0, self.g["TestEff"](self.lua.table_from(
+            {"lastSeen": 0, "peerAt": 0})))
+
+    def test_peer_record_enters_the_buffer(self):
+        """Раньше такие записи в буфер не попадали вообще."""
+        self.peer_row("PeerOnly", STUBS_NOW - 10)
+        base = self.g["TestBase"](self.g["DB"], "lastSeen")
+        self.assertEqual(1, len(base), "peer-запись не попала в буфер последних")
+
+    def test_peer_record_is_fresh(self):
+        """«Эти новые по обмену надо показывать в списке свежие»."""
+        self.peer_row("Fresh", STUBS_NOW - 60)
+        self.peer_row("Old", STUBS_NOW - 3600)
+        fresh = self.g["TacticalVisible"](self.g["DB"]["players"]["Fresh"], STUBS_NOW)
+        stale = self.g["TacticalVisible"](self.g["DB"]["players"]["Old"], STUBS_NOW)
+        self.assertTrue(fresh, "свежая peer-запись не проходит в «Свежие»")
+        self.assertFalse(stale)
+
+    def test_peer_record_puts_the_peer_tab_in_order(self):
+        """Порядок вкладки peer — по времени пакета, а не по нашей встрече."""
+        self.peer_row("P1", STUBS_NOW - 100)
+        self.peer_row("P2", STUBS_NOW - 10)
+        base = self.g["TestBase"](self.g["DB"], "peerAt")
+        self.assertEqual("P2", base[1]["name"])
+
+    def test_peer_at_update_moves_the_record(self):
+        self.peer_row("P", STUBS_NOW - 500)
+        self.seen_row("S", STUBS_NOW - 100)
+        self.assertEqual("S", self.g["TestBase"](self.g["DB"], "lastSeen")[1]["name"])
+        # пакет пришёл снова, теперь он свежее
+        self.lua.execute("""
+        DB.players['P'].peerAt = ...
+        NspRecentTouch('P', DB.players['P'])
+        """, STUBS_NOW - 5)
+        self.assertEqual("P", self.g["TestBase"](self.g["DB"], "lastSeen")[1]["name"])
 
 
 if __name__ == "__main__":

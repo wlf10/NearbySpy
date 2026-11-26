@@ -1454,6 +1454,10 @@ local function UpsertPlayer(db, data)
         -- keeps peerNew untouched (the player was first known from a real
         -- sighting) while the Peer filter still shows the record.
         entry.peerAt = nowT
+        -- Буфер окна: время пакета — единственное время такой записи, поэтому
+        -- без этого вызова вкладка «Обмен новые» оставалась пустой до пересборки
+        -- (26.11.2026).
+        if NspRecentTouch then NspRecentTouch(key, entry) end
         if data.peerRealm then entry.peerRealm = data.peerRealm end
         if data.peerForeign then entry.peerForeign = true end
         -- the latest sender wins: the row is "last corroborated by" this character
@@ -6008,7 +6012,7 @@ function NspRecentBuild(db)
     local players = (db or GetDB()).players or {}
     local all, n = {}, 0
     for key, p in pairs(players) do
-        local v = tonumber(p.lastSeen) or 0
+        local v = NspEffectiveTime(p)
         if v > 0 then
             n = n + 1
             all[n] = { v = v, p = p, key = key }
@@ -6025,13 +6029,27 @@ function NspRecentBuild(db)
     return list
 end
 
+-- NspEffectiveTime(p) — по какому времени запись стоит в списке.
+--
+-- Своя встреча даёт lastSeen; у записи, которую мы никогда не видели сами
+-- (пришла по каналу обмена), lastSeen = 0, и её единственное время — peerAt.
+-- Раньше буфер брал ТОЛЬКО lastSeen, поэтому peer-записи в него не попадали
+-- вовсе: вкладка «Обмен новые» была пустой, а в «Свежих» их не было никогда
+-- (возраст считался от нуля). global: в главном чанке 195 локалов из 200.
+function NspEffectiveTime(p)
+    if type(p) ~= "table" then return 0 end
+    local ls = tonumber(p.lastSeen) or 0
+    if ls > 0 then return ls end
+    return tonumber(p.peerAt) or 0
+end
+
 -- NspRecentTouch(key, entry) — запись обновилась: вставить/переставить её.
--- Вызывается из UpsertPlayer при каждом изменении lastSeen (единственная точка
--- записи игрока), поэтому буфер всегда актуален без пересортировки.
+-- Вызывается из UpsertPlayer при СОЗДАНИИ записи, при обновлении встречи и при
+-- обновлении peerAt, поэтому буфер всегда актуален без пересортировки.
 function NspRecentTouch(key, entry)
     local st = NSP_RECENT
     if st.dirty or not key or type(entry) ~= "table" then return end
-    local v = tonumber(entry.lastSeen) or 0
+    local v = NspEffectiveTime(entry)
     if v <= 0 then return end
     local list = st.list
     -- Уже в буфере? Тогда сначала убрать со старого места (обновилось время).
@@ -6103,22 +6121,27 @@ function NspTopPlayers(db, key, limit, accept)
     key = key or "lastSeen"
     limit = tonumber(limit) or NSP_CONST.MAX_ROWS
     local base = NspBaseList(db, key)
-    local out, m = {}, 0
+    local out, m, seen = {}, 0, {}
     for i = 1, #base do
         local p = base[i]
         if not accept or accept(p) then
             m = m + 1
             out[m] = p
+            seen[p] = true
             if m >= limit then return out, m end
         end
     end
     if m < limit then
-        -- добор нулевых: только когда порядочных не хватило
+        -- Добор записей БЕЗ времени (эффективное = 0). Проверка `seen`
+        -- обязательна: peer-запись попадает в базовый список по времени пакета,
+        -- а по ключу lastSeen её «нет» — без отметки она добавилась бы вторым
+        -- экземпляром (поймано тестом: 5 строк вместо 3).
         local players = (db and db.players) or {}
         for _, p in pairs(players) do
-            if (tonumber(p[key]) or 0) <= 0 and (not accept or accept(p)) then
+            if not seen[p] and NspEffectiveTime(p) <= 0 and (not accept or accept(p)) then
                 m = m + 1
                 out[m] = p
+                seen[p] = true
                 if m >= limit then break end
             end
         end
@@ -6520,7 +6543,12 @@ local function TacticalVisible(p, now)
     -- Остались только режимы списка (все / свежие / новые / из канала) — это не
     -- фильтры, а разные выборки одного и того же порядка.
     if tactical.filter == "fresh" then
-        return now - (p.lastSeen or 0) <= TACTICAL_FRESH
+        -- Возраст — по ЭФФЕКТИВНОМУ времени (своя встреча ИЛИ время пакета):
+        -- у записи канала lastSeen = 0, и `now - 0` делало её «старой на 56 лет»,
+        -- поэтому в «Свежих» peer-записей не было никогда (замечание владельца
+        -- 26.11.2026: «эти новые по обмену надо показывать в списке свежие»).
+        local t = NspEffectiveTime(p)
+        return t > 0 and (now - t) <= TACTICAL_FRESH
     elseif tactical.filter == "new" then
         -- Only OUR OWN finds. A peer record gets firstSeen at the moment the
         -- packet arrives, so it satisfied the time check and filled "New" with

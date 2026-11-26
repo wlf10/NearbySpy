@@ -15,11 +15,17 @@ class PeerFilterTests(unittest.TestCase):
         start = source.index("local tactical = {rows = {")
         end = source.index("-- Relative time for the contact column")
         block = source[start:end]
+        # TacticalVisible теперь считает возраст по NspEffectiveTime (своя
+        # встреча, иначе время пакета) — без неё чанк падает
+        # «attempt to call global 'NspEffectiveTime'».
+        eff_start = source.index("function NspEffectiveTime(")
+        eff_end = source.index("-- NspRecentTouch(key, entry)", eff_start)
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(
             "time = function() return 1000 end\n"
             "ALL_REALMS = true\n"
             "function GetDB() return { peerAllRealms = ALL_REALMS } end\n"
+            + source[eff_start:eff_end] + "\n"
             + block + "\n"
             "TestVisible = TacticalVisible\n"
             "TestStat = tactical\n"
