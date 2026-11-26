@@ -6530,7 +6530,11 @@ function RealmBadge(realm)
     return RealmBucket(realm) or PeerRealmTag(realm) or realm
 end
 
-local function TacticalVisible(p, now)
+local function TacticalVisible(p, now, filt)
+    -- filt — режим списка. Необязателен: обычные вызовы берут текущий режим,
+    -- а счётчики табов передают его явно, чтобы посчитать все четыре режима за
+    -- один проход, не дёргая глобальное состояние окна.
+    filt = filt or tactical.filter
     -- Foreign peer rows are hidden as soon as the "all realms" flag is off:
     -- they were accepted while it was on, and a list that keeps showing them
     -- would contradict the setting the user just changed. Nothing is deleted —
@@ -6542,21 +6546,21 @@ local function TacticalVisible(p, now)
     -- классам и уровням делает сайт, где для этого есть вся база.
     -- Остались только режимы списка (все / свежие / новые / из канала) — это не
     -- фильтры, а разные выборки одного и того же порядка.
-    if tactical.filter == "fresh" then
+    if filt == "fresh" then
         -- Возраст — по ЭФФЕКТИВНОМУ времени (своя встреча ИЛИ время пакета):
         -- у записи канала lastSeen = 0, и `now - 0` делало её «старой на 56 лет»,
         -- поэтому в «Свежих» peer-записей не было никогда (замечание владельца
         -- 26.11.2026: «эти новые по обмену надо показывать в списке свежие»).
         local t = NspEffectiveTime(p)
         return t > 0 and (now - t) <= TACTICAL_FRESH
-    elseif tactical.filter == "new" then
+    elseif filt == "new" then
         -- Only OUR OWN finds. A peer record gets firstSeen at the moment the
         -- packet arrives, so it satisfied the time check and filled "New" with
         -- players somebody else met (215 of them in the live save). "New" answers
         -- "whom did I discover this session", so peer rows are excluded; they have
         -- their own filter.
         return (p.firstSeen or 0) >= tactical.started and p.source ~= "peer"
-    elseif tactical.filter == "peern" then
+    elseif filt == "peern" then
         -- Только то, чему канал научил ЗА ЭТУ СЕССИЮ. peerNew/peerAt лежат в
         -- SavedVariables и живут после релога, поэтому без проверки на
         -- tactical.started вкладка показывала все записи канала за всё время
@@ -6565,6 +6569,33 @@ local function TacticalVisible(p, now)
         return (p.peerAt or 0) >= tactical.started and p.peerNew == true
     end
     return true
+end
+
+-- NspTabCounts(now) — сколько строк покажет КАЖДЫЙ таб.
+--
+-- Число на табе обязано совпадать с длиной списка: раньше оно считалось по всей
+-- базе (63 391 запись), а список берётся из буфера последних 500 — на вкладке
+-- «Обмен новые» стояло 1520 при 462 строках в списке (жалоба владельца
+-- 26.11.2026: «в табе число отличается от списка в обмене»).
+--
+-- Поэтому считаем не «сколько подходящего в базе», а «сколько строк отберёт
+-- список» — тем же NspTopPlayers с тем же фильтром и тем же пределом. Тогда
+-- расхождение невозможно по построению, в том числе на маленькой базе, где
+-- список добирается записями без времени.
+-- global: новых локалов в главном чанке нет (195 из 200).
+function NspTabCounts(now)
+    local db, out = GetDB(), {}
+    local modes = { "all", "fresh", "new", "peern" }
+    for i = 1, #modes do
+        local filt = modes[i]
+        -- Порядок вкладки peer — по времени пакета, остальных — по нашей встрече.
+        local key = (filt == "peern") and "peerAt" or "lastSeen"
+        local _, shown = NspTopPlayers(db, key, NSP_CONST.MAX_ROWS, function(p)
+            return TacticalVisible(p, now, filt)
+        end)
+        out[filt] = shown or 0
+    end
+    return out
 end
 
 -- Relative time for the contact column: freshness reads at a glance
@@ -6813,23 +6844,16 @@ local function TacticalStats()
         tactical.statsHits = (tactical.statsHits or 0) + 1
         return cached.st
     end
-    local st = {total = 0, f5 = 0, f15 = 0, f60 = 0, newN = 0, peerNewN = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
+    -- f5/newN/peerNewN убраны 26.11.2026: числа на табах и их карточках
+    -- считает NspTabCounts тем же отбором, что строит список.
+    local st = {total = 0, f15 = 0, f60 = 0, alliance = 0, horde = 0, unknown = 0, levelN = 0, levelSum = 0, level = {}, classes = {}}
     for _, p in pairs(GetDB().players) do
         st.total = st.total + 1
-        local age = now - (p.lastSeen or 0)
-        if age <= 300 then st.f5 = st.f5 + 1 end
+        -- Возраст — по эффективному времени (своя встреча ИЛИ время пакета),
+        -- иначе «15m/1h» не считали бы записи канала, хотя «Свежие» их показывают.
+        local age = now - NspEffectiveTime(p)
         if age <= 900 then st.f15 = st.f15 + 1 end
         if age <= 3600 then st.f60 = st.f60 + 1 end
-        if (p.firstSeen or 0) >= tactical.started and p.source ~= "peer" then
-            st.newN = st.newN + 1
-        end
-        -- Счётчик на вкладке "Обмен новые" — про текущую сессию, как и сам
-        -- фильтр (см. TacticalVisible). Записи чужого реалма, отключённого в
-        -- настройках, не считаются: их не показывает и список.
-        if (p.peerAt or 0) > 0 and not (p.peerForeign and GetDB().peerAllRealms == false)
-            and p.peerNew and (p.peerAt or 0) >= tactical.started then
-            st.peerNewN = st.peerNewN + 1
-        end
         if p.faction == "Alliance" then st.alliance = st.alliance + 1
         elseif p.faction == "Horde" then st.horde = st.horde + 1
         else st.unknown = st.unknown + 1 end
@@ -7014,9 +7038,14 @@ TacticalUpdate = function()
     if not tactical.total then return end
     local ok, err = pcall(function()
         local st = TacticalStats()
+        -- Числа, у которых есть одноимённый таб, берём из отбора списка
+        -- (NspTabCounts), иначе «на табе 462» спорит с «в списке 462».
+        -- Карточки-статистики (всего в базе, фракции, уровни, классы, 15m/1h)
+        -- остаются по всей базе: они про базу, а не про список.
+        local tabN = NspTabCounts(time())
         tactical.total.value:SetText(tostring(st.total))
-        tactical.total.detail:SetText("+" .. tostring(st.newN) .. " " .. L("UI_NEW_SHORT"))
-        tactical.fresh.value:SetText(tostring(st.f5))
+        tactical.total.detail:SetText("+" .. tostring(tabN.new) .. " " .. L("UI_NEW_SHORT"))
+        tactical.fresh.value:SetText(tostring(tabN.fresh))
         tactical.fresh.detail:SetText(("15m %d; 1h %d"):format(st.f15, st.f60))
         tactical.factions.value:SetText(("|cffff6666%s %d|r ; |cff6699ff%s %d|r"):format(L("HORDE"), st.horde, L("ALLIANCE"), st.alliance))
         tactical.factions.detail:SetText(st.unknown > 0 and ("? " .. st.unknown) or "")
@@ -7058,10 +7087,12 @@ TacticalUpdate = function()
             else row:Hide() end
         end
 
-        tactical.filters.all.label:SetText(L("UI_ALL") .. " " .. st.total)
-        tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. st.f5)
-        tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. st.newN)
-        tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. st.peerNewN)
+        -- Числа на табах — из того же отбора, что строит список (NspTabCounts),
+        -- поэтому «на табе 462» и «в списке 462 строки» — одно и то же число.
+        tactical.filters.all.label:SetText(L("UI_ALL") .. " " .. tabN.all)
+        tactical.filters.fresh.label:SetText(L("UI_FRESH") .. " " .. tabN.fresh)
+        tactical.filters.new.label:SetText(L("UI_NEW") .. " " .. tabN.new)
+        tactical.filters.peern.label:SetText(L("UI_PEER_NEW") .. " " .. tabN.peern)
         for key, button in pairs(tactical.filters) do TacticalFilterState(button, key == tactical.filter) end
         tactical.count:SetText(tostring(TacticalRows()) .. " / " .. tostring(st.total))
         tactical.status:SetText("|cff45dc9b+|r " .. L("UI_LIVE") .. " ; " .. TacticalSources())

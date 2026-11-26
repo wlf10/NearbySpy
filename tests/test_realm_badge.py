@@ -22,7 +22,7 @@ MINE = "CAMWOW EU5 Realm 1 PvE"
 
 def blocks() -> str:
     src = SOURCE.read_text(encoding="utf-8")
-    stop = src.index("local function TacticalVisible(p, now)")
+    stop = src.index("local function TacticalVisible(p, now")
     peer = src[src.index("function PeerRealmTag(realm, mine)"):stop]
     # RealmBucket lives further down (next to the realm selector); the badge calls
     # it, so both must be in the chunk for the harness to see it. Tolerant on
