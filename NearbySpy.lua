@@ -1598,6 +1598,30 @@ local PEER_BATCH_SEP = ","
 -- отдельная запись. '~' не встречается в данных (проверено) и не escape-символ.
 local PEER_TAIL_SEP = "~"
 local peerQueue, peerQueued, peerSent = {}, {}, {}
+
+-- PeerItemLabel(it) — как называть элемент очереди в логе.
+-- В очереди лежат ДВА разных вида: записи о встречах (`rec`, есть `name`) и
+-- управляющие пакеты вроде запроса Q1 (`raw`, имя «?»). Пока имя было одно,
+-- потеря запроса писалась как «Peer queue full: dropped ?» — по такой строке
+-- нельзя отличить управляющий пакет от рядовой записи, и в отчёте 26.11.2026
+-- это дало ложное «отказов ноль» при askSent=0 и askOut=2.
+function PeerItemLabel(it)
+    if type(it) ~= "table" then return "?" end
+    if type(it.raw) == "string" then return it.label or ("request " .. it.raw) end
+    return it.name or "?"
+end
+
+-- PeerEvictIndex() — индекс самой старой РЯДОВОЙ записи в очереди; 0 = таких нет.
+-- Управляющие пакеты (Q1) вытеснению НЕ подлежат: запрос стоит несравнимо
+-- дороже одной встречи — он приводит десятки записей от пира, а встреча одна.
+-- Записи добавляются в хвост, поэтому первая найденная рядовая — самая старая.
+function PeerEvictIndex()
+    for i = 1, #peerQueue do
+        if type(peerQueue[i].raw) ~= "string" then return i end
+    end
+    return 0
+end
+
 -- Per-session peer counters/state. Kept in ONE table on purpose: the main chunk
 -- of this file sits at the Lua 5.1 ceiling of 200 locals, so every new
 -- top-level local breaks the whole addon at compile time.
@@ -1718,6 +1742,10 @@ PeerSync = function()
         -- клиент такие пакеты выбрасывает, и в SV должно быть видно, что они
         -- приходили, а не «в канале тишина».
         askStray = peerStats.askStray or 0,
+        -- Запрос, истёкший в очереди неотправленным (26.11.2026). Отдельно от
+        -- dropped: потеря управляющего пакета лишает десятков записей, и её
+        -- нельзя смешивать с потерей одной встречи.
+        askExpired = peerStats.askExpired or 0,
         -- Адресные запросы (24.11.2026): сколько запросов отправлено и сколько
         -- сейчас открыто. При обходе пиров по очереди это главные числа —
         -- по ним видно, чей ответ ещё не пришёл.
@@ -2194,10 +2222,23 @@ QueuePeerNew = function(db, data)
     if #PayloadOf(rec) > PEER_PAYLOAD_MAX then rec = BuildRec("-", "-", false) end
     if #PayloadOf(rec) > PEER_PAYLOAD_MAX then return end
     if #peerQueue >= PEER_QUEUE_MAX then
-        local old = table.remove(peerQueue, 1)
+        -- Снимаем САМУЮ СТАРУЮ ЗАПИСЬ, а не голову очереди: в голове стоит
+        -- управляющий пакет Q1 (у него есть raw), и прежнее «удалить первый»
+        -- убивало запрос. Живой случай 26.11.2026: два запроса из двух
+        -- выброшены так — за 3 минуты и за 1 секунду, askSent=0 при askOut=2.
+        local victim = PeerEvictIndex()
+        if victim == 0 then
+            -- Вся очередь из управляющих пакетов: место новому не даём, но и
+            -- запрос не трогаем — он приводит десятки записей, а эта одна.
+            peerStats.dropped = peerStats.dropped + 1
+            D(("Peer record not queued: the queue holds only requests, q=%d")
+                :format(#peerQueue))
+            return
+        end
+        local old = table.remove(peerQueue, victim)
         peerQueued[old.key] = nil
         peerStats.dropped = peerStats.dropped + 1
-        D(("Peer queue full: dropped %s"):format(PeerEsc(old.name or "?")))
+        D(("Peer queue full: dropped %s"):format(PeerEsc(PeerItemLabel(old), 40)))
     end
     peerQueue[#peerQueue + 1] = {
         key = key, rec = rec, name = data.name, at = time(),
@@ -2511,11 +2552,31 @@ local function DrainPeerQueue()
         gap = PEER_GAP_THROTTLED
     end
     if nowT - peerStats.lastSend < gap then return end
-    while #peerQueue > 0 and nowT - peerQueue[1].at > PEER_TTL do
-        local old = table.remove(peerQueue, 1)
-        peerQueued[old.key] = nil
-        peerStats.dropped = peerStats.dropped + 1
-        D(("Peer expired before send: %s"):format(PeerEsc(old.name or "?")))
+    -- Подрезка смотрит ВСЮ очередь, а не только голову: раньше `while` крутился
+    -- на head, и голова-запрос (свежая) не давала истечь записям за собой —
+    -- они стояли, пока не вытеснялись переполнением. Запрос при истечении
+    -- называется своим именем и считается отдельно: «Peer ask expired» —
+    -- это потеря управляющего пакета, а не рядовой встречи.
+    do
+        local i = 1
+        while i <= #peerQueue do
+            local it = peerQueue[i]
+            if nowT - (tonumber(it.at) or nowT) > PEER_TTL then
+                table.remove(peerQueue, i)
+                peerQueued[it.key] = nil
+                peerStats.dropped = peerStats.dropped + 1
+                if type(it.raw) == "string" then
+                    peerStats.askExpired = (peerStats.askExpired or 0) + 1
+                    D(("Peer ask expired before send: %s")
+                        :format(PeerEsc(PeerItemLabel(it), 40)))
+                else
+                    D(("Peer expired before send: %s")
+                        :format(PeerEsc(PeerItemLabel(it), 40)))
+                end
+            else
+                i = i + 1
+            end
+        end
     end
     if #peerQueue == 0 then return end
     local channel = GetChannelName(PeerChannelName())
@@ -2816,6 +2877,19 @@ function PeerAskSend(db, minutes, target)
             :format(target or "everyone", nowT - prev)
     end
     peerStats.askTargetAt[gateKey] = nowT
+    -- Место под запрос освобождаем САМИ и только за счёт рядовой записи:
+    -- без этой проверки вставка давала 61 элемент при лимите 60 (живой SV
+    -- 26.11.2026), а очередь за потолком потом считалась «полной» вечно.
+    if #peerQueue >= PEER_QUEUE_MAX then
+        local victim = PeerEvictIndex()
+        if victim > 0 then
+            local gone = table.remove(peerQueue, victim)
+            peerQueued[gone.key] = nil
+            peerStats.dropped = peerStats.dropped + 1
+            D(("Peer queue full: dropped %s (making room for a request)")
+                :format(PeerEsc(PeerItemLabel(gone), 40)))
+        end
+    end
     -- В голову очереди: запрос — это одна короткая строка, и ждать за пачкой
     -- встреч ему незачем.
     table.insert(peerQueue, 1, {

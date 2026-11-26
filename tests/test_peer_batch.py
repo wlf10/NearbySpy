@@ -38,6 +38,21 @@ def queue_part() -> str:
     return src[start:end]
 
 
+def evict_part() -> str:
+    """Настоящие PeerItemLabel / PeerEvictIndex из файла, а не копии в тесте.
+
+    `QueuePeerNew` и TTL-подрезка зовут их по имени, а объявлены они ВЫШЕ
+    вырезаемого куска (рядом с объявлением очереди) — без них чанк падает
+    «attempt to call global 'PeerItemLabel' (a nil value)» и не проверяет
+    ничего о самом вытеснении. Копия этих функций в тесте разошлась бы с
+    продакшном на первой же правке правила вытеснения.
+    """
+    src = SOURCE.read_text(encoding="utf-8")
+    start = src.index("function PeerItemLabel(it)")
+    end = src.index("-- Per-session peer counters/state", start)
+    return src[start:end]
+
+
 SEND_HARNESS = """
 time = function() return 1000 end
 PEER_CHANNEL_BASE = 'nearbyspy'
@@ -89,6 +104,7 @@ class BatchSendTests(unittest.TestCase):
         qm, ttl = re.search(r"local PEER_QUEUE_MAX, PEER_TTL = (\d+), (\d+)", src).groups()
         harness = SEND_HARNESS.replace("__QM__", qm).replace("__TTL__", ttl)
         self.lua.execute(CONST_PRELUDE + "\n" + RACE_PRELUDE + "\n" + harness + "\n" + codes_block() + "\n"
+                         + evict_part() + "\n"
                          + queue_part() + "\n"
                          "TestQueue = QueuePeerNew\n"
                          "TestDrain = DrainPeerQueue\n")

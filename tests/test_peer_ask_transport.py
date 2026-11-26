@@ -120,6 +120,77 @@ class PeerAskTransportTests(unittest.TestCase):
         self.assertTrue(g7, msgs)
         self.assertLess(n7[0], g7[0], msgs)
 
+    # --- Q1 не должен гибнуть в полной очереди ------------------------
+    def fill_queue(self, count, start=0):
+        """Добить очередь обычными встречами — как живой канал в столице.
+
+        observedAt фиксирован, чтобы PEER_TTL не портил сценарий: проверяется
+        вытеснение, а не протухание. `start` обязателен при повторном вызове:
+        дедуп по ключу выбрасывает повторные имена, и «заполнил ещё раз» тихо
+        не делает НИЧЕГО.
+        """
+        for i in range(start, start + count):
+            self.globals["QueuePeerNew"](self.db, self.lua.table_from({
+                "key": f"Fill{i}-TestRealm PvP", "name": f"Fill {i}",
+                "realm": "TestRealm PvP", "class": "MAGE", "level": 60,
+                "race": "Human", "faction": "Alliance", "zone": "TestZone",
+                "zoneId": 12, "observedAt": NOW - 5,
+            }))
+
+    def ask_index(self):
+        """Индекс запроса в очереди (у него есть raw, а rec нет); 0 — его нет."""
+        q = self.globals["TestPeerQueue"]
+        for i in range(1, len(q) + 1):
+            if isinstance(q[i]["raw"], str):
+                return i
+        return 0
+
+    def capture_d(self):
+        """Перехватить D(): кольцо печати в харнессе — заглушка, а причину
+        потери надо читать так же, как её увидит владелец в SavedVariables."""
+        self.lua.execute("TestLog = {}")
+        self.lua.execute("D = function(m) TestLog[#TestLog + 1] = tostring(m) end")
+        return self.globals["TestLog"]
+
+    def dlines(self):
+        log = self.globals["TestLog"]
+        return [str(log[i]) for i in range(1, len(log) + 1)]
+
+    def test_request_survives_records_arriving_behind_it(self):
+        """Живой случай 26.11.2026: askSent=0 при askOut=2.
+
+        Запрос встаёт в ГОЛОВУ очереди, а вытеснение снимало голову, чтобы
+        освободить место обычной встрече. Оба запроса сессии погибли так —
+        за 3 минуты и за 1 секунду, строками `Peer queue full: dropped ?`.
+        """
+        ok, payload = self.globals["PeerAskSend"](self.db, 60)
+        self.assertTrue(ok, payload)
+        self.assertEqual(1, self.ask_index())
+        self.fill_queue(80)
+        self.assertGreater(self.ask_index(), 0,
+                           "запрос выброшен вытеснением — так askSent и остаётся нулём")
+
+    def test_queue_never_grows_past_its_cap(self):
+        """Вставка запроса не проверяла потолок: в живом SV было 61 при 60."""
+        self.fill_queue(60)
+        q = self.globals["TestPeerQueue"]
+        self.assertEqual(60, len(q))
+        self.globals["PeerAskSend"](self.db, 60)
+        self.assertLessEqual(len(q), 60)
+
+    def test_no_unnamed_drop_in_the_ring(self):
+        """`dropped ?` не отличить от потерянной встречи.
+
+        Именно эта строка позволила раньше отчитаться «отказов ноль»: имя
+        запроса в очереди — «?», и потеря управляющего пакета выглядела как
+        потеря рядовой записи.
+        """
+        self.capture_d()
+        self.fill_queue(60)
+        self.globals["PeerAskSend"](self.db, 60)
+        self.fill_queue(3, start=60)
+        self.assertNotIn("Peer queue full: dropped ?", self.dlines())
+
     def test_answer_records_carry_no_coordinates(self):
         self.add_player("Plain-Home", NOW - 10, gear=None)
         self.run_asks()
