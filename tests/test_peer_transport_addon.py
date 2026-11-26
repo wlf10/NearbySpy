@@ -272,5 +272,59 @@ class ReceivesBothWaysTests(unittest.TestCase):
         self.assertLess(branch.index("canaccessvalue"), branch.index("text == \"\""))
 
 
+class NoDirectSendTests(unittest.TestCase):
+    """Все пути отправки обязаны идти через PeerWireSend.
+
+    Живой случай 26.11.2026: встречи и Q1 перевели на аддон-сообщение, а
+    снапшоты экипировки (PeerDrainGear) забыли — они прошли старым
+    SendChatMessage и после переноса слива на таймер давали БЛОКИРОВКУ на
+    каждом пакете (`BLOCKED ... UNKNOWN()` вплотную к `Peer gear sent`,
+    peerGate 172 → 257, попапы у игрока). Этот тест ищет такие места по коду.
+    """
+
+    def setUp(self):
+        self.src = SOURCE.read_text(encoding="utf-8")
+
+    def test_no_direct_send_calls_outside_the_wire_function(self):
+        # Разрешены только два вызова — внутри самого PeerWireSend.
+        start = self.src.index("function PeerWireSend(db, payload, channel)")
+        end = self.src.index("function PeerRegisterPrefix", start)
+        body = self.src[start:end]
+        allowed = self.src.count("pcall(addon") + self.src.count("pcall(send, payload")
+        self.assertEqual(2, allowed,
+                         "появился третий прямой вызов SendChatMessage/SendAddonMessage — "
+                         "его нужно провести через PeerWireSend")
+        # Внутри общей точки оба вызова обязательны.
+        self.assertIn("pcall(addon", body)
+        self.assertIn("pcall(send, payload", body)
+
+    def test_gear_drain_uses_the_wire_function(self):
+        start = self.src.index("function PeerDrainGear")
+        end = self.src.index("-- ── Управляющий пакет", start)
+        body = self.src[start:end]
+        self.assertIn("PeerWireSend(db, payload, channel)", body)
+        self.assertNotIn("pcall(sender", body)
+
+
+class TimerCounterTests(unittest.TestCase):
+    """timerSent обязан считать фактические отправки таймера.
+
+    Он жил в PeerWireTimerSend, но слив идёт DrainPeerQueue → PeerWireSend, то
+    есть мимо обёртки: в живом SV таймер отработал десятки раз (queued=0), а
+    timerSent остался 0 — счётчик врал.
+    """
+
+    def setUp(self):
+        self.src = SOURCE.read_text(encoding="utf-8")
+
+    def test_timer_counter_measures_delta_around_the_drain(self):
+        start = self.src.index("function DrainPeerTimer()")
+        end = self.src.index("-- ── Запрос базы у пиров", start)
+        body = self.src[start:end]
+        self.assertIn("local before = peerStats.sent", body)
+        self.assertIn("peerStats.timerSent", body)
+        self.assertIn("DrainPeerQueue", body)
+
+
 if __name__ == "__main__":
     unittest.main()

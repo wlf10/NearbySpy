@@ -2414,8 +2414,6 @@ function PeerDrainGear(db)
         end
         return false
     end
-    local sender = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
-    if not sender then return end
     local payload = PeerGearPayload(db, q[1])
     if not payload then
         -- Нечего отправлять (мусор в снапшоте) — запись не должна стоять вечно.
@@ -2443,14 +2441,20 @@ function PeerDrainGear(db)
             return false
         end
     end
-    local ok, result = pcall(sender, payload, "CHANNEL", nil, channel)
+    -- Транспорт — тот же PeerWireSend, что и у встреч: снапшоты шли старым
+    -- SendChatMessage и после перевода слива на таймер давали БЛОКИРОВКУ на
+    -- каждом пакете (живой SV 26.11.2026: `BLOCKED ... UNKNOWN()` вплотную к
+    -- каждой строке `Peer gear sent`, счётчик peerGate 172 → 257, игрок видел
+    -- попапы). Забыть третье место отправки — типичная цена «одной точки»:
+    -- она одна только тогда, когда через неё прошли ВСЕ вызовы.
+    local ok, result, transport = PeerWireSend(db, payload, channel)
     if NspNoteSendRet(db, ok, result, nowT) then
         D(("Peer gate: a block fired with this gear send (total %d)")
             :format(db.debug.peerGate or 0))
     end
     if not ok or result == false then
         db.debug.peerSendError = tostring(result):sub(1, 150)
-        D(("Peer gear send error: %s"):format(PeerEsc(db.debug.peerSendError, 120)))
+        D(("Peer gear send error (%s): %s"):format(tostring(transport), PeerEsc(db.debug.peerSendError, 120)))
         PeerSync()
         return false
     end
@@ -2891,7 +2895,22 @@ end
 -- раз в PEER_TIMER_STEP.
 function DrainPeerTimer()
     peerStats.lastSend = 0
-    return DrainPeerQueue()
+    -- Счётчик timerSent раньше жил в PeerWireTimerSend, но слив идёт через
+    -- DrainPeerQueue → PeerWireSend, то есть мимо этой обёртки: в живом SV
+    -- 26.11.2026 таймер отработал десятки раз (queued=0), а timerSent остался 0.
+    -- Считаем ДЕЛЬТУ отправленного вокруг вызова — так счётчик не зависит от
+    -- того, через какую функцию прошла отправка.
+    local before = peerStats.sent or 0
+    local gearBefore = peerStats.gearSentCount or 0
+    local ok, err = pcall(DrainPeerQueue)
+    local added = ((peerStats.sent or 0) - before) + ((peerStats.gearSentCount or 0) - gearBefore)
+    if added > 0 then
+        peerStats.timerSent = (peerStats.timerSent or 0) + added
+    elseif not ok then
+        peerStats.timerFail = (peerStats.timerFail or 0) + 1
+    end
+    if not ok then error(err, 0) end
+    return added > 0
 end
 
 -- ── Запрос базы у пиров: пакеты Q1 (запрос) и A1 (ответ) — 24.11.2026 ──────
